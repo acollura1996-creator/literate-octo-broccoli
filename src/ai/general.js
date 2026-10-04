@@ -797,7 +797,7 @@ export class GeneralAI {
     }
     // Rations: tighten them while hungry, be generous with a full granary.
     if ((p.starving || (p.food < 60 && p.foodRate < 0)) && p.rations > 4) E.setRations(p, p.rations - 1);
-    else if (p.food > 350 && p.foodRate > 0 && p.rations < 13) E.setRations(p, p.rations + 1);
+    else if (p.food > 350 && p.foodRate > 0 && p.rations < (p.food > 1500 ? 17 : 13)) E.setRations(p, p.rations + 1);
     else if (p.food < 150 && p.foodRate < 0 && p.rations > 10) E.setRations(p, p.rations - 1);
     // Taxes: as high as the people will happily bear.
     if (p.happiness < 45 && p.tax > 1) E.setTax(p, p.tax - 1);
@@ -806,7 +806,7 @@ export class GeneralAI {
     // Nuclear missiles.
     for (const b of p.buildings) {
       if (b.dead || b.underConstruction || !b.def.nukes) continue;
-      if (!b.nukeReady && !b.nukeBuild && p.gold > ECONOMY.nuke.cost.gold + 900 && p.lumber > ECONOMY.nuke.cost.lumber + 300) E.startNuke(b);
+      if (!b.nukeReady && !b.nukeBuild && p.gold > ECONOMY.nuke.cost.gold + 250 && p.lumber > ECONOMY.nuke.cost.lumber + 200 && this.armyFood(this.army()) >= 20) E.startNuke(b);
       if (b.nukeReady) {
         const t = this.nukeTarget();
         if (t) E.launchNuke(b, t.x, t.z);
@@ -843,7 +843,7 @@ export class GeneralAI {
         }
       }
     }
-    return bestScore >= 12 ? best : null;
+    return bestScore >= 8 ? best : null;
   }
 
   /** Wall line across the side of the town that faces the map center, gate in the middle. */
