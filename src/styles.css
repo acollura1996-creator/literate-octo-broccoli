@@ -1318,3 +1318,7 @@ body:not(.mode-empire) .empire-only {
   background: #2a2420;
   color: #cbbfa6;
 }
+.sb-row.hired .sb-tag,
+.sb-row.mercenary .sb-tag {
+  color: #ffd27a;
+}

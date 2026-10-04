@@ -205,7 +205,7 @@ export class Hud {
     if ($('scoreboard').classList.contains('collapsed')) return;
     const rows = g.generals
       .map((p) => {
-        const side = p.isHuman ? 'You' : g.isAlliedToHuman(p) ? 'Ally' : 'Rival';
+        const side = p.isHuman ? 'You' : p.hiredBy ? (p.hiredBy === g.human ? 'Hired' : 'Mercenary') : g.isAlliedToHuman(p) ? 'Ally' : 'Rival';
         const alive = p.units.filter((u) => !u.dead && !u.isIllusion && !u.summoned);
         let line2;
         if (p.mode === 'hero') {
@@ -215,14 +215,14 @@ export class Hud {
             ? `${h.def.name} · level ${h.level}${h.dead ? ` · reviving${h.reviveAt ? ` in ${Math.max(0, Math.ceil(h.reviveAt - g.time))}s` : ''}` : ''}${mercs ? ` · ${mercs} merc${mercs > 1 ? 's' : ''}` : ''}`
             : 'Hero';
         } else {
-          const hall = ['No town hall', 'Town Hall', 'Keep', 'Castle'][p.tier] ?? 'Town Hall';
           const army = alive.filter((u) => !u.def.worker).length;
           const workers = alive.length - army;
-          line2 = `${hall} · ${army} soldiers · ${workers} peasants`;
+          line2 = `${AGE_NAMES[Math.max(1, p.tier)]} · ${army} soldiers · ${workers} peasants · ${Math.floor(p.citizens ?? 0)} citizens`;
         }
         let status = '';
         if (p.defeated) status = 'Defeated';
         else if (p.ai) status = p.ai.status ?? '';
+        if (p.hiredBy && !p.defeated) status = `Hired by ${p.hiredBy.isHuman ? 'you' : p.hiredBy.name} (${Math.max(0, Math.ceil((p.contractEnds - g.time) / 60))} min left)${status ? ` · ${status}` : ''}`;
         return `<div class="sb-row ${side.toLowerCase()}${p.defeated ? ' out' : ''}">
           <span class="swatch" style="background:#${p.color.toString(16).padStart(6, '0')}"></span>
           <div class="sb-main">

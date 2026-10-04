@@ -90,12 +90,11 @@ export class GameEvents {
     const [tx, tz] = p.base.toCenter;
     const from = g.grid.nearestWalkable(home.x + tx * 30, home.z + tz * 30, 10);
     if (!from) return;
-    const minutes = g.time / 60;
+    const minutes = Math.max(0, g.time / 60);
     const pool = minutes < 12 ? ['gnoll', 'gnoll_archer', 'kobold'] : minutes < 25 ? ['ogre', 'forest_troll', 'gnoll_archer'] : ['ogre_lord', 'rock_golem', 'forest_troll', 'drake'];
     const n = Math.min(9, 3 + Math.floor(minutes / 5));
     for (let i = 0; i < n; i++) {
-      const pos = g.grid.nearestWalkable(from.x + (Math.random() - 0.5) * 4, from.z + (Math.random() - 0.5) * 4, 6);
-      if (!pos) continue;
+      const pos = g.grid.nearestWalkable(from.x + (Math.random() - 0.5) * 4, from.z + (Math.random() - 0.5) * 4, 10) ?? from;
       const u = g.spawnUnit(pick(pool), g.creeps, pos.x, pos.z);
       u.raider = true;
       g.creepMgr.empower?.(u);

@@ -1103,7 +1103,9 @@ export class Game {
     }
     for (const b of p.buildings) {
       if (b.dead || !b.def.ageModels || b.ageLevel >= p.tier) continue;
-      this.later(0.5 + Math.random() * 5, () => this.upgradeStructureAge(b, p.tier));
+      // Town centers change at once; the rest of the town follows over a few seconds.
+      if (b.def.tier) this.upgradeStructureAge(b, p.tier);
+      else this.later(0.5 + Math.random() * 5, () => this.upgradeStructureAge(b, p.tier));
     }
     this.roads.dirty = true;
     p.ai?.onAgeAdvanced?.();
