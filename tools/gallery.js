@@ -37,6 +37,11 @@ const FP = {
   townhall: 4, keep: 4, castle: 4, farm: 2, barracks: 3, blacksmith: 3, sanctum: 3, workshop: 3,
   scouttower: 2, guardtower: 2, altar: 3, construction: 1, goldmine: 3, shop: 3, mercenary_camp: 3,
   fountain: 3, kalenden_keep: 6, dark_tower: 2, wall_segment: [2, 1], wall_tower: 2,
+  house_1: 2, house_2: 2, house_3: 2, house_4: 2, lumberyard: 3, stable: 3, palace: 4,
+  wall_palisade: 1, wall_stone: 1, wall_fortified: 1, gate_wood: 2, gate_stone: 2, gate_fortified: 2,
+  stone_camp: 4, bronze_hall: 4, house_stone: 2, farm_1: 3, city_hall: 4, house_ind: 2, farm_2: 3, factory: 3,
+  tower_bunker: 2, wall_concrete: 1, gate_concrete: 2, missile_silo: 3, capitol: 4, house_mod: 2, nexus: 4,
+  house_fut: 2, farm_3: 3, wall_energy: 1, gate_energy: 2, tower_laser: 2,
 };
 
 // Fog-of-war patch: disable and feed a white texture.

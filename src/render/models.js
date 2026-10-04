@@ -15,6 +15,11 @@ import * as C from './models/creeps.js';
 import * as B from './models/buildings.js';
 import * as N from './models/neutral.js';
 import * as A from './models/ages.js';
+import * as E1 from './models/era_ancient.js';
+import * as E2 from './models/era_gunpowder.js';
+import * as E3 from './models/era_industrial.js';
+import * as E4 from './models/era_modern.js';
+import * as E5 from './models/era_future.js';
 
 const BUILDERS = {
   // Empire units
@@ -106,6 +111,52 @@ const BUILDERS = {
   gate_wood: A.gate_wood,
   gate_stone: A.gate_stone,
   gate_fortified: A.gate_fortified,
+  // Eras: ancient
+  caveman: E1.caveman,
+  rock_thrower: E1.rock_thrower,
+  hoplite: E1.hoplite,
+  chariot: E1.chariot,
+  cargo_wagon: E1.cargo_wagon,
+  stone_camp: E1.stone_camp,
+  bronze_hall: E1.bronze_hall,
+  house_stone: E1.house_stone,
+  farm_1: E1.farm_1,
+  // Eras: gunpowder
+  musketeer: E2.musketeer,
+  grenadier: E2.grenadier,
+  dragoon: E2.dragoon,
+  cannon: E2.cannon,
+  rifleman: E2.rifleman,
+  machine_gunner: E2.machine_gunner,
+  steam_tank: E2.steam_tank,
+  howitzer: E2.howitzer,
+  // Eras: industrial
+  city_hall: E3.city_hall,
+  house_ind: E3.house_ind,
+  farm_2: E3.farm_2,
+  factory: E3.factory,
+  tower_bunker: E3.tower_bunker,
+  wall_concrete: E3.wall_concrete,
+  gate_concrete: E3.gate_concrete,
+  // Eras: modern
+  infantry: E4.infantry,
+  bazooka: E4.bazooka,
+  tank: E4.tank,
+  rocket_artillery: E4.rocket_artillery,
+  missile_silo: E4.missile_silo,
+  capitol: E4.capitol,
+  house_mod: E4.house_mod,
+  // Eras: future
+  laser_trooper: E5.laser_trooper,
+  exo_trooper: E5.exo_trooper,
+  hover_tank: E5.hover_tank,
+  mech_walker: E5.mech_walker,
+  nexus: E5.nexus,
+  house_fut: E5.house_fut,
+  farm_3: E5.farm_3,
+  wall_energy: E5.wall_energy,
+  gate_energy: E5.gate_energy,
+  tower_laser: E5.tower_laser,
 };
 
 export const MODEL_IDS = Object.keys(BUILDERS);
@@ -118,6 +169,9 @@ const STATIC_IDS = new Set([
   'ruins_pillar', 'banner_pole', 'stump', 'mushrooms',
   'house_1', 'house_2', 'house_3', 'house_4', 'lumberyard', 'stable', 'palace',
   'wall_palisade', 'wall_stone', 'wall_fortified', 'gate_wood', 'gate_stone', 'gate_fortified',
+  'stone_camp', 'bronze_hall', 'house_stone', 'farm_1', 'city_hall', 'house_ind', 'farm_2', 'factory',
+  'tower_bunker', 'wall_concrete', 'gate_concrete', 'missile_silo', 'capitol', 'house_mod', 'nexus', 'house_fut',
+  'farm_3', 'wall_energy', 'gate_energy', 'tower_laser',
 ]);
 
 const DEFAULT_TEAM = 0x959697;
