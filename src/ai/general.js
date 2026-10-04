@@ -182,7 +182,7 @@ export class GeneralAI {
       return { x: k.x, z: k.z };
     }
     // Occasionally raid a rival.
-    if (!g.allied && h.level >= 6 && Math.random() < 0.18) {
+    if (!g.allied && h.level >= 6 && g.time > [16, 12, 8][g.difficulty] * 60 && Math.random() < 0.18) {
       const base = this.nearestEnemyBase();
       if (base) return base;
     }
@@ -757,7 +757,8 @@ export class GeneralAI {
     const k = g.legionMgr.kalenden;
     const late = g.time > 26 * 60 || (g.allied && g.time > 16 * 60);
     if (!k.dead && late && food >= (g.allied ? 30 : 40)) return { x: k.x, z: k.z };
-    if (!g.allied) {
+    // Rival bases are only raided after a grace period that depends on difficulty.
+    if (!g.allied && g.time > [16, 12, 8][g.difficulty] * 60) {
       const base = this.nearestEnemyBase();
       if (base && (this.attacks >= 2 || continuing)) {
         const near = base.player.buildings.filter((b) => !b.dead).sort((a, b) => Math.hypot(a.x - base.x, a.z - base.z) - Math.hypot(b.x - base.x, b.z - base.z))[0];
