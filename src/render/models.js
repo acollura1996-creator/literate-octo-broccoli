@@ -91,6 +91,21 @@ const BUILDERS = {
   royal_knight: A.royal_knight,
   battlemage: A.battlemage,
   trebuchet: A.trebuchet,
+  // Ages: empire buildings
+  house_1: A.house_1,
+  house_2: A.house_2,
+  house_3: A.house_3,
+  house_4: A.house_4,
+  lumberyard: A.lumberyard,
+  stable: A.stable,
+  palace: A.palace,
+  // Ages: fortifications
+  wall_palisade: A.wall_palisade,
+  wall_stone: A.wall_stone,
+  wall_fortified: A.wall_fortified,
+  gate_wood: A.gate_wood,
+  gate_stone: A.gate_stone,
+  gate_fortified: A.gate_fortified,
 };
 
 export const MODEL_IDS = Object.keys(BUILDERS);
@@ -101,6 +116,8 @@ const STATIC_IDS = new Set([
   'guardtower', 'altar', 'construction', 'goldmine', 'shop', 'mercenary_camp', 'fountain', 'kalenden_keep',
   'dark_tower', 'wall_segment', 'wall_tower', 'rock', 'bush', 'flowers', 'crate', 'barrel', 'campfire',
   'ruins_pillar', 'banner_pole', 'stump', 'mushrooms',
+  'house_1', 'house_2', 'house_3', 'house_4', 'lumberyard', 'stable', 'palace',
+  'wall_palisade', 'wall_stone', 'wall_fortified', 'gate_wood', 'gate_stone', 'gate_fortified',
 ]);
 
 const DEFAULT_TEAM = 0x959697;

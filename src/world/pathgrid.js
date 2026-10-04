@@ -189,6 +189,7 @@ export class PathGrid {
     const stopR = Math.max(range, 0.0);
 
     // Already close enough and line is clear.
+    this.lastExpanded = 0;
     if (Math.hypot(start.x - goalX, start.z - goalZ) <= Math.max(stopR, 0.05)) return [];
     if (Math.hypot(start.x - goalX, start.z - goalZ) < 40 && exact && this.lineWalkable(start.x, start.z, goalX, goalZ)) {
       return [{ x: goalX, z: goalZ }];
@@ -274,6 +275,7 @@ export class PathGrid {
       }
     }
 
+    this.lastExpanded = expanded;
     const end = found >= 0 ? found : best;
     if (end === s && found < 0) return null;
     const cells = [];

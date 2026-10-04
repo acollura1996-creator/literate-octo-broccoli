@@ -778,12 +778,16 @@ export class GeneralAI {
     const pieces = line.filter(([x, z]) => !gateCells.has(`${x},${z}`) && g.canPlace('wall', x + 0.5, z + 0.5, p));
     const half = Math.ceil(pieces.length / workers.length);
     workers.forEach((w, wi) => {
+      const tree = w.harvest?.tree;
+      // The gate builder queues its wall after the gate; the others start right away.
+      let first = !(wi === 0 && w.order.type === 'build');
       pieces.slice(wi * half, (wi + 1) * half).forEach(([x, z]) => {
         if (!g.canAfford(p, UNITS.wall.cost)) return;
         g.spend(p, UNITS.wall.cost);
-        g.issueOrder(w, { type: 'build', building: 'wall', x: x + 0.5, z: z + 0.5, paid: true }, true);
+        g.issueOrder(w, { type: 'build', building: 'wall', x: x + 0.5, z: z + 0.5, paid: true }, !first);
+        first = false;
       });
-      if (w.harvest?.tree) w.orderQueue.push({ type: 'harvest', target: w.harvest.tree });
+      if (tree) w.orderQueue.push({ type: 'harvest', target: tree });
     });
   }
 

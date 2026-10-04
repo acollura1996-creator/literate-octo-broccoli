@@ -655,7 +655,7 @@ export class Game {
     if (owner.general && !u.isIllusion && kOwner && kOwner !== owner) {
       const by = kOwner?.general ? (kOwner.isHuman ? 'you' : kOwner.name) : kOwner === this.legion ? "Kalenden's Legion" : 'creeps';
       if (u.isHero && !owner.isHuman && !kOwner?.isHuman) this.notify(owner, `${owner.name}'s ${u.def.name} was slain by ${by}.`);
-      if (u.isBuilding && (u.def.dropOff || u.def.revivesHeroes) && !owner.isHuman && !u.underConstruction) {
+      if (u.isBuilding && (u.def.tier || u.def.revivesHeroes) && !owner.isHuman && !u.underConstruction) {
         this.notify(owner, `${owner.name}'s ${u.def.name} was destroyed by ${by}!`);
       }
     }
@@ -1414,7 +1414,7 @@ export class Game {
   checkDefeats() {
     for (const p of this.generals) {
       if (p.defeated) continue;
-      const hasBuilding = p.buildings.some((b) => !b.dead);
+      const hasBuilding = p.buildings.some((b) => !b.dead && !b.def.wall && !b.def.gate); // fortifications alone don't count
       const heroAlive = p.hero && !p.hero.dead;
       const anyUnit = p.units.some((u) => !u.dead && !u.isIllusion && !u.summoned);
       let out = false;
@@ -1462,6 +1462,7 @@ export class Game {
     this.time += dt;
     this.frame++;
     this.pathBudget = 28;
+    this.pathNodes = 90000; // A* node expansions allowed per frame
     this.rebuildHash();
 
     // Timers

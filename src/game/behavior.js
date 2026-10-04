@@ -41,13 +41,16 @@ export function moveToward(game, u, x, z, range, dt) {
   }
   const goalMoved = !u.pathGoal || Math.hypot(u.pathGoal.x - x, u.pathGoal.z - z) > Math.max(0.6, dist * 0.2);
   if (!u.path || goalMoved) {
-    if (game.pathBudget <= 0) {
+    if (game.pathBudget <= 0 || game.pathNodes <= 0) {
       u.moving = false;
       return 'moving';
     }
     game.pathBudget--;
     const searchRange = range > 0.35 ? range : 0;
-    const path = game.grid.findPath(u.x, u.z, x, z, searchRange);
+    // Long searches (e.g. toward a target behind walls) are capped; the unit
+    // walks to the closest reachable point and deals with what is in the way.
+    const path = game.grid.findPath(u.x, u.z, x, z, searchRange, Math.min(30000, game.pathNodes));
+    game.pathNodes -= game.grid.lastExpanded ?? 0;
     u.pathGoal = { x, z };
     u.stuckTime = 0;
     u.lastProgressDist = dist;
@@ -75,7 +78,14 @@ export function moveToward(game, u, x, z, range, dt) {
         stopMoving(u);
         return 'arrived';
       }
+      // Reached the end of a partial path: the goal is walled off.
       u.path = null;
+      u.exhausted = (u.exhausted || 0) + 1;
+      if (u.exhausted >= 2) {
+        u.exhausted = 0;
+        stopMoving(u);
+        return 'blocked';
+      }
       return 'moving';
     }
   }
@@ -186,7 +196,16 @@ export function attackTarget(game, u, t, dt, chase = true) {
   if (u.def.minRange && d < u.def.minRange + t.radius && u.windup <= 0) return 'out';
   if (d > reach + (u.windup > 0 ? 1.2 : 0)) {
     if (!chase || !u.canMove) return 'out';
-    moveToward(game, u, t.x, t.z, reach - 0.15, dt);
+    const r = moveToward(game, u, t.x, t.z, reach - 0.15, dt);
+    if (r === 'blocked') {
+      // Hack through whatever is in the way, then carry on.
+      const obstacle = blockingStructure(game, u);
+      if (obstacle && obstacle !== t) {
+        u.order = { type: 'attack', target: obstacle, resume: u.order.type === 'attack' && u.order.target === t ? u.order : u.order.resume ?? { type: 'attack', target: t } };
+        return 'busy';
+      }
+      return 'out';
+    }
     return 'busy';
   }
   stopMoving(u);
@@ -202,6 +221,21 @@ export function attackTarget(game, u, t, dt, chase = true) {
     if (u.hasBuff('wind_walk')) u.windWalkStrike = true;
   }
   return 'busy';
+}
+
+/** The nearest enemy structure (wall, gate or building) right next to a stuck unit. */
+export function blockingStructure(game, u) {
+  let best = null;
+  let bd = 3.5;
+  for (const b of game.unitsNear(u.x, u.z, 3.5)) {
+    if (!b.isBuilding || b.dead || b.def.invulnerable || !game.isEnemy(u.owner, b.owner)) continue;
+    const d = u.distTo(b) - b.radius;
+    if (d < bd) {
+      bd = d;
+      best = b;
+    }
+  }
+  return best;
 }
 
 function deliverAttack(game, u, t) {
@@ -452,6 +486,13 @@ function doAttackMove(game, u, dt) {
     }
   }
   const r = moveToward(game, u, o.point.x, o.point.z, o.type === 'patrol' ? 0.6 : 1.0, dt);
+  if (r === 'blocked' && u.canAttack) {
+    const obstacle = blockingStructure(game, u);
+    if (obstacle) {
+      o.engage = obstacle;
+      return;
+    }
+  }
   if (r !== 'moving') {
     if (o.type === 'patrol') {
       const tmp = o.point;
