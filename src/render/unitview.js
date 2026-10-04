@@ -5,6 +5,9 @@ import { createModel } from './models.js';
 import { geo, mat } from './assets.js';
 
 const ghostCache = new Map();
+// Pole weapons thrust instead of swinging: the weapon tilts to this angle (lowering the
+// pike or lance level) while the arm draws back and then lunges forward.
+const THRUST = { spearman: 0.55, royal_knight: 0.05 };
 function ghostMaterial(m, tint) {
   const key = `${m.uuid}|${tint ?? ''}`;
   let g = ghostCache.get(key);
@@ -227,7 +230,25 @@ export class UnitView {
     if (P.weapon) {
       let w = walking ? Math.sin(u.walkCycle) * 0.3 : 0;
       const ranged = !!u.def.projectile;
-      if (anim === 'attack') {
+      const thrust = THRUST[u.modelId];
+      const rz = P.weapon.userData.restPosition?.z ?? 0;
+      if (thrust !== undefined && anim === 'attack') {
+        const wind = Math.min(0.45, u.attackCooldown * 0.32);
+        let reach;
+        if (t < wind) {
+          w = (t / wind) * thrust;
+          reach = -(t / wind) * 0.12;
+        } else if (t < wind + 0.1) {
+          w = thrust;
+          reach = -0.12 + ((t - wind) / 0.1) * 0.4;
+        } else {
+          const k = Math.max(0, 1 - (t - wind - 0.1) / 0.35);
+          w = thrust * k;
+          reach = 0.28 * k;
+        }
+        P.weapon.rotation.x = w;
+        P.weapon.position.z = rz + reach;
+      } else if (anim === 'attack') {
         const wind = Math.min(0.45, u.attackCooldown * 0.32);
         const siege = u.def.attackGround;
         const amp = siege ? 0.9 : ranged ? 0.55 : 2.1;
@@ -242,6 +263,7 @@ export class UnitView {
         const c = (time * 1.6 + u.id * 0.37) % 1;
         P.weapon.rotation.x = c < 0.6 ? (c / 0.6) * 2.0 : 2.0 - ((c - 0.6) / 0.4) * 2.8;
       } else lerpTo(P.weapon, 'x', w, 10);
+      if (thrust !== undefined && anim !== 'attack') P.weapon.position.z += (rz - P.weapon.position.z) * Math.min(1, dt * 10);
     }
     for (const sp of P.spin ?? []) sp.rotation.y += dt * 1.6;
     // Gates swing open for their owner's team.

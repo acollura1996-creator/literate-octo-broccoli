@@ -238,7 +238,7 @@ export class Input {
         if (u.def.worker && target.type === 'goldmine') g.issueOrder(u, { type: 'harvest', target }, shift);
         else if (u.def.worker && target.isBuilding && target.owner === g.human && target.underConstruction) {
           g.issueOrder(u, { type: 'construct', target }, shift);
-        } else if (u.def.worker && u.carry && target.owner === g.human && target.def.dropOff && !target.underConstruction) {
+        } else if (u.def.worker && u.carry && target.owner === g.human && (target.def.dropOff === true || target.def.dropOff === u.carry.kind) && !target.underConstruction) {
           g.issueOrder(u, { type: 'returnRes', resume: u.harvest?.kind === 'gold' ? { type: 'harvest', target: u.harvest.mine } : u.harvest?.tree ? { type: 'harvest', target: u.harvest.tree } : null }, shift);
         } else if (target.isBuilding) {
           g.issueOrder(u, { type: 'move', point: { x: target.x, z: target.z }, range: target.radius + u.radius + 0.6 }, shift);
@@ -978,7 +978,7 @@ export class Input {
       if (g.isEnemy(g.human, h.owner) && h.targetableBy(movers[0])) return `Attack ${h.def.name}`;
       if (workers && h.type === 'goldmine') return 'Mine gold';
       if (workers && h.owner === g.human && h.isBuilding && h.underConstruction) return 'Help build';
-      if (workers && h.owner === g.human && h.def.dropOff && movers.some((u) => u.carry)) return 'Return resources';
+      if (workers && h.owner === g.human && h.def.dropOff && movers.some((u) => u.carry && (h.def.dropOff === true || h.def.dropOff === u.carry.kind))) return 'Return resources';
       if (h.def.shop && movers.some((u) => u.isHero)) return 'Go to the shop';
       if (!h.isBuilding && h.owner.general && h !== movers[0]) return `Follow ${h.def.name}`;
       return null;

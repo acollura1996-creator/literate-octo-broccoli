@@ -533,10 +533,10 @@ export class GeneralAI {
   thinkEmpire() {
     const g = this.g;
     const p = this.p;
-    const halls = p.buildings.filter((b) => !b.dead && b.def.dropOff && !b.underConstruction);
+    const halls = p.buildings.filter((b) => !b.dead && b.def.dropOff === true && !b.underConstruction);
     const hall = halls.find((h) => this.mainMine(h)?.goldLeft > 0) ?? halls[0];
     const peasants = p.units.filter((u) => !u.dead && u.type === 'peasant');
-    if (!hall && !p.buildings.some((b) => !b.dead && b.def.dropOff)) {
+    if (!hall && !p.buildings.some((b) => !b.dead && b.def.dropOff === true)) {
       // Lost the town hall: rebuild if possible.
       if (peasants.length && g.canAfford(p, UNITS.townhall.cost)) this.build('townhall', peasants);
       this.militaryEmpire();
@@ -557,8 +557,8 @@ export class GeneralAI {
     const mine = this.mainMine(hall);
     this.expansionGuard = null;
     if (mine && mine.goldLeft > 4000) return;
-    if (p.buildings.some((b) => !b.dead && b.def.dropOff && b.underConstruction) || this.pendingBuild('townhall')) return;
-    const halls = p.buildings.filter((b) => !b.dead && b.def.dropOff);
+    if (p.buildings.some((b) => !b.dead && b.def.dropOff === true && b.underConstruction) || this.pendingBuild('townhall')) return;
+    const halls = p.buildings.filter((b) => !b.dead && b.def.dropOff === true);
     const candidates = g.passive.buildings
       .filter((m) => m.type === 'goldmine' && !m.dead && m.goldLeft > 2000)
       .filter((m) => !halls.some((h) => h.distTo(m) < 14))

@@ -186,6 +186,7 @@ function anchorSet(root, parts) {
   for (const l of parts.legs ?? []) set.add(l.obj);
   for (const a of parts.arms ?? []) set.add(a.obj);
   for (const w of parts.wings ?? []) set.add(w.obj);
+  for (const d of parts.doors ?? []) set.add(d.obj);
   for (const k of ['spin', 'bob', 'wheels', 'fire']) for (const o of parts[k] ?? []) set.add(o);
   return set;
 }

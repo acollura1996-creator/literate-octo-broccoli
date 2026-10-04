@@ -1325,7 +1325,8 @@ export class Game {
   }
 
   homeOf(p) {
-    const b = p.buildings.find((x) => !x.dead && (x.def.dropOff || x.def.revivesHeroes) && !x.underConstruction);
+    const ok = (x) => !x.dead && !x.underConstruction;
+    const b = p.buildings.find((x) => ok(x) && (x.def.dropOff === true || x.def.revivesHeroes)) ?? p.buildings.find((x) => ok(x) && x.def.dropOff);
     return b || null;
   }
 
