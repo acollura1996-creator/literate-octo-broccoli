@@ -76,7 +76,9 @@ export class GeneralAI {
       if (o === this.p || o.defeated || !this.g.isEnemy(this.p, o)) continue;
       const b = o.buildings.find((x) => !x.dead) ?? (o.hero && !o.hero.dead ? o.hero : null);
       if (!b) continue;
-      const d = Math.hypot(b.x - h.x, b.z - h.z);
+      // Empires prefer rival empires; small hero-path camps are left alone until late.
+      const penalty = this.p.mode === 'empire' && o.mode === 'hero' && this.g.time < 25 * 60 ? 80 : 0;
+      const d = Math.hypot(b.x - h.x, b.z - h.z) + penalty;
       if (d < bd) {
         bd = d;
         best = { x: b.x, z: b.z, player: o };
