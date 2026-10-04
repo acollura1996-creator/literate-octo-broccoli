@@ -305,7 +305,7 @@ export function rock_thrower(tc) {
   const L = 0.35;
   const r = rig({ legLen: L, hipW: 0.068, shoulderX: 0.185, shoulderY: 0.31, neckY: 0.385 });
   const skin = mat(C.tan), skinD = mat(C.tanD), hide = mat(C.hide), hideD = mat(C.hideD), hideL = mat(C.hideL);
-  const team = mat(tc), teamD = mat(shade(tc, 0.58)), hair = mat(C.hair);
+  const team = mat(tc), hair = mat(C.hair);
   r.legs.forEach((l, i) => {
     const s = i === 0 ? 1 : -1;
     legMesh(l.obj, L, 0.082, hide, hideD, { bootH: 0.32, toe: 0.22 });
@@ -925,7 +925,7 @@ function pithos(parent, x, y, z, s, clay, band) {
 // awning and flag, side storerooms, bronze braziers, storage jars, oxhide ingots and a bronze bull.
 export function bronze_hall(tc) {
   const root = new THREE.Group();
-  const team = mat(tc), teamD = mat(shade(tc, 0.6));
+  const team = mat(tc);
   const stone = mat(0xcbbb98), stoneD = mat(0xa39272), stoneL = mat(0xe4d8ba);
   const mud = mat(C.mud), mudD = mat(C.mudD), plaster = mat(0xeadfc4), plasterD = mat(0xcfc09c), timber = mat(0x5a3a1e);
   const bronze = mat(C.bronze), bronzeD = mat(C.bronzeD);
@@ -1037,7 +1037,7 @@ export function bronze_hall(tc) {
 export function farm_1(tc) {
   const root = new THREE.Group();
   const soil = mat(0x6e4a2a), soilL = mat(0x87603a), team = mat(tc), teamD = mat(shade(tc, 0.6));
-  const wheat = mat(P.thatch), wheatD = mat(0xc49a44), woodD = mat(P.woodDark), wood = mat(P.wood), woodL = mat(P.woodLight);
+  const wheat = mat(P.thatch), wheatD = mat(0xc49a44), woodD = mat(P.woodDark), woodL = mat(P.woodLight);
   const thatch = mat(P.thatch), thatchD = mat(P.thatchDark);
   add(root, geo.box(2.86, 0.05, 2.86), soil, [0, 0.025, 0]);
   // wheat: ridged rows across the front two thirds (a stalk band per row topped by ragged ears)

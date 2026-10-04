@@ -635,10 +635,10 @@ export function farm_2(tc) {
   add(root, geo.cyl(0.2, 0.2, 0.01, 12), mat(0x3a6aa0), [tx, b + 0.33, tz]);
   rod(root, [wx, b + 0.5, wz], [tx + 0.05, b + 0.42, tz - 0.15], 0.02, iron, 5);
 
-  // --- yard: round hay bales, milk cans ---------------------------------------------------------------
+  // --- yard: round hay bales, milk cans by the tank ----------------------------------------------------
   add(root, mergedCyls('fBales', [[0.15, 0.15, 0.24, 0, 0.15, 0, 0, HALF_PI, 10], [0.15, 0.15, 0.24, 0.05, 0.15, 0.34, 0, HALF_PI, 10]]), mat(0xd8b45a), [0.06, b, -0.02]);
   add(root, mergedCyls('fBaleEnds', [[0.12, 0.12, 0.25, 0, 0.15, 0, 0, HALF_PI, 10], [0.12, 0.12, 0.25, 0.05, 0.15, 0.34, 0, HALF_PI, 10]]), mat(0xb8923e), [0.06, b, -0.02]);
-  add(root, mergedCyls('fCans', [[0.045, 0.05, 0.14, 0, 0.07, 0, 0, 0, 7], [0.045, 0.05, 0.14, 0.11, 0.07, 0.03, 0, 0, 7], [0.045, 0.05, 0.14, 0.05, 0.07, 0.11, 0, 0, 7]]), steel, [-0.08 + bx, b, front + 0.28]);
+  add(root, mergedCyls('fCans', [[0.045, 0.05, 0.14, 0, 0.07, 0, 0, 0, 7], [0.045, 0.05, 0.14, 0.11, 0.07, 0.03, 0, 0, 7], [0.045, 0.05, 0.14, 0.05, 0.07, 0.11, 0, 0, 7]]), steel, [0.5, b, 1.06]);
   return { root, parts: { spin: [rotor] }, height: 3.2, radius: 1.45 };
 }
 
@@ -817,7 +817,7 @@ export function tower_bunker(tc) {
 // ===========================================================================
 // Concrete wall + checkpoint gate
 // Same tiling rules as the ages.js fortifications: the wall body fills its 1x1 cell exactly and every
-// detail repeats with period 1 (edge details overhang by at most 8 mm), so pieces join in any of the 8
+// detail repeats with period 1 (edge details overhang by at most 6 mm), so pieces join in any of the 8
 // directions. Steel posts stand only on the cell corners and pair up across seams; the coiled wire
 // runs along all four top edges between them. The team band sits at the same height on wall and gate.
 // The gate is 2x2: wall line along X, passage along Z, pier side faces flush with x = +-1.
@@ -888,7 +888,7 @@ function steelLeaf(parent, x, z, dir, w, h) {
   add(hinge, geo.box(w - 0.1, h * 0.5 - 0.08, t * 0.5), plate, [(dir * w) / 2, y0 + h * 0.25 + 0.01, -t / 2]);
   const vb = [];
   for (let i = 1; i <= 4; i++) vb.push([0.026, h * 0.5 - 0.08, 0.026, dir * (w * i) / 5, y0 + h * 0.75 - 0.005, -t / 2]);
-  vb.push([0.05, 0.12, t + 0.03, dir * 0.0, y0 + h * 0.2, -t / 2], [0.05, 0.12, t + 0.03, dir * 0.0, y0 + h * 0.8, -t / 2]); // hinge knuckles
+  vb.push([0.05, 0.12, t + 0.03, 0, y0 + h * 0.2, -t / 2], [0.05, 0.12, t + 0.03, 0, y0 + h * 0.8, -t / 2]); // hinge knuckles
   add(hinge, mergedBoxes(`ind-leafBars:${w},${h},${dir}`, vb), bars);
   hazard(hinge, (dir * w) / 2, y0 + h * 0.25 + 0.01, 0.002, w - 0.12, 0.13, { slant: dir, period: 0.12 });
   return { obj: hinge, side: dir };
@@ -896,7 +896,7 @@ function steelLeaf(parent, x, z, dir, w, h) {
 
 export function gate_concrete(tc) {
   const root = new THREE.Group();
-  const conc = mat(CONC), concD = mat(CONC_D), concL = mat(CONC_L), team = mat(tc), steelD = mat(STEEL_D), iron = mat(P.iron);
+  const conc = mat(CONC), concD = mat(CONC_D), team = mat(tc), steelD = mat(STEEL_D), iron = mat(P.iron);
   const PW = 0.56, GZ = 0.975, H = 1.44, pw = 1 - PW, pc = PW + pw / 2;
   const glow = [];
   // road through the passage: asphalt, stop lines, a striped speed bump outside

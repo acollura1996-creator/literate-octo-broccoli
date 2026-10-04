@@ -825,18 +825,18 @@ export function farm_3(tc) {
 // with obj a Group on the hinge; the game sets obj.rotation.y = side * open * 1.4 (both swing to -Z).
 // ===========================================================================
 
-const WALL_TOP = 0.54; // plinth top
-const FIELD_H = 0.96; // energy field height above the plinth
-const POST = 0.15; // corner pylon size
+const WALL_TOP = 0.62; // plinth top
+const FIELD_H = 0.8; // energy field height above the plinth
+const POST = 0.18; // corner pylon size
 const FIELD_MAT = () => mat(0x6cecff, { emissive: 0x18c4e6, emissiveIntensity: 0.75 });
 
 /** Wall plinth (fills [-w/2, w/2] x [-d/2, d/2]) with team band and face panels. */
 function wallPlinth(parent, m, key, w = 1, d = 1, x = 0, z = 0) {
   add(parent, geo.box(w, 0.12, d), m.gun, [x, 0.06, z]);
-  add(parent, geo.box(w - 0.01, 0.27, d - 0.01), m.pearl, [x, 0.255, z]);
-  add(parent, geo.box(w, 0.05, d), m.team, [x, 0.415, z]);
-  add(parent, geo.box(w, 0.1, d), m.silver, [x, 0.49, z]);
-  if (key) add(parent, mergedBoxes(key, onFourFaces([[0.5, 0.15, 0, 0.255]], 0.02, 0.494)), m.silver, [x, 0, z]);
+  add(parent, geo.box(w - 0.01, 0.35, d - 0.01), m.pearl, [x, 0.295, z]);
+  add(parent, geo.box(w, 0.06, d), m.team, [x, 0.5, z]);
+  add(parent, geo.box(w, 0.09, d), m.silver, [x, 0.575, z]);
+  if (key) add(parent, mergedBoxes(key, onFourFaces([[0.5, 0.2, 0, 0.3], [0.3, 0.04, 0, 0.3]], 0.02, 0.494)), m.silver, [x, 0, z]);
 }
 
 /** Cross-shaped field footprint inside a 1x1 cell (leaves the POST x POST corners free). */
@@ -848,11 +848,12 @@ export function wall_energy(tc) {
   const glow = [];
   wallPlinth(root, m, 'wallPanels');
   // corner emitter pylons: white posts, team band, dark emitter grilles, cyan tips
-  add(root, cornerPosts('wallPost', POST, 1.12, 0.004), m.white, [0, WALL_TOP, 0]);
-  add(root, cornerPosts('wallPostGrille', POST + 0.004, 0.62, 0.002), m.gun, [0, WALL_TOP + 0.16, 0]);
-  add(root, cornerPosts('wallPostBand', POST + 0.008, 0.07), m.team, [0, WALL_TOP + 0.96, 0]);
-  add(root, cornerPosts('wallPostCap', POST + 0.02, 0.05, 0.0), m.silver, [0, WALL_TOP + 1.12, 0]);
-  add(root, cornerPosts('wallPostTip', POST * 0.6, 0.09, POST * 0.2 + 0.01), m.cyan, [0, WALL_TOP + 1.17, 0]);
+  const PH = 1.04;
+  add(root, cornerPosts('wallPost', POST, PH, 0.004), m.white, [0, WALL_TOP, 0]);
+  add(root, cornerPosts('wallPostCollar', POST + 0.004, 0.08, 0.002), m.gun, [0, WALL_TOP, 0]);
+  add(root, cornerPosts('wallPostBand', POST + 0.008, 0.07), m.team, [0, WALL_TOP + 0.84, 0]);
+  add(root, cornerPosts('wallPostCap', POST, 0.05), m.silver, [0, WALL_TOP + PH, 0]);
+  add(root, cornerPosts('wallPostTip', POST * 0.5, 0.1, POST * 0.25), m.cyan, [0, WALL_TOP + PH + 0.05, 0]);
   // field: emitter channel, static under-layer, pulsing glow on top
   // energy field: emitter channel, a static under-layer and the pulsing glow on top of it
   add(root, fieldGeo(0.03), m.dark, [0, WALL_TOP, 0]);
@@ -912,9 +913,9 @@ export function gate_energy(tc) {
     add(root, geo.cyl(0.05, 0.08, 0.06, 8), m.silver, [x, WALL_TOP + 1.62, 0]);
   }
   // lintel beam over the passage
-  add(root, geo.box(2 * PW + 0.06, 0.2, 0.36), m.white, [0, 2.0, 0]);
-  add(root, geo.box(2 * PW + 0.06, 0.07, 0.37), m.team, [0, 2.035, 0]);
-  add(root, geo.box(2 * PW - 0.1, 0.02, 0.12), m.cyan, [0, 1.895, 0]);
+  add(root, geo.box(2 * PW + 0.06, 0.2, 0.36), m.white, [0, 2.06, 0]);
+  add(root, geo.box(2 * PW + 0.06, 0.07, 0.37), m.team, [0, 2.095, 0]);
+  add(root, geo.box(2 * PW - 0.1, 0.02, 0.12), m.cyan, [0, 1.955, 0]);
   const doors = [
     energyLeaf(root, glow, m, -PW, 0.6, 1, PW - 0.005, 1.58),
     energyLeaf(root, glow, m, PW, 0.6, -1, PW - 0.005, 1.58),
