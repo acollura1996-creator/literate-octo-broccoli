@@ -34,13 +34,11 @@ const C = {
   nutrient: 0x8dff5c,
 };
 
-const shade = (c, k) => new THREE.Color(c).multiplyScalar(k).getHex();
-
 /** The shared material set of a team. */
 function mats(tc) {
   return {
     white: mat(C.white), pearl: mat(C.pearl), silver: mat(C.silver), steel: mat(C.steel), gun: mat(C.gun),
-    dark: mat(C.dark), glass: mat(C.glass), team: mat(tc), teamD: mat(shade(tc, 0.62)), cyan: glowMat(C.cyan, 1),
+    dark: mat(C.dark), glass: mat(C.glass), team: mat(tc), cyan: glowMat(C.cyan, 1),
   };
 }
 
@@ -297,7 +295,7 @@ export function laser_trooper(tc) {
   beam(aL, eL, hL, 0.09, m.white);
   beam(aL, [eL[0] * 0.6 + hL[0] * 0.4, eL[1] * 0.6 + hL[1] * 0.4, eL[2] * 0.6 + hL[2] * 0.4], [eL[0] * 0.25 + hL[0] * 0.75, eL[1] * 0.25 + hL[1] * 0.75, eL[2] * 0.25 + hL[2] * 0.75], 0.097, m.team);
   add(aL, geo.box(0.065, 0.07, 0.07), m.dark, hL);
-  // gun arm + laser rifle (rifle axis at x0, y0 in the arm's frame, level along +Z)
+  // gun arm: hand on the pistol grip
   const w = r.weapon;
   const eR = [-0.005, -0.19, -0.03], hR = [0.115, -0.165, 0.085];
   beam(w, [0, 0, 0], eR, 0.082, m.white);
@@ -460,7 +458,7 @@ export function hover_tank(tc) {
   return { root, parts: { bob: [hull], weapon, glow }, height: 1.25, radius: 0.9 };
 }
 
-/** Reverse-joint mech leg from the hip pivot down to the ground at y = -H. */
+/** Heavy mech leg from the hip pivot down to the ground at y = -H: knee forward, shin raked back, clawed foot. */
 function mechLeg(lg, H, s, m) {
   const K = [0, -0.52, 0.26], A = [0, -1.0, -0.12];
   add(lg, geo.cyl(0.15, 0.15, 0.22, 10), m.dark, [0, 0, 0], [0, 0, HALF_PI]);
@@ -485,7 +483,7 @@ function mechLeg(lg, H, s, m) {
   add(lg, geo.box(0.08, 0.06, 0.22), m.gun, [0, fy + 0.03, -0.24]);
 }
 
-// Mech walker: big reverse-joint biped with a wedge cockpit (team side/roof armour, glowing eye
+// Mech walker: big armoured biped with a wedge cockpit (team side/roof armour, glowing eye
 // slits), shoulder missile pods and two arm cannons that move together as parts.weapon.
 export function mech_walker(tc) {
   const root = new THREE.Group();
@@ -599,7 +597,7 @@ export function nexus(tc) {
   }
   // spire: foot, fins (white) around a glowing core
   add(root, geo.cyl(0.8, 0.88, 0.5, 16), m.white, [0, b + 0.25, 0]);
-  add(root, geo.cyl(0.82, 0.82, 0.05, 16), m.team, [0, b + 0.4, 0]);
+  add(root, geo.cyl(0.835, 0.84, 0.05, 16), m.team, [0, b + 0.4, 0]);
   add(root, geo.cyl(0.72, 0.78, 0.06, 16), m.dark, [0, b + 0.53, 0]);
   const fy = b + 0.5, FH = 5.0;
   add(root, spireFins('nexus', 6, 0.2, 0.3, 0.72, FH, 0.12), m.white, [0, fy, 0], [0, Math.PI / 6, 0]);
@@ -623,6 +621,7 @@ export function nexus(tc) {
       bx.rotateZ(rz);
       bx.translate(x, y, 0);
       parts.push(bx.toNonIndexed());
+      bx.dispose();
     }
     const gg = mergeGeometries(parts, false);
     for (const p of parts) p.dispose();
@@ -803,7 +802,7 @@ export function farm_3(tc) {
   for (const [x, z, h] of tanks) {
     add(root, geo.cyl(0.25, 0.27, h, 12), m.white, [x, b + h / 2, z]);
     add(root, hemi(12, 3), m.silver, [x, b + h, z], null, [0.25, 0.12, 0.25]);
-    for (const y of [0.18, h - 0.14]) add(root, geo.cyl(0.262, 0.262, 0.06, 12), m.team, [x, b + y, z]);
+    for (const y of [0.18, h - 0.14]) add(root, geo.cyl(0.278, 0.278, 0.06, 12), m.team, [x, b + y, z]);
     add(root, geo.box(0.07, h * 0.55, 0.04), m.dark, [x - 0.18, b + h * 0.5, z + 0.18], [0, -Math.PI / 4, 0]);
     add(root, geo.box(0.05, h * 0.38, 0.045), mat(C.nutrient, { emissive: C.nutrient, emissiveIntensity: 0.8 }), [x - 0.18, b + h * 0.44, z + 0.18], [0, -Math.PI / 4, 0]);
   }
@@ -838,7 +837,7 @@ const FIELD_MAT = () => mat(0x6cecff, { emissive: 0x18c4e6, emissiveIntensity: 0
 /** Wall plinth (fills [-w/2, w/2] x [-d/2, d/2]) with team band and face panels. */
 function wallPlinth(parent, m, key, w = 1, d = 1, x = 0, z = 0) {
   add(parent, geo.box(w, 0.12, d), m.gun, [x, 0.06, z]);
-  add(parent, geo.box(w - 0.01, 0.35, d - 0.01), m.pearl, [x, 0.295, z]);
+  add(parent, geo.box(w - 0.01, 0.35, d - 0.01), m.white, [x, 0.295, z]);
   add(parent, geo.box(w, 0.06, d), m.team, [x, 0.5, z]);
   add(parent, geo.box(w, 0.09, d), m.silver, [x, 0.575, z]);
   if (key) add(parent, mergedBoxes(key, onFourFaces([[0.5, 0.2, 0, 0.3], [0.3, 0.04, 0, 0.3]], 0.02, 0.494)), m.silver, [x, 0, z]);
@@ -858,10 +857,10 @@ export function wall_energy(tc) {
   add(root, cornerPosts('wallPostCollar', POST + 0.004, 0.08, 0.002), m.gun, [0, WALL_TOP, 0]);
   add(root, cornerPosts('wallPostBand', POST + 0.008, 0.07), m.team, [0, WALL_TOP + 0.84, 0]);
   add(root, cornerPosts('wallPostCap', POST, 0.05), m.silver, [0, WALL_TOP + PH, 0]);
-  add(root, cornerPosts('wallPostTip', POST * 0.5, 0.1, POST * 0.25), m.cyan, [0, WALL_TOP + PH + 0.05, 0]);
+  add(root, cornerPosts('wallPostTip', POST * 0.5, 0.1, POST * 0.25), FIELD_MAT(), [0, WALL_TOP + PH + 0.05, 0]);
   // field: emitter channel, static under-layer, pulsing glow on top
   // energy field: emitter channel, a static under-layer and the pulsing glow on top of it
-  add(root, fieldGeo(0.03), m.dark, [0, WALL_TOP, 0]);
+  add(root, fieldGeo(0.03), m.gun, [0, WALL_TOP, 0]);
   add(root, fieldGeo(FIELD_H * 0.9), FIELD_MAT(), [0, WALL_TOP, 0]);
   const f = glowAdd(glow, root, fieldGeo(FIELD_H), FIELD_MAT(), [0, WALL_TOP, 0]);
   f.castShadow = false;

@@ -17,6 +17,11 @@ export const MUZZLE = {
   steam_tank: [0, 0.6, 1.425],
   howitzer: [0, 1.053, 0.803],
   tower_bunker: [0, 0.92, 0.9],
+  laser_trooper: [-0.104, 0.707, 0.805],
+  // Twin guns alternate barrels.
+  hover_tank: [[0.1, 0.8, 0.75], [-0.1, 0.8, 0.75]],
+  mech_walker: [[0.6, 1.65, 0.89], [-0.6, 1.65, 0.89]],
+  tower_laser: [0, 1.98, 0.95],
   infantry: [-0.105, 0.7, 0.7],
   bazooka: [-0.16, 0.81, 0.57],
   tank: [0, 0.82, 1.82],
@@ -145,7 +150,11 @@ export class Projectiles {
   /** World position of a unit's muzzle (model-space MUZZLE offsets, or a sensible default). */
   muzzleOf(from) {
     const g = this.game;
-    const m = MUZZLE[from.modelId];
+    let m = MUZZLE[from.modelId];
+    if (m && Array.isArray(m[0])) {
+      from.shotIndex = ((from.shotIndex ?? 0) + 1) % m.length;
+      m = m[from.shotIndex];
+    }
     const ground = g.terrain.heightAt(from.x, from.z);
     if (m) {
       const sc = from.view?.root?.scale?.x ?? 1;
