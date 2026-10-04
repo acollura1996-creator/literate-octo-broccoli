@@ -8,7 +8,12 @@ import { geo, mat } from './assets.js';
  * Muzzle offsets in model space ([x, y, z], model facing +Z) for units whose shots should leave
  * the barrel rather than the unit's chest.
  */
-export const MUZZLE = {};
+export const MUZZLE = {
+  infantry: [-0.105, 0.7, 0.7],
+  bazooka: [-0.16, 0.81, 0.57],
+  tank: [0, 0.82, 1.82],
+  rocket_artillery: [0, 1.29, -0.33],
+};
 
 function makeMesh(kind, color) {
   const g = new THREE.Group();
