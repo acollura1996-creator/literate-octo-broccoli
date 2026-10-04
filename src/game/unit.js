@@ -1,6 +1,6 @@
 // A Unit is any entity on the map: soldiers, heroes, creeps and buildings
 // (as in Warcraft III, buildings are units too).
-import { UNITS, HERO_XP, MAX_HERO_LEVEL } from '../data/units.js';
+import { UNITS, HERO_XP, MAX_HERO_LEVEL, MAX_AGE } from '../data/units.js';
 import { HEROES } from '../data/heroes.js';
 import { ITEMS } from '../data/items.js';
 
@@ -37,7 +37,7 @@ export class Unit {
       this.inventory = [null, null, null, null, null, null];
     }
     // Age-styled structures remember the age they were built (or rebuilt) in.
-    this.ageLevel = Math.max(1, Math.min(4, opts.ageLevel ?? owner?.tier ?? 1));
+    this.ageLevel = Math.max(1, Math.min(MAX_AGE, opts.ageLevel ?? owner?.tier ?? 1));
     this.isIllusion = !!opts.illusion;
     this.summoned = !!def.summoned || !!opts.summoned;
     this.lifetime = opts.lifetime ?? null; // seconds remaining for summons
@@ -153,19 +153,23 @@ export class Unit {
     else if (!this.isBuilding && this.owner?.upgrades) a += this.owner.upgrades.armor * 2;
     return a + this.itemStat('armor') + (this.mods.armor || 0);
   }
+  /** Projectile fired by this unit (towers change ammunition with the ages). */
+  get projectile() {
+    return this.def.projectileByAge?.[this.ageLevel - 1] ?? this.def.projectile;
+  }
   get damageRange() {
-    const d = this.def.damage;
+    const d = this.def.damageByAge?.[this.ageLevel - 1] ?? this.def.damage;
     if (!d) return null;
     let bonus = this.itemStat('damage') + (this.mods.damage || 0);
     if (this.isHero) bonus += this[this.heroDef.primary];
     else if (!this.isBuilding && this.owner?.upgrades) bonus += this.owner.upgrades.weapons * 2;
     let mult = 1;
-    if (this.def.projectile && this.mods.rangedPct) mult += this.mods.rangedPct;
+    if (this.projectile && this.mods.rangedPct) mult += this.mods.rangedPct;
     if (this.owner?.damageMult && !this.isBuilding) mult *= this.owner.damageMult;
     return [Math.round((d[0] + bonus) * mult), Math.round((d[1] + bonus) * mult)];
   }
   get attackCooldown() {
-    let cd = this.def.attackCooldown;
+    let cd = this.def.cooldownByAge?.[this.ageLevel - 1] ?? this.def.attackCooldown;
     if (this.isHero) cd /= 1 + 0.02 * this.agi;
     cd /= this.mods.attackSpeed || 1;
     return cd;

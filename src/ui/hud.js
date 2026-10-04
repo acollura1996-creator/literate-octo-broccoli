@@ -1,6 +1,7 @@
 // The Warcraft III-style console: resources, clock, hero buttons, minimap,
 // 3D portrait, unit info, inventory and the command card.
-import { UNITS, UPGRADES, AGE_NAMES } from '../data/units.js';
+import { moodOf } from '../game/empire.js';
+import { UNITS, UPGRADES, AGE_NAMES, ECONOMY } from '../data/units.js';
 import { ITEMS } from '../data/items.js';
 import { getCommands } from './commands.js';
 import { modelIcon, Portrait } from './icons.js';
@@ -87,9 +88,22 @@ export class Hud {
     $('r-lumber').textContent = Math.floor(p.lumber);
     $('r-food').textContent = `${p.foodUsed}/${p.foodCap}`;
     if (p.mode === 'empire') {
-      const age = AGE_NAMES[p.tier] || 'No Town Hall';
+      const age = AGE_NAMES[p.tier] || 'No Town Center';
       if ($('r-mode').textContent !== age) $('r-mode').textContent = age;
+      $('r-grain').textContent = Math.floor(p.food);
+      const fr = Math.round(p.foodRate * 60);
+      const rate = $('r-grain-rate');
+      rate.textContent = `${fr >= 0 ? '+' : ''}${fr}/m`;
+      rate.className = `rate ${fr < 0 ? 'neg' : 'pos'}`;
+      $('res-grain').classList.toggle('warn', p.starving);
+      $('r-citizens').textContent = `${Math.floor(p.citizens)}/${p.housing}`;
+      const mood = moodOf(p.happiness);
+      $('r-mood-ico').textContent = mood.icon;
+      $('r-mood').textContent = mood.name;
+      $('r-mood').style.color = mood.color;
+      $('res-mood').title = `Mood ${Math.round(p.happiness)}/100 (heading to ${Math.round(p.happinessTarget)}). Tax ${p.tax}, rations ${p.rations}${p.starving ? ', STARVING' : ''}. Income ${Math.round(p.taxRate * 60)} gold/min from taxes.`;
     }
+    document.body.classList.toggle('mode-empire', p.mode === 'empire');
     $('r-food').classList.toggle('warn', p.foodUsed >= p.foodCap && p.mode === 'empire');
     $('gametime').textContent = fmtTime(g.time);
     const hour = g.timeOfDay;
@@ -112,6 +126,37 @@ export class Hud {
     this.updateInventory(unit);
     this.updateMessages();
     this.updateTooltip();
+    this.updateOffers();
+  }
+
+  /** Contract offers from empires that want to hire the player's Hero. */
+  updateOffers() {
+    const g = this.game;
+    const offers = (g.empires?.offers ?? []).filter((o) => o.to === g.human);
+    const sig = offers.map((o) => `${o.from.index}:${Math.ceil(o.expires - g.time)}`).join('|');
+    if (sig === this.offerSig) return;
+    this.offerSig = sig;
+    const box = $('offers');
+    box.innerHTML = offers
+      .map(
+        (o, i) => `<div class="offer" data-i="${i}">
+          <div class="of-title" style="color:${g.nameColor(o.from)}">${o.from.name} wants to hire you</div>
+          <div class="of-body">${o.fee} gold to fight for them for ${ECONOMY.hireTime / 60} minutes. Their enemies become yours. <span class="dim">(${Math.ceil(o.expires - g.time)}s)</span></div>
+          <div class="of-btns"><button class="of-yes">Accept</button><button class="of-no">Decline</button></div>
+        </div>`,
+      )
+      .join('');
+    box.querySelectorAll('.offer').forEach((el) => {
+      const o = offers[Number(el.dataset.i)];
+      el.querySelector('.of-yes').addEventListener('click', () => {
+        g.empires.acceptOffer(o);
+        this.offerSig = '';
+      });
+      el.querySelector('.of-no').addEventListener('click', () => {
+        g.empires.declineOffer(o);
+        this.offerSig = '';
+      });
+    });
   }
 
   renderPortrait(time) {
@@ -207,7 +252,7 @@ export class Hud {
     const buttons = getCommands(this.game, this.input);
     this.input.buttons = buttons;
     const sig = buttons
-      .map((b) => `${b.id}:${b.disabled ? 1 : 0}:${b.level ?? ''}:${b.autocast ?? ''}:${b.count ?? ''}:${Math.round((b.cooldown || 0) * 20)}:${b.noMana ? 1 : 0}:${Math.round((b.progress || 0) * 20)}:${b.unlearned ? 1 : 0}`)
+      .map((b) => `${b.id}:${b.name}:${b.disabled ? 1 : 0}:${b.level ?? ''}:${b.autocast ?? ''}:${b.count ?? ''}:${Math.round((b.cooldown || 0) * 20)}:${b.noMana ? 1 : 0}:${Math.round((b.progress || 0) * 20)}:${b.unlearned ? 1 : 0}`)
       .join('|') + `|${this.input.targetMode?.kind ?? ''}`;
     if (sig === this.cardSig) return;
     this.cardSig = sig;
@@ -234,6 +279,7 @@ export class Hud {
       if (b.hotkey) inner += `<span class="hk">${b.keyLabel ?? b.hotkey}</span>`;
       if (b.level) inner += `<span class="lv">${b.level}</span>`;
       if (b.count !== undefined) inner += `<span class="cnt">${b.count}</span>`;
+      if (b.label) inner += `<span class="lbl">${b.label}</span>`;
       if (b.autocast !== undefined) cell.classList.toggle('autocast', !!b.autocast);
       if (b.cooldown) inner += `<div class="cd" style="height:${Math.round(b.cooldown * 100)}%"></div>`;
       if (b.progress) inner += `<div class="cd prog" style="height:${Math.round((1 - b.progress) * 100)}%"></div>`;
@@ -344,7 +390,8 @@ export class Hud {
       parts.push(`<div class="progress"><div class="pl">Constructing</div><div class="bar"><i style="width:${u.buildProgress * 100}%"></i></div></div>`);
     } else if (u.isBuilding && (u.trainQueue.length || u.upgrading || u.researching)) {
       if (u.upgrading) {
-        parts.push(`<div class="progress"><div class="pl">Upgrading to ${UNITS[u.upgrading.to].name}</div><div class="bar"><i style="width:${(u.upgrading.time / u.upgrading.total) * 100}%"></i></div></div>`);
+        const what = u.upgrading.age ? `Advancing to the ${AGE_NAMES[u.upgrading.age]}` : `Upgrading to ${UNITS[u.upgrading.to].name}`;
+        parts.push(`<div class="progress"><div class="pl">${what}</div><div class="bar"><i style="width:${(u.upgrading.time / u.upgrading.total) * 100}%"></i></div></div>`);
       }
       if (u.researching) {
         const up = UPGRADES[u.researching.upg];
@@ -375,15 +422,32 @@ export class Hud {
       }
       if (u.type === 'goldmine') stats.push(`<div class="stat"><span class="si">◉</span>Gold: <b>${u.goldLeft}</b></div>`);
       if (u.carry) stats.push(`<div class="stat dim">Carrying ${u.carry.amount} ${u.carry.kind}</div>`);
-      if (u.def.foodProvided && !u.underConstruction) stats.push(`<div class="stat dim">Provides ${u.def.foodProvided} population</div>`);
-      if (u.def.foodByAge && !u.underConstruction) {
+      if (u.def.foodProvided && !u.underConstruction && !u.def.tier) stats.push(`<div class="stat dim">Provides ${u.def.foodProvided} army supply</div>`);
+      if (u.def.housingByAge && !u.underConstruction) {
         stats.push(
           u.roadConnected
-            ? `<div class="stat ok">Houses ${u.def.foodByAge[u.ageLevel - 1]} population (${AGE_NAMES[u.ageLevel]})</div>`
-            : '<div class="stat warn">Not connected to your Town Hall by road: provides no population. Lay a road linking it.</div>',
+            ? `<div class="stat ok">Shelters ${u.def.housingByAge[u.ageLevel - 1]} citizens (+${u.def.housingByAge[u.ageLevel - 1]} supply)</div>`
+            : '<div class="stat warn">Not connected to your town center by road: nobody can live here. Lay a road linking it.</div>',
         );
       }
-      if (u.def.tier && u.owner.general) stats.push(`<div class="stat">Age: <b>${AGE_NAMES[u.def.tier]}</b></div>`);
+      if (u.def.foodRateByAge && !u.underConstruction) {
+        stats.push(`<div class="stat ok">Grows ${Math.round(u.def.foodRateByAge[u.ageLevel - 1] * 60 * (g.events?.harvestMult(u.owner) ?? 1))} food per minute</div>`);
+      }
+      if (u.def.tier && u.owner.mode === 'empire') {
+        const o = u.owner;
+        stats.push(`<div class="stat">Age: <b>${AGE_NAMES[Math.max(1, o.tier)]}</b></div>`);
+        if (o === g.human) {
+          const mood = moodOf(o.happiness);
+          stats.push(`<div class="stat">Citizens: <b>${Math.floor(o.citizens)}/${o.housing}</b> · Mood: <b style="color:${mood.color}">${mood.icon} ${mood.name}</b></div>`);
+          stats.push(`<div class="stat dim">Tax ${o.tax} → ${Math.round(o.taxRate * 60)} gold/min · Rations ${o.rations} → ${Math.round(o.foodEaten * 60)} food/min · Farms ${Math.round(o.foodProduced * 60)} food/min</div>`);
+          if (o.starving) stats.push('<div class="stat warn">Your people are starving: no taxes are paid.</div>');
+        }
+      }
+      if (u.def.nukes && !u.underConstruction) {
+        stats.push(`<div class="stat ${u.nukeReady ? 'warn' : 'dim'}">${u.nukeReady ? '☢️ Nuclear missile armed' : u.nukeBuild ? 'Building a nuclear missile…' : 'No missile armed'}</div>`);
+      }
+      if (u.rebel) stats.push('<div class="stat warn">Rebel: an angry citizen in open revolt.</div>');
+      if (u.def.caravan) stats.push('<div class="stat ok">Carries a fortune in gold. Stop it to claim the treasure!</div>');
       if (u.def.gate) stats.push('<div class="stat dim">Opens for you and your allies.</div>');
       if (u.def.shop) {
         const cust = g.shopCustomer(g.human, u);
@@ -397,7 +461,7 @@ export class Hud {
         const names = {
           stun: 'Stunned', slow: 'Slowed', thunder_slow: 'Thunder Clap', divine_shield: 'Divine Shield', wind_walk: 'Wind Walk',
           avatar: 'Avatar', entangle: 'Entangled', bladestorm: 'Bladestorm', aura_devotion_aura: 'Devotion Aura',
-          aura_brilliance_aura: 'Brilliance Aura', aura_trueshot_aura: 'Trueshot Aura', elemental_power: '', tyrant_might: '',
+          aura_brilliance_aura: 'Brilliance Aura', aura_trueshot_aura: 'Trueshot Aura', elemental_power: '', tyrant_might: '', veteran: 'Veteran',
         };
         const list = buffs.map((b) => names[b] ?? b).filter(Boolean);
         if (list.length) stats.push(`<div class="buffs">${list.map((n) => `<span>${n}</span>`).join('')}</div>`);

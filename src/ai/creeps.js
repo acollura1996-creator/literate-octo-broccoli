@@ -37,9 +37,19 @@ export class CreepManager {
       const u = g.spawnUnit(type, g.creeps, p.x, p.z, { facing: face + (Math.random() - 0.5) });
       u.camp = camp;
       u.guardPos = { x: p.x, z: p.z, facing: u.facing, leash: 11 };
+      this.empower(u);
       camp.units.push(u);
     });
     camp.cleared = false;
+  }
+
+  /** Creeps grow stronger as the game goes on (+15% health and damage every 10 minutes). */
+  empower(u) {
+    const k = Math.min(2, (this.game.time / 600) * 0.15);
+    if (k < 0.01) return;
+    const [d0, d1] = u.def.damage ?? [0, 0];
+    u.addBuff('veteran', Infinity, { hp: Math.round(u.def.hp * k), damage: Math.round(((d0 + d1) / 2) * k), armor: Math.floor(this.game.time / 900) });
+    u.hp = u.maxHp;
   }
 
   aggro(camp, target) {

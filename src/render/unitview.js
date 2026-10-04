@@ -8,6 +8,8 @@ const ghostCache = new Map();
 // Pole weapons thrust instead of swinging: the weapon tilts to this angle (lowering the
 // pike or lance level) while the arm draws back and then lunges forward.
 const THRUST = { spearman: 0.55, royal_knight: 0.05 };
+// Guns aim (weapon.rotation.x) and kick back when they fire instead of swinging.
+export const AIM = {};
 function ghostMaterial(m, tint) {
   const key = `${m.uuid}|${tint ?? ''}`;
   let g = ghostCache.get(key);
@@ -229,10 +231,19 @@ export class UnitView {
     // Weapon arm
     if (P.weapon) {
       let w = walking ? Math.sin(u.walkCycle) * 0.3 : 0;
-      const ranged = !!u.def.projectile;
+      const ranged = !!u.projectile;
       const thrust = THRUST[u.modelId];
       const rz = P.weapon.userData.restPosition?.z ?? 0;
-      if (thrust !== undefined && anim === 'attack') {
+      const gun = u.def.firearm || (u.isBuilding && u.projectile && u.projectile.kind !== 'arrow' && u.projectile.kind !== 'bolt');
+      if (gun) {
+        const aim = AIM[u.modelId] ?? 0;
+        const since = this.game.time - (u.lastShotAt ?? -9);
+        const kick = since < 0.22 ? 1 - since / 0.22 : 0;
+        const heavy = u.def.vehicle || u.isBuilding || u.def.attackGround;
+        if (anim === 'attack' || kick > 0) P.weapon.rotation.x = aim - kick * (heavy ? 0.06 : 0.14);
+        else lerpTo(P.weapon, 'x', walking && !u.def.vehicle ? w * 0.4 : 0, 8);
+        P.weapon.position.z = rz - kick * (heavy ? 0.12 : 0.06);
+      } else if (thrust !== undefined && anim === 'attack') {
         const wind = Math.min(0.45, u.attackCooldown * 0.32);
         let reach;
         if (t < wind) {

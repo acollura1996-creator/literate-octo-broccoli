@@ -125,6 +125,151 @@ export class Effects {
     this.burst(x, 0.3, z, 0xffb347, Math.round(8 * size), 4 * size, 0.08);
   }
 
+  /** Brief flash at a gun's muzzle. */
+  muzzle(x, y, z, color = 0xffd27a, size = 0.22) {
+    if (!this.visible(x, z)) return;
+    const m = basic(color, 1, true);
+    const mesh = new THREE.Mesh(geo.octa(1), m);
+    mesh.position.set(x, y, z);
+    this.add(mesh, (t) => {
+      const k = t / 0.09;
+      mesh.scale.setScalar(size * (0.6 + k));
+      mesh.rotation.y += 1.3;
+      m.opacity = Math.max(0, 1 - k);
+      return t < 0.09;
+    });
+  }
+
+  /** Small smoke puff (rocket trails, exhaust). */
+  puff(x, y, z, color = 0xb8b2a8, size = 0.25, life = 0.8) {
+    if (!this.visible(x, z)) return;
+    const m = basic(color, 0.55);
+    const mesh = new THREE.Mesh(geo.ico(1, 0), m);
+    mesh.position.set(x, y, z);
+    this.add(mesh, (t, dt) => {
+      const k = t / life;
+      mesh.scale.setScalar(size * (0.6 + k * 1.6));
+      mesh.position.y += dt * 0.5;
+      m.opacity = Math.max(0, 0.55 * (1 - k));
+      return t < life;
+    });
+  }
+
+  /** A nuclear missile rises from its silo, arcs over the land and falls on (x, z). */
+  nukeLaunch(silo, x, z, flight) {
+    const gm = basic(0xdcdcdc, 1);
+    const fm = basic(0xffb347, 1, true);
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(geo.cyl(0.18, 0.18, 1.6, 8), gm);
+    const nose = new THREE.Mesh(geo.cone(0.18, 0.45, 8), basic(0xc0392b, 1));
+    nose.position.y = 1.02;
+    const flame = new THREE.Mesh(geo.cone(0.2, 0.9, 8), fm);
+    flame.rotation.x = Math.PI;
+    flame.position.y = -1.2;
+    g.add(body, nose, flame);
+    const sx = silo.x;
+    const sz = silo.z;
+    const sy = this.h(sx, sz) + 1;
+    const ty = this.h(x, z);
+    const peak = 45;
+    g.position.set(sx, sy, sz);
+    this.scene.add(g);
+    // Red warning circle at the target, visible to everyone.
+    const rm = basic(0xff2020, 0.6, true);
+    const ring = new THREE.Mesh(geo.ring(0.92, 1, 48), rm);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, ty + 0.2, z);
+    const dot = new THREE.Mesh(geo.circle ? geo.circle(1, 24) : geo.ring(0, 1, 24), basic(0xff2020, 0.25, true));
+    dot.rotation.x = -Math.PI / 2;
+    dot.position.set(x, ty + 0.18, z);
+    dot.scale.setScalar(0.6);
+    this.add(ring, (t) => {
+      const pulse = 0.5 + 0.5 * Math.sin(t * 10);
+      ring.scale.setScalar(9 * (0.92 + 0.08 * pulse));
+      rm.opacity = 0.35 + 0.4 * pulse;
+      return t < flight;
+    });
+    this.add(dot, (t) => {
+      dot.scale.setScalar(0.6 + 0.4 * Math.sin(t * 10));
+      return t < flight;
+    });
+    let lastPuff = 0;
+    const prev = new THREE.Vector3();
+    this.list.push({
+      obj: g,
+      t: 0,
+      update: (t) => {
+        const k = Math.min(1, t / flight);
+        prev.copy(g.position);
+        const px = sx + (x - sx) * k;
+        const pz = sz + (z - sz) * k;
+        const py = sy + (ty - sy) * k + Math.sin(Math.PI * k) * peak;
+        g.position.set(px, py, pz);
+        const dir = new THREE.Vector3().subVectors(g.position, prev);
+        if (dir.lengthSq() > 1e-6) g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+        flame.scale.setScalar(0.8 + Math.random() * 0.4);
+        if (t - lastPuff > 0.06) {
+          lastPuff = t;
+          this.puff(prev.x, prev.y, prev.z, 0xd8d2c8, 0.45, 1.6);
+        }
+        return k < 1;
+      },
+    });
+  }
+
+  /** The nuclear blast: white flash, fireball, shockwave and a rising mushroom cloud. */
+  nukeBlast(x, z, R) {
+    const y = this.h(x, z);
+    const flashM = basic(0xffffff, 1, true);
+    const flash = new THREE.Mesh(geo.sphere(1, 16, 12), flashM);
+    flash.position.set(x, y + 1, z);
+    this.add(flash, (t) => {
+      flash.scale.setScalar(2 + t * R * 3);
+      flashM.opacity = Math.max(0, 1 - t / 0.35);
+      return t < 0.35;
+    });
+    const fireM = basic(0xff8a2a, 0.95, true);
+    const fire = new THREE.Mesh(geo.sphere(1, 16, 12), fireM);
+    fire.position.set(x, y + 1, z);
+    this.add(fire, (t) => {
+      const k = t / 2.2;
+      fire.scale.setScalar(R * 0.25 + R * 0.55 * Math.min(1, k * 2));
+      fire.position.y = y + 1 + k * 4;
+      fireM.color.setHSL(0.07 - k * 0.05, 1, 0.55 - k * 0.25);
+      fireM.opacity = Math.max(0, 0.95 - k);
+      return t < 2.2;
+    });
+    // Shockwave rings.
+    this.ring(x, z, 0xffe2b0, R * 2.2, 1.2, 1, 0.9);
+    this.later(0.15, () => this.ring(x, z, 0xff9a5a, R * 1.6, 1.0, 1, 0.7));
+    // Mushroom cloud: a rising stem and a billowing cap.
+    const smokeM = basic(0x6a5a50, 0.8);
+    const capM = basic(0x8a7464, 0.85);
+    const cloud = new THREE.Group();
+    const stem = new THREE.Mesh(geo.cyl(0.7, 1.1, 1, 10), smokeM);
+    const cap = new THREE.Mesh(geo.sphere(1, 14, 10), capM);
+    const skirt = new THREE.Mesh(geo.ring(0.6, 1, 24), capM);
+    skirt.rotation.x = -Math.PI / 2;
+    cloud.add(stem, cap, skirt);
+    cloud.position.set(x, y, z);
+    this.add(cloud, (t) => {
+      const k = Math.min(1, t / 3.5);
+      const h = 2 + k * 16;
+      stem.scale.set(1 + k * 1.5, h, 1 + k * 1.5);
+      stem.position.y = h / 2;
+      cap.scale.set(3 + k * 6, 2 + k * 3.5, 3 + k * 6);
+      cap.position.y = h + 1;
+      skirt.scale.setScalar(3 + k * 7);
+      skirt.position.y = h - 0.5;
+      const fade = t > 6 ? Math.max(0, 1 - (t - 6) / 3) : 1;
+      smokeM.opacity = 0.8 * fade;
+      capM.opacity = 0.85 * fade;
+      capM.color.setHSL(0.05, 0.25 + 0.4 * (1 - k), 0.3 + 0.25 * (1 - k));
+      return t < 9;
+    });
+    for (let i = 0; i < 4; i++) this.later(i * 0.15, () => this.burst(x, 1, z, 0xffb347, 18, 9, 0.18, 1.2));
+  }
+
   /** Green/red arrows on the ground where an order was given. */
   orderMarker(x, z, color = 0x40ff40) {
     const m = basic(color, 1, true);

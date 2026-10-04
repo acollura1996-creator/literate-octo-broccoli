@@ -29,7 +29,10 @@
           <div class="tb-right" id="resources">
             <div class="res" title="Gold"><span class="ico gold">◉</span><span id="r-gold">0</span></div>
             <div class="res" title="Lumber"><span class="ico lumber">♣</span><span id="r-lumber">0</span></div>
-            <div class="res" title="Population (houses connected by road add more)"><span class="ico food">🍖</span><span id="r-food">0/0</span></div>
+            <div class="res empire-only" id="res-grain" title="Food stock (farms grow it, citizens eat their rations)"><span class="ico">🌾</span><span id="r-grain">0</span><span class="rate" id="r-grain-rate"></span></div>
+            <div class="res empire-only" id="res-citizens" title="Citizens / housing (citizens pay taxes; houses on roads shelter them)"><span class="ico">👥</span><span id="r-citizens">0/0</span></div>
+            <div class="res empire-only mood" id="res-mood" title="Your people's mood"><span id="r-mood-ico">🙂</span><span id="r-mood">Happy</span></div>
+            <div class="res" id="res-supply" title="Army supply (houses on roads and your town center raise the limit)"><span class="ico food">🍖</span><span id="r-food">0/0</span></div>
             <div class="res mode" id="r-mode">Hero Path</div>
           </div>
         </div>
@@ -43,6 +46,7 @@
         </div>
         <div id="idleworkers" class="hidden" title="Select idle Peasant">⛏<span id="idle-count">0</span></div>
         <div id="messages"></div>
+        <div id="offers"></div>
         <div id="tooltip" class="hidden"></div>
         <div id="console">
           <div id="minimap-wrap"><canvas id="minimap" width="200" height="200"></canvas></div>

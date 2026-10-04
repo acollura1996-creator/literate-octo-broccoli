@@ -209,7 +209,7 @@ export function attackTarget(game, u, t, dt, chase = true) {
     return 'busy';
   }
   stopMoving(u);
-  if (u.rooted && !u.isBuilding && !u.def.projectile && d > reach) return 'out';
+  if (u.rooted && !u.isBuilding && !u.projectile && d > reach) return 'out';
   const ang = angleTo(u, t.x, t.z);
   if (!u.isBuilding) turnToward(u, ang, dt, 12);
   if (u.windup <= 0 && u.attackTimer <= 0 && !u.rooted) {
@@ -238,21 +238,36 @@ export function blockingStructure(game, u) {
   return best;
 }
 
+const SHOT_SOUND = {
+  rock: 'explosion', stone: 'arrowShoot', arrow: 'arrowShoot', axe: 'arrowShoot', bullet: 'gunshot', grenade: 'arrowShoot',
+  cannonball: 'cannon', shell: 'cannon', rocket: 'rocket', laser: 'laser', plasma: 'laser',
+};
+
 function deliverAttack(game, u, t) {
   if (!validTarget(game, u, t)) return;
   const reach = u.range + u.radius + t.radius + 1.6;
   if (u.distTo(t) > reach) return;
-  if (u.def.projectile) {
-    const p = u.def.projectile;
-    game.projectiles.spawn({
-      kind: p.kind, from: u, target: t, speed: p.speed, color: p.color, arc: p.arc,
-      point: p.arc ? { x: t.x, z: t.z } : null,
-      onHit(target, point) {
-        if (u.def.splash) game.splashHit(u, point.x, point.z, u.def.splash);
-        else if (target) game.attackHit(u, target);
-      },
-    });
-    game.sound(p.kind === 'rock' ? 'explosion' : p.kind === 'arrow' || p.kind === 'axe' ? 'arrowShoot' : 'magicCast', u.x, u.z, 0.5);
+  const p = u.projectile;
+  if (p) {
+    const shots = u.def.salvo ?? 1;
+    for (let i = 0; i < shots; i++) {
+      const fire = () => {
+        if (u.dead) return;
+        const spread = shots > 1 ? 1.4 : 0;
+        const point = p.arc ? { x: t.x + (Math.random() - 0.5) * spread, z: t.z + (Math.random() - 0.5) * spread } : null;
+        game.projectiles.spawn({
+          kind: p.kind, from: u, target: t, speed: p.speed, color: p.color, arc: p.arc, point,
+          onHit(target, pt) {
+            if (u.def.splash) game.splashHit(u, pt.x, pt.z, u.def.splash, shots > 1 ? 1 / shots + 0.15 : 1);
+            else if (target) game.attackHit(u, target);
+          },
+        });
+        game.sound(SHOT_SOUND[p.kind] ?? 'magicCast', u.x, u.z, 0.5);
+        u.lastShotAt = game.time;
+      };
+      if (i === 0) fire();
+      else game.later(i * 0.18, fire);
+    }
   } else {
     game.attackHit(u, t);
   }

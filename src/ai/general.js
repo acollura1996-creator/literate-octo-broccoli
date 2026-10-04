@@ -1,7 +1,7 @@
 // Computer-controlled rival generals. Each plays either the Hero path
 // (level up on creeps, buy items, hire mercenaries, raid and hunt Kalenden)
 // or the Empire path (gather, build a base, train an army and attack).
-import { UNITS, UPGRADES, ROAD } from '../data/units.js';
+import { UNITS, UPGRADES, ROAD, AGES, ECONOMY } from '../data/units.js';
 import { Roads } from '../game/roads.js';
 import { ITEMS } from '../data/items.js';
 import { ABILITIES } from '../game/abilities.js';
@@ -158,6 +158,25 @@ export class GeneralAI {
       this.go(h, call, true);
       this.rallyMercs(mercs, h);
       return;
+    }
+
+    // A hired Hero guards its employer's lands between fights.
+    if (p.hiredBy && !p.hiredBy.defeated) {
+      const emp = p.hiredBy;
+      const home = emp.buildings.find((b) => !b.dead && (b.def.tier || b.def.revivesHeroes));
+      const target = emp.ai?.state === 'attack' && emp.ai.target ? emp.ai.target : null;
+      if (target && hpR > 0.6) {
+        this.status = `Fighting for ${emp.isHuman ? 'you' : emp.name}`;
+        this.go(h, target, true);
+        this.rallyMercs(mercs, h);
+        return;
+      }
+      if (home && h.distTo(home) > 40) {
+        this.status = `Guarding ${emp.isHuman ? 'your' : `${emp.name}'s`} lands`;
+        this.go(h, { x: home.x, z: home.z }, true);
+        this.rallyMercs(mercs, h);
+        return;
+      }
     }
 
     // Shopping.
@@ -545,6 +564,7 @@ export class GeneralAI {
     if (hall) this.economy(hall, peasants);
     if (hall) this.expand(hall, peasants);
     if (hall) this.city(hall, peasants);
+    if (hall) this.civic(hall, peasants);
     this.construction(hall, peasants);
     this.production();
     this.militaryEmpire();
@@ -595,9 +615,11 @@ export class GeneralAI {
     const onGold = peasants.filter((u) => u.harvest?.kind === 'gold' && u.order.type !== 'build' && u.order.type !== 'construct');
     const onWood = peasants.filter((u) => u.harvest?.kind === 'lumber' && u.order.type !== 'build' && u.order.type !== 'construct');
     const idle = peasants.filter((u) => u.order.type === 'idle');
-    const woodTarget = p.lumber > 1200 ? 1 : p.lumber > 600 ? 3 : g.time > 360 ? 5 : 4;
+    // Taxes bring in most of the gold, so once the treasury is full the Peasants cut wood.
+    const taxed = (p.taxRate ?? 0) * 60 > 350;
+    const goldTarget = !mine ? 0 : p.gold > 1500 ? 1 : p.lumber > 1000 ? 5 : taxed ? (p.gold > 500 ? 1 : 3) : p.gold > 700 ? 3 : 5;
     for (const u of idle) {
-      if (mine && onGold.length < 5) {
+      if (mine && onGold.length < goldTarget) {
         g.issueOrder(u, { type: 'harvest', target: mine });
         onGold.push(u);
       } else {
@@ -608,19 +630,17 @@ export class GeneralAI {
         }
       }
     }
-    // Too much lumber banked: move a woodcutter back to gold.
-    if (onWood.length > woodTarget && mine && onGold.length < 6) {
-      const u = onWood.find((x) => !x.carry);
-      if (u) g.issueOrder(u, { type: 'harvest', target: mine });
-    }
-    // Rebalance: too many on gold → move one to wood.
-    if (onGold.length > 6) {
+    if (onGold.length > goldTarget) {
       const u = onGold.find((x) => !x.harvest?.inside && !x.carry);
       const tree = this.woodTree(hall);
       if (u && tree) g.issueOrder(u, { type: 'harvest', target: tree });
+    } else if (onGold.length < goldTarget && onWood.length > 2 && p.lumber > 300) {
+      const u = onWood.find((x) => !x.carry);
+      if (u) g.issueOrder(u, { type: 'harvest', target: mine });
     }
-    const wanted = (mine ? 5 : 0) + woodTarget + 2;
-    if (peasants.length < Math.min(wanted, 14) && hall.trainQueue.length === 0 && !hall.upgrading) g.trainUnit(hall, 'peasant');
+    const wanted = Math.min(20, 9 + p.tier * 2);
+    // Don't tie up the town center with Peasants when the next age is affordable.
+    if (peasants.length < wanted && hall.trainQueue.length === 0 && !hall.upgrading && !this.ageReady) g.trainUnit(hall, 'peasant');
   }
 
   /** Trees near the Lumber Yard if there is one, otherwise near the hall. */
@@ -738,8 +758,12 @@ export class GeneralAI {
     g.computeFood(p);
     // Houses whenever population runs short.
     const building = p.buildings.filter((b) => !b.dead && b.def.needsRoad && b.underConstruction).length + (this.pendingBuild('house') ? 1 : 0);
-    const short = p.foodCap < 150 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5);
-    if (short && building < (p.foodUsed > 40 ? 2 : 1) && g.canAfford(p, UNITS.house.cost)) {
+    const fed = p.foodRate > 0.05 && p.food > 100;
+    const short = (p.foodCap < 200 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5)) || (fed && p.citizens >= p.housing - 2 && p.happiness >= 40);
+    const supplyShort = p.foodCap < 200 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5);
+    const r = this.reserve;
+    const saving = !supplyShort && r && (p.gold - UNITS.house.cost.gold < (r.gold ?? 0) || p.lumber - UNITS.house.cost.lumber < (r.lumber ?? 0));
+    if (short && !saving && building < (p.foodUsed > 40 ? 2 : 1) && g.canAfford(p, UNITS.house.cost)) {
       const spot = this.findHouseSpot(hall);
       if (spot) this.buildAt('house', spot, peasants);
       else this.extendStreets(12);
@@ -749,7 +773,77 @@ export class GeneralAI {
       this.extendStreets(6);
     }
     // A wall across the approach to the town, with a gate, once in the Feudal Age.
-    if (p.tier >= 2 && !this.wallPlanned && g.time > 400 && p.lumber > 260 && p.gold > 90) this.planFrontWall(hall, peasants);
+    if (p.tier >= 3 && !this.wallPlanned && g.time > 400 && p.lumber > 260 && p.gold > 90) this.planFrontWall(hall, peasants);
+  }
+
+  /**
+   * Run the people: farms to feed them, taxes and rations to keep them happy, nuclear missiles,
+   * and Heroes for hire.
+   */
+  civic(hall, peasants) {
+    const g = this.g;
+    const p = this.p;
+    if (g.time - (this.lastCivic ?? 0) < 4) return;
+    this.lastCivic = g.time;
+    const E = g.empires;
+    // Food: enough farms for the citizens we will soon have.
+    const farmsBuilding = p.buildings.filter((b) => !b.dead && b.type === 'farm' && b.underConstruction).length + (this.pendingBuild('farm') ? 1 : 0);
+    const need = Math.max(p.citizens, p.housing * 0.9) * Math.max(p.rations, 8) * ECONOMY.foodPerRation;
+    const perFarm = UNITS.farm.foodRateByAge[Math.max(1, p.tier) - 1];
+    const farmsWanted = Math.ceil((need * 1.1 - p.foodProduced) / perFarm);
+    this.hungry = p.starving || (p.foodRate < 0 && p.food < -p.foodRate * 90);
+    if (farmsWanted > 0 && farmsBuilding < Math.min(3, farmsWanted)) {
+      if (g.canAfford(p, UNITS.farm.cost)) this.build('farm', peasants, hall);
+    }
+    // Rations: tighten them while hungry, be generous with a full granary.
+    if ((p.starving || (p.food < 60 && p.foodRate < 0)) && p.rations > 4) E.setRations(p, p.rations - 1);
+    else if (p.food > 350 && p.foodRate > 0 && p.rations < 13) E.setRations(p, p.rations + 1);
+    else if (p.food < 150 && p.foodRate < 0 && p.rations > 10) E.setRations(p, p.rations - 1);
+    // Taxes: as high as the people will happily bear.
+    if (p.happiness < 45 && p.tax > 1) E.setTax(p, p.tax - 1);
+    else if (p.happinessTarget < 58 && p.tax > 2) E.setTax(p, p.tax - 1);
+    else if (p.happinessTarget > 70 && p.happiness > 62 && p.tax < 8) E.setTax(p, p.tax + 1);
+    // Nuclear missiles.
+    for (const b of p.buildings) {
+      if (b.dead || b.underConstruction || !b.def.nukes) continue;
+      if (!b.nukeReady && !b.nukeBuild && p.gold > ECONOMY.nuke.cost.gold + 900 && p.lumber > ECONOMY.nuke.cost.lumber + 300) E.startNuke(b);
+      if (b.nukeReady) {
+        const t = this.nukeTarget();
+        if (t) E.launchNuke(b, t.x, t.z);
+      }
+    }
+    // Hire a Hero when rich, or when in trouble.
+    if (g.time - (this.lastHire ?? 0) > 60 && p.tier >= 2) {
+      this.lastHire = g.time;
+      const troubled = p.underAttack && g.time - p.underAttack.time < 20;
+      const options = E.heroesForHire(p).sort((a, b) => b.hero.level - a.hero.level);
+      const hg = options.find((o) => p.gold > E.hireFee(o) + (troubled ? 150 : 700));
+      if (hg && (troubled || Math.random() < 0.35)) E.hire(p, hg);
+    }
+  }
+
+  /** Where to drop a nuke: the most valuable enemy town, never near our own buildings. */
+  nukeTarget() {
+    const g = this.g;
+    const p = this.p;
+    const R = ECONOMY.nuke.radius + 4;
+    let best = null;
+    let bestScore = 0;
+    for (const o of g.generals) {
+      if (o.defeated || !g.isEnemy(p, o)) continue;
+      for (const b of o.buildings) {
+        if (b.dead || (!b.def.tier && !b.def.revivesHeroes && !b.def.trains)) continue;
+        if (p.buildings.some((m) => !m.dead && Math.hypot(m.x - b.x, m.z - b.z) < R)) continue;
+        if (p.units.some((u) => !u.dead && Math.hypot(u.x - b.x, u.z - b.z) < R)) continue;
+        let score = 0;
+        for (const u of g.unitsNear(b.x, b.z, ECONOMY.nuke.radius)) if (!u.dead && g.isEnemy(p, u.owner)) score += u.isBuilding ? 3 : u.def.food || 1;
+        if (score > bestScore) {
+          bestScore = score;
+          best = { x: b.x, z: b.z };
+        }
+      }
+    }
+    return bestScore >= 12 ? best : null;
   }
 
   /** Wall line across the side of the town that faces the map center, gate in the middle. */
@@ -868,36 +962,45 @@ export class GeneralAI {
     if (!peasants.length) return;
     const t = g.time;
     this.reserve = null;
+    this.ageReady = false;
     const plan = [
-      { type: 'lumberyard', n: 1, at: 30 },
-      { type: 'barracks', n: 1, at: 70 },
-      { upgrade: 'keep', at: 220 },
-      { type: 'blacksmith', n: 1, at: 240 },
-      { type: 'stable', n: 1, at: 270 },
-      { type: 'scouttower', n: 1, at: 300 },
-      { type: 'barracks', n: 2, at: 420 },
-      { upgrade: 'castle', at: 540 },
-      { type: 'sanctum', n: 1, at: 580 },
-      { type: 'workshop', n: 1, at: 620 },
+      { type: 'lumberyard', n: 1, at: 25 },
+      { type: 'farm', n: 1, at: 35 },
+      { type: 'barracks', n: 1, at: 60 },
+      { age: 2, at: 150 },
+      { type: 'stable', n: 1, at: 190 },
+      { type: 'blacksmith', n: 1, at: 230 },
+      { type: 'scouttower', n: 1, at: 260 },
+      { age: 3, at: 300 },
+      { type: 'workshop', n: 1, at: 340 },
+      { type: 'barracks', n: 2, at: 380 },
+      { type: 'sanctum', n: 1, at: 420 },
+      { age: 4, at: 460 },
+      { age: 5, at: 620 },
       { type: 'scouttower', n: 2, at: 660 },
-      { upgrade: 'palace', at: 1000 },
-      { type: 'stable', n: 2, at: 1080 },
-      { type: 'barracks', n: 3, at: 1150 },
+      { age: 6, at: 800 },
+      { type: 'factory', n: 1, at: 820 },
+      { age: 7, at: 980 },
+      { type: 'missile_silo', n: 1, at: 1020 },
+      { type: 'factory', n: 2, at: 1150 },
+      { age: 8, at: 1200 },
+      { type: 'barracks', n: 3, at: 1300 },
     ];
     for (const step of plan) {
       if (t < step.at) continue;
-      if (step.upgrade) {
-        if (!hall) continue;
-        const want = step.upgrade;
-        const tierOf = { keep: 2, castle: 3, palace: 4 }[want];
-        if (p.tier >= tierOf || hall.upgrading) continue;
-        if (hall.def.upgradesTo !== want) continue;
-        if (g.missingRequirements(p, UNITS[want]).length) continue;
-        if (g.canAfford(p, UNITS[want].cost) && hall.trainQueue.length === 0) {
-          g.startUpgrade(hall);
+      if (step.age) {
+        if (!hall || p.tier >= step.age) continue;
+        if (p.buildings.some((b) => !b.dead && b.upgrading?.age)) return;
+        if (step.age > p.tier + 1) continue;
+        if (g.empires.ageMissing(p).length) continue;
+        const cost = AGES[step.age].cost;
+        this.ageReady = g.canAfford(p, cost);
+        if (this.ageReady && hall.trainQueue.length === 0 && !hall.upgrading) {
+          g.empires.startAgeUp(hall);
+          this.ageReady = false;
           return;
         }
-        this.reserve = UNITS[want].cost; // save up for the next age
+        this.reserve = cost; // save up for the next age
         return;
       }
       const have = p.buildings.filter((b) => !b.dead && (b.type === step.type || (step.type === 'scouttower' && b.type === 'guardtower'))).length + (this.pendingBuild(step.type) ? 1 : 0);
@@ -1000,30 +1103,34 @@ export class GeneralAI {
     const counts = {};
     for (const u of army) counts[u.type] = (counts[u.type] || 0) + 1;
     const unlocked = (t) => !g.missingRequirements(p, UNITS[t]).length;
-    // Best unlocked units first; pick among the top two for variety.
-    const choose = (list) => {
-      const ok = list.filter(unlocked);
+    // The newest units this building offers (current and previous age), best first;
+    // pick among the top two for variety, preferring whichever we have fewer of.
+    const choose = (b) => {
+      const ok = (b.def.trains ?? [])
+        .filter((t) => t !== 'peasant' && unlocked(t) && (UNITS[t].age ?? 1) >= p.tier - 1)
+        .sort((a, c) => (UNITS[c].age ?? 1) - (UNITS[a].age ?? 1) || UNITS[c].cost.gold - UNITS[a].cost.gold);
       if (!ok.length) return null;
       const top = ok.slice(0, 2);
-      // Prefer whichever we have fewer of.
-      top.sort((a, b) => (counts[a] || 0) - (counts[b] || 0));
+      top.sort((a, c) => (counts[a] || 0) - (counts[c] || 0));
       return top[0];
     };
+    // Feed the people before the army (unless the town is under attack).
+    const holdTroops = this.hungry && g.time > this.defendUntil && food >= 8;
     for (const b of p.buildings) {
       if (b.dead || b.underConstruction || b.trainQueue.length >= 2 || b.upgrading) continue;
       let pick = null;
-      if (b.type === 'barracks') pick = choose(['champion', 'crossbowman', 'footman', 'archer', 'spearman', 'militia', 'hunter']);
-      else if (b.type === 'stable') pick = choose(['royal_knight', 'knight', 'scout_rider']);
+      if (holdTroops && b.def.trains) continue;
+      if (b.type === 'barracks' || b.type === 'stable' || b.type === 'factory') pick = choose(b);
       else if (b.type === 'sanctum') {
-        pick = choose(['battlemage', 'priest', 'sorceress']);
+        pick = choose(b);
         if (pick && (counts[pick] || 0) >= 1 + Math.floor(food / 14)) pick = null;
       } else if (b.type === 'workshop') {
-        pick = choose(['trebuchet', 'catapult']);
+        pick = choose(b);
         if (pick && (counts[pick] || 0) >= 2) pick = null;
       } else if (b.type === 'blacksmith' && !b.researching) {
         const upg = p.upgrades.weapons <= p.upgrades.armor ? 'weapons' : 'armor';
         const lvl = p.upgrades[upg];
-        if (lvl < 3 && food >= 10 && p.tier >= UPGRADES[upg].tier[lvl] && g.canAfford(p, UPGRADES[upg].cost[lvl]) && p.lumber > 200) g.startResearch(b, upg);
+        if (lvl < UPGRADES[upg].levels && food >= 10 && p.tier >= UPGRADES[upg].tier[lvl] && g.canAfford(p, UPGRADES[upg].cost[lvl]) && p.lumber > 200) g.startResearch(b, upg);
       } else if (b.def.dropOff === 'lumber' && !b.researching) {
         const lvl = p.upgrades.lumber;
         if (lvl < 2 && p.tier >= UPGRADES.lumber.tier[lvl] && p.gold > UPGRADES.lumber.cost[lvl].gold + 250) g.startResearch(b, 'lumber');

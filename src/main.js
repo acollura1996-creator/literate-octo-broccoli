@@ -381,7 +381,7 @@ function createGame() {
   game.message(
     settings.mode === 'hero'
       ? 'Hero path: slay creeps to gain levels, buy items and hire mercenaries. Press F1 to select your Hero.'
-      : 'Empire path: your Peasants are mining gold. Build Farms and Barracks with B, then train an army.',
+      : 'Empire path: you begin in the Stone Age. Build Houses along roads for citizens who pay taxes, Farms to feed them, and advance through the ages at your town center.',
     '#d8ccaa',
   );
   $('screen-loading').classList.add('hidden');

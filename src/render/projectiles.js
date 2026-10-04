@@ -1,7 +1,14 @@
-// Projectiles: arrows, magic bolts, thrown axes, catapult rocks, fireballs
-// and Storm Bolt hammers. Homing unless they are lobbed at a point.
+// Projectiles: arrows, magic bolts, thrown axes, rocks and fireballs, Storm Bolt hammers, and the
+// weapons of later ages: bullets, grenades, cannonballs, shells, rockets, plasma and instant lasers.
+// Homing unless they are lobbed at a point.
 import * as THREE from 'three';
 import { geo, mat } from './assets.js';
+
+/**
+ * Muzzle offsets in model space ([x, y, z], model facing +Z) for units whose shots should leave
+ * the barrel rather than the unit's chest.
+ */
+export const MUZZLE = {};
 
 function makeMesh(kind, color) {
   const g = new THREE.Group();
@@ -48,6 +55,59 @@ function makeMesh(kind, color) {
       g.userData.spin = spin;
       break;
     }
+    case 'stone': {
+      const m = new THREE.Mesh(geo.dodeca(0.13, 0), mat(0x8a8276, { noFog: true }));
+      g.add(m);
+      g.userData.spin = m;
+      break;
+    }
+    case 'bullet': {
+      g.add(new THREE.Mesh(geo.box(0.035, 0.035, 0.6), mat(0xffe9a0, { emissive: 0xffc860, emissiveIntensity: 1.4, noFog: true })));
+      break;
+    }
+    case 'grenade': {
+      const m = new THREE.Mesh(geo.sphere(0.11, 8, 6), mat(0x1c1c1c, { noFog: true }));
+      const spark = new THREE.Mesh(geo.sphere(0.05, 6, 4), mat(0xffb347, { emissive: 0xff8a00, emissiveIntensity: 1.5, noFog: true }));
+      spark.position.y = 0.12;
+      m.add(spark);
+      g.add(m);
+      g.userData.spin = m;
+      break;
+    }
+    case 'cannonball': {
+      g.add(new THREE.Mesh(geo.sphere(0.17, 10, 8), mat(0x26241f, { noFog: true })));
+      break;
+    }
+    case 'shell': {
+      const m = new THREE.Mesh(geo.box(0.09, 0.09, 0.32), mat(0x5a5040, { noFog: true }));
+      const tail = new THREE.Mesh(geo.box(0.07, 0.07, 0.5), mat(0xffd27a, { transparent: true, opacity: 0.6, emissive: 0xffa040, emissiveIntensity: 1.2, noFog: true }));
+      tail.position.z = -0.35;
+      g.add(m, tail);
+      break;
+    }
+    case 'rocket': {
+      const body = new THREE.Mesh(geo.cyl(0.06, 0.06, 0.45, 6), mat(0x6c7466, { noFog: true }));
+      body.rotation.x = Math.PI / 2;
+      const nose = new THREE.Mesh(geo.cone(0.06, 0.14, 6), mat(0x9a3a2a, { noFog: true }));
+      nose.rotation.x = Math.PI / 2;
+      nose.position.z = 0.29;
+      const flame = new THREE.Mesh(geo.cone(0.07, 0.3, 6), mat(0xffb347, { transparent: true, opacity: 0.85, emissive: 0xff7a00, emissiveIntensity: 1.6, noFog: true }));
+      flame.rotation.x = -Math.PI / 2;
+      flame.position.z = -0.35;
+      g.add(body, nose, flame);
+      g.userData.trail = true;
+      break;
+    }
+    case 'plasma': {
+      const c = color ?? 0x6af7ff;
+      g.add(new THREE.Mesh(geo.sphere(0.18, 8, 6), mat(0xffffff, { emissive: c, emissiveIntensity: 1.6, noFog: true })));
+      g.add(new THREE.Mesh(geo.sphere(0.34, 8, 6), mat(c, { transparent: true, opacity: 0.45, emissive: c, noFog: true })));
+      const tail = new THREE.Mesh(geo.cone(0.2, 0.9, 8), mat(c, { transparent: true, opacity: 0.35, emissive: c, noFog: true }));
+      tail.rotation.x = -Math.PI / 2;
+      tail.position.z = -0.5;
+      g.add(tail);
+      break;
+    }
     default: {
       // Magic bolt
       const c = color ?? 0x9fd8ff;
@@ -69,12 +129,35 @@ export class Projectiles {
     return u.view?.height ?? 1;
   }
 
+  /** World position of a unit's muzzle (model-space MUZZLE offsets, or a sensible default). */
+  muzzleOf(from) {
+    const g = this.game;
+    const m = MUZZLE[from.modelId];
+    const ground = g.terrain.heightAt(from.x, from.z);
+    if (m) {
+      const sc = from.view?.root?.scale?.x ?? 1;
+      const f = from.view?.root?.rotation?.y ?? from.facing;
+      const c = Math.cos(f);
+      const sn = Math.sin(f);
+      return { x: from.x + (m[0] * c + m[2] * sn) * sc, y: ground + m[1] * sc, z: from.z + (-m[0] * sn + m[2] * c) * sc };
+    }
+    return {
+      x: from.x + Math.sin(from.facing) * from.radius * 0.6,
+      y: ground + this.unitHeight(from) * (from.isBuilding ? 0.85 : 0.6),
+      z: from.z + Math.cos(from.facing) * from.radius * 0.6,
+    };
+  }
+
   spawn(o) {
     const g = this.game;
     const from = o.from;
-    const sx = from.x + Math.sin(from.facing) * from.radius * 0.6;
-    const sz = from.z + Math.cos(from.facing) * from.radius * 0.6;
-    const sy = g.terrain.heightAt(from.x, from.z) + this.unitHeight(from) * (from.isBuilding ? 0.85 : 0.6);
+    const { x: sx, y: sy, z: sz } = this.muzzleOf(from);
+    if (from.def.firearm || from.projectile?.kind === 'bullet' || from.projectile?.kind === 'laser') {
+      const c = o.kind === 'laser' || o.kind === 'plasma' ? o.color ?? 0x6af7ff : 0xffd27a;
+      g.hooks.fx?.muzzle(sx, sy, sz, c, o.kind === 'shell' || o.kind === 'cannonball' ? 0.45 : 0.22);
+      if (o.kind === 'shell' || o.kind === 'cannonball') g.hooks.fx?.puff(sx, sy, sz, 0xcfc8bc, 0.4, 1.0);
+    }
+    if (o.kind === 'laser') return this.beam(o, sx, sy, sz);
     const mesh = makeMesh(o.kind, o.color);
     mesh.position.set(sx, sy, sz);
     this.scene.add(mesh);
@@ -97,10 +180,51 @@ export class Projectiles {
     return p;
   }
 
+  /** Lasers hit instantly: draw a beam that fades out. */
+  beam(o, sx, sy, sz) {
+    const g = this.game;
+    const t = o.target;
+    const tx = t.x;
+    const tz = t.z;
+    const ty = g.terrain.heightAt(tx, tz) + this.unitHeight(t) * 0.5;
+    const len = Math.hypot(tx - sx, ty - sy, tz - sz);
+    const c = o.color ?? 0x5ff2ff;
+    const beamMat = (color, opacity) =>
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending });
+    const m = beamMat(c, 0.9);
+    const core = beamMat(0xffffff, 0.95);
+    const mesh = new THREE.Group();
+    const outer = new THREE.Mesh(geo.box(0.09, 0.09, 1), m);
+    const inner = new THREE.Mesh(geo.box(0.035, 0.035, 1), core);
+    mesh.add(outer, inner);
+    mesh.scale.set(1, 1, len);
+    mesh.position.set((sx + tx) / 2, (sy + ty) / 2, (sz + tz) / 2);
+    mesh.lookAt(tx, ty, tz);
+    mesh.visible = g.fog.isVisible(sx, sz) || g.fog.isVisible(tx, tz);
+    this.scene.add(mesh);
+    try {
+      o.onHit?.(t && !t.dead ? t : null, { x: tx, z: tz });
+    } catch (e) {
+      console.error(e);
+    }
+    this.list.push({ beam: true, mesh, t: 0, life: 0.14, m, core });
+  }
+
   update(dt) {
     const g = this.game;
     const keep = [];
     for (const p of this.list) {
+      if (p.beam) {
+        p.t += dt;
+        p.m.opacity = 0.9 * (1 - p.t / p.life);
+        p.core.opacity = 0.95 * (1 - p.t / p.life);
+        if (p.t >= p.life) {
+          this.scene.remove(p.mesh);
+          p.m.dispose();
+          p.core.dispose();
+        } else keep.push(p);
+        continue;
+      }
       let done = false;
       const prev = { x: p.x, y: p.y, z: p.z };
       if (p.arc) {
@@ -142,6 +266,13 @@ export class Projectiles {
       const vz = p.z - prev.z;
       if (vx * vx + vy * vy + vz * vz > 1e-8) p.mesh.lookAt(p.x + vx, p.y + vy, p.z + vz);
       if (p.mesh.userData.spin) p.mesh.userData.spin.rotation.x += dt * 18;
+      if (p.mesh.userData.trail) {
+        p.trailT = (p.trailT ?? 0) + dt;
+        if (p.trailT > 0.04) {
+          p.trailT = 0;
+          g.hooks.fx?.puff(prev.x, prev.y, prev.z, 0xc8c2b8, 0.16, 0.6);
+        }
+      }
       p.mesh.visible = g.fog.isVisible(p.x, p.z);
       if (done) {
         this.scene.remove(p.mesh);

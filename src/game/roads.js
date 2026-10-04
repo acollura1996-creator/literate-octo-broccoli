@@ -17,6 +17,7 @@ export class Roads {
     this.owner = new Int8Array(MAP_SIZE * MAP_SIZE).fill(-1); // general index, -1 = no road
     this.connected = new Uint8Array(MAP_SIZE * MAP_SIZE);
     this.count = 0;
+    this.counts = new Int32Array(16); // road tiles per general index
     this.dirty = true;
     this.mesh = null;
     this.material = null;
@@ -32,6 +33,11 @@ export class Roads {
 
   isRoadAt(x, z) {
     return this.isRoad(Math.floor(x), Math.floor(z));
+  }
+
+  /** Number of road tiles a general owns. */
+  countOf(p) {
+    return this.counts[p.index] ?? 0;
   }
 
   ownerAt(cx, cz) {
@@ -96,6 +102,7 @@ export class Roads {
       this.owner[this.idx(cx, cz)] = p.index;
       g.grid.road[this.idx(cx, cz)] = 1;
       this.count++;
+      this.counts[p.index]++;
     }
     this.dirty = true;
     this.recompute(p);
@@ -110,6 +117,7 @@ export class Roads {
         if (!this.isRoad(x, z)) continue;
         const i = this.idx(x, z);
         changed = this.game.generals[this.owner[i]];
+        this.counts[this.owner[i]]--;
         this.owner[i] = -1;
         this.game.grid.road[i] = 0;
         this.count--;
@@ -223,9 +231,12 @@ export class Roads {
 
   colorFor(p) {
     const tier = p?.tier ?? 1;
-    if (tier <= 1) return [0.55, 0.42, 0.27]; // packed dirt
-    if (tier === 2) return [0.62, 0.58, 0.52]; // cobbles
-    return [0.78, 0.75, 0.68]; // dressed paving
+    if (tier <= 2) return [0.55, 0.42, 0.27]; // packed dirt
+    if (tier <= 4) return [0.62, 0.58, 0.52]; // cobbles
+    if (tier === 5) return [0.78, 0.75, 0.68]; // dressed paving
+    if (tier === 6) return [0.5, 0.46, 0.44]; // macadam
+    if (tier === 7) return [0.3, 0.31, 0.33]; // asphalt
+    return [0.82, 0.9, 0.95]; // smart paving
   }
 
   /** Rebuild the road mesh when roads or ages change. */

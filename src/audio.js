@@ -995,6 +995,55 @@ function sRoar(v, t, out) {
   noiseNode(v, t, stop, biquad(v, 'bandpass', 700, 0.8, gainNode(v, 0.9, drive)));
 }
 
+function sGunshot(v, t, out) {
+  const p = rand(0.85, 1.15);
+  noiseBurst(v, t, { type: 'highpass', freq: 900 * p, Q: 0.7, a: 0.0005, peak: 0.9, d: 0.07, dest: out });
+  noiseBurst(v, t, { type: 'lowpass', freq: 1400 * p, freqTo: 200, sweep: 0.12, Q: 0.7, a: 0.001, peak: 0.6, d: 0.18, dest: out });
+  thump(v, t, 160 * p, 60, 0.5, 0.06, out);
+}
+
+function sCannon(v, t, out) {
+  wet(v, 0.25);
+  const p = rand(0.85, 1.05);
+  thump(v, t, 90 * p, 28, 1.0, 0.45, out);
+  noiseBurst(v, t, { type: 'lowpass', freq: 1200 * p, freqTo: 80, sweep: 0.6, Q: 0.7, a: 0.002, peak: 0.95, d: 0.7, dest: out });
+  noiseBurst(v, t, { type: 'bandpass', freq: 2600, Q: 0.9, a: 0.0005, peak: 0.4, d: 0.06, dest: out });
+}
+
+function sLaser(v, t, out) {
+  const p = rand(0.9, 1.1);
+  const g = gainNode(v, 0, out);
+  perc(g.gain, t, 0.002, 0.28, 0.2);
+  const o = oscNode(v, 'sawtooth', 1900 * p, t, t + 0.22, biquad(v, 'lowpass', 4200, 2, g));
+  sweep(o.frequency, t, 1900 * p, 260 * p, 0.2);
+  const o2 = oscNode(v, 'square', 950 * p, t, t + 0.18, gainNode(v, 0.12, g));
+  sweep(o2.frequency, t, 950 * p, 180 * p, 0.17);
+}
+
+function sRocket(v, t, out) {
+  const p = rand(0.9, 1.1);
+  noiseBurst(v, t, { type: 'bandpass', freq: 700 * p, freqTo: 2400 * p, sweep: 0.5, Q: 1.2, a: 0.02, peak: 0.7, d: 0.6, dest: out });
+  thump(v, t, 120 * p, 50, 0.5, 0.12, out);
+}
+
+function sNukeSiren(v, t, out) {
+  const g = gainNode(v, 0, out);
+  perc(g.gain, t, 0.15, 0.35, 2.6);
+  const o = oscNode(v, 'sawtooth', 440, t, t + 2.8, biquad(v, 'lowpass', 1800, 1, g));
+  for (let i = 0; i < 3; i++) {
+    sweep(o.frequency, t + i * 0.9, 440, 880, 0.45);
+    sweep(o.frequency, t + i * 0.9 + 0.45, 880, 440, 0.45);
+  }
+}
+
+function sNukeBlast(v, t, out) {
+  wet(v, 0.5);
+  thump(v, t, 70, 18, 1.0, 1.6, out);
+  noiseBurst(v, t, { type: 'lowpass', freq: 2000, freqTo: 60, sweep: 2.5, Q: 0.6, a: 0.005, peak: 1.0, d: 3.0, dest: out });
+  noiseBurst(v, t + 0.05, { type: 'bandpass', freq: 300, Q: 0.5, a: 0.3, peak: 0.7, d: 2.6, dest: out });
+  crackle(v, t + 0.2, 2.2, 6, 0.3, 1800, out);
+}
+
 /**
  * Registry. prio: higher = more important (may steal lower voices when the
  * voice pool is full). max / gap override the per-name throttle. gain scales
@@ -1031,6 +1080,12 @@ const SFX = {
   defeat: { fn: sDefeat, prio: 4, max: 1, gap: 2 },
   bladestorm: { fn: sBladestorm, prio: 1, max: 2, gap: 0.3 },
   roar: { fn: sRoar, prio: 3, max: 1, gap: 0.8, gain: 0.85 },
+  gunshot: { fn: sGunshot, prio: 0, max: 4, gap: 0.03, gain: 0.7 },
+  cannon: { fn: sCannon, prio: 1, max: 3, gain: 0.9 },
+  laser: { fn: sLaser, prio: 0, max: 4, gap: 0.03, gain: 0.6 },
+  rocket: { fn: sRocket, prio: 1, max: 3, gain: 0.8 },
+  nukeSiren: { fn: sNukeSiren, prio: 4, max: 1, gap: 2 },
+  nukeBlast: { fn: sNukeBlast, prio: 4, max: 1, gap: 1 },
 };
 
 /**

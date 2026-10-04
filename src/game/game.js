@@ -1,13 +1,15 @@
 // The Game: owns the world state and runs the simulation.
 import * as THREE from 'three';
 import { Unit } from './unit.js';
-import { UNITS, ATTACK_TABLE, UPGRADES, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES } from '../data/units.js';
+import { UNITS, ATTACK_TABLE, UPGRADES, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES, AGES } from '../data/units.js';
 import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.js';
 import { ITEMS } from '../data/items.js';
 import { ABILITIES } from './abilities.js';
 import { updateUnit, stopMoving, finishOrder } from './behavior.js';
 import { PathGrid, BLOCK_BUILDING, BLOCK_GATE } from '../world/pathgrid.js';
 import { Roads } from './roads.js';
+import { Empires } from './empire.js';
+import { GameEvents } from './events.js';
 import { Terrain } from '../world/terrain.js';
 import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, CITY_RADIUS } from '../world/layout.js';
 import { Fog } from './fog.js';
@@ -65,6 +67,8 @@ export class Game {
     this.terrain = new Terrain(this.layout, this.grid);
     this.fog = new Fog(this);
     this.roads = new Roads(this);
+    this.empires = new Empires(this);
+    this.events = new GameEvents(this);
 
     this.createPlayers();
 
@@ -173,6 +177,7 @@ export class Game {
         handicap: isHuman ? 1 : handicap,
         damageMult: isHuman ? 1 : handicap,
       });
+      p.homeTeam = p.team;
       this.generals.push(p);
     }
     this.human = this.generals[0];
@@ -213,6 +218,8 @@ export class Game {
     if (p.mode === 'empire') {
       p.gold = 500;
       p.lumber = 150;
+      p.tier = 1;
+      this.empires.init(p);
       const th = this.spawnUnit('townhall', p, hx, hz);
       this.layStartingRoads(p, th);
       const mx = base.mine[0];
@@ -457,7 +464,7 @@ export class Game {
     if (opts.spell && t.isBuilding && attackType === 'spell' && !opts.siege) amount *= 0.5;
     let mult = ATTACK_TABLE[attackType]?.[t.def.armorType] ?? 1;
     let dmg = amount * mult;
-    if (!opts.spell) dmg *= this.armorReduction(t.armor);
+    if (!opts.spell && !opts.pure) dmg *= this.armorReduction(t.armor);
     if (src?.isIllusion) dmg = 0;
     if (t.isIllusion) dmg *= 2;
     if (t.underConstruction) dmg *= 1.0;
@@ -559,17 +566,18 @@ export class Game {
         if (e !== t) this.dealDamage(u, e, dmg * u.def.cleave, u.def.attackType);
       }
     }
-    if (!u.def.projectile) {
+    const proj = u.projectile;
+    if (!proj) {
       const heavy = u.def.radius >= 0.65 || u.def.boss;
       this.sound(heavy ? 'heavyHit' : 'swordHit', t.x, t.z, 0.45);
-    } else if (u.def.projectile.kind === 'arrow' || u.def.projectile.kind === 'axe') {
+    } else if (proj.kind === 'arrow' || proj.kind === 'axe' || proj.kind === 'bullet') {
       this.sound('arrowHit', t.x, t.z, 0.3);
     }
-    this.hooks.fx?.hit(t, u.def.projectile ? u.def.projectile.color ?? 0xffffff : 0xffeecc);
+    this.hooks.fx?.hit(t, proj ? proj.color ?? (proj.kind === 'bullet' ? 0xffe28a : 0xffffff) : 0xffeecc);
   }
 
-  splashHit(u, x, z, radius) {
-    const dmg = this.rollDamage(u);
+  splashHit(u, x, z, radius, scale = 1) {
+    const dmg = this.rollDamage(u) * scale;
     for (const e of this.enemiesInRadius(u.owner, x, z, radius)) {
       const d = Math.hypot(e.x - x, e.z - z) - e.radius;
       const f = d < radius * 0.4 ? 1 : 0.5;
@@ -640,6 +648,7 @@ export class Game {
       if (this.corpses.length > 200) this.corpses.shift();
     }
     if (u.camp) this.creepMgr.onCreepDied(u);
+    u.onDeath?.(killer);
     if (u.isHero && owner.general && !u.isIllusion) {
       u.reviveAt = this.time + 12 + 4 * u.level;
       if (owner.isHuman) {
@@ -803,9 +812,8 @@ export class Game {
   }
 
   hasRequirement(p, req) {
-    if (req === 'keep' || req === 'age2') return p.tier >= 2;
-    if (req === 'castle' || req === 'age3') return p.tier >= 3;
-    if (req === 'age4') return p.tier >= 4;
+    const age = /^age(\d)$/.exec(req);
+    if (age) return p.tier >= Number(age[1]);
     return p.buildings.some((b) => !b.dead && !b.underConstruction && (b.type === req || (req === 'scouttower' && b.type === 'guardtower')));
   }
   requirementName(req) {
@@ -817,22 +825,27 @@ export class Game {
     return (def.requires || []).filter((r) => !this.hasRequirement(p, r));
   }
 
+  /** Ages are researched at the town center and never lost; hero generals stay at 0. */
   updateTier(p) {
-    let t = 0;
-    for (const b of p.buildings) {
-      if (b.dead || b.underConstruction) continue;
-      if (b.def.tier) t = Math.max(t, b.def.tier);
-    }
-    p.tier = t;
+    if (p.mode === 'empire') p.tier = Math.max(p.tier, 1);
   }
 
+  /** Supply (army food) and housing for citizens. Houses only count while connected by road. */
   computeFood(p) {
     let cap = 0;
     let used = 0;
+    let housing = 0;
     for (const b of p.buildings) {
       if (b.dead) continue;
-      if (!b.underConstruction && b.def.foodProvided) cap += b.def.foodProvided;
-      if (!b.underConstruction && b.def.foodByAge && b.roadConnected) cap += b.def.foodByAge[b.ageLevel - 1];
+      if (!b.underConstruction) {
+        if (b.def.foodProvided) cap += b.def.foodProvided;
+        if (b.def.housing) housing += b.def.housing;
+        if (b.def.housingByAge && b.roadConnected) {
+          const h = b.def.housingByAge[b.ageLevel - 1];
+          cap += h;
+          housing += h;
+        }
+      }
       for (const q of b.trainQueue) used += UNITS[q.type].food;
     }
     for (const u of p.units) {
@@ -840,8 +853,9 @@ export class Game {
       used += u.def.food;
     }
     for (const r of p.pendingRevives ?? []) used += r;
-    p.foodCap = Math.min(p.mode === 'empire' ? 150 : 100, cap);
+    p.foodCap = Math.min(p.mode === 'empire' ? 200 : 100, cap);
     p.foodUsed = used;
+    p.housing = housing;
   }
 
   /**
@@ -953,7 +967,7 @@ export class Game {
     this.updateTier(b.owner);
     if (b.def.tier || b.def.needsRoad) this.roads.recompute(b.owner);
     if (b.def.needsRoad && !b.roadConnected && b.owner.isHuman) {
-      this.message('This house is not connected to your Town Hall by road, so it adds no population.', '#ffb070');
+      this.message('This house is not connected to your town center by road, so nobody can move in.', '#ffb070');
     }
     this.hooks.onUnitChanged?.(b);
     if (b.owner.isHuman) {
@@ -979,7 +993,7 @@ export class Game {
     this.computeFood(p);
     if (p.foodUsed + def.food > p.foodCap) {
       if (p.isHuman) {
-        this.message(p.foodCap >= 100 ? 'Food limit reached.' : 'Not enough food. Build more Farms.', '#ff8080');
+        this.message(p.foodCap >= (p.mode === 'empire' ? 200 : 100) ? 'Army limit reached.' : p.mode === 'empire' ? 'Not enough housing. Build more Houses along your roads.' : 'Not enough food.', '#ff8080');
         this.sound('error');
       }
       return false;
@@ -1049,11 +1063,18 @@ export class Game {
 
   cancelUpgrade(b) {
     if (!b.upgrading) return;
-    this.refund(b.owner, UNITS[b.upgrading.to].cost);
+    this.refund(b.owner, b.upgrading.age ? AGES[b.upgrading.age].cost : UNITS[b.upgrading.to].cost);
     b.upgrading = null;
   }
 
   finishUpgrade(b) {
+    if (b.upgrading.age) {
+      const p = b.owner;
+      p.tier = Math.max(p.tier, b.upgrading.age);
+      b.upgrading = null;
+      this.onAgeAdvanced(p);
+      return;
+    }
     const to = b.upgrading.to;
     b.upgrading = null;
     const ratio = b.hp / b.maxHp;
@@ -1076,7 +1097,7 @@ export class Game {
     const age = AGE_NAMES[p.tier];
     if (p.isHuman) {
       this.sound('levelUp');
-      this.message(`Your empire has advanced to the ${age}! Your houses, walls and gates are being rebuilt.`, '#ffe680');
+      this.message(`Your empire has advanced to the ${age}! New units are available, and your town is being rebuilt in the style of the new age.`, '#ffe680');
     } else {
       this.notify(p, `${p.name} has advanced to the ${age}.`);
     }
@@ -1085,6 +1106,8 @@ export class Game {
       this.later(0.5 + Math.random() * 5, () => this.upgradeStructureAge(b, p.tier));
     }
     this.roads.dirty = true;
+    p.ai?.onAgeAdvanced?.();
+    this.hooks.onAgeAdvanced?.(p);
   }
 
   upgradeStructureAge(b, tier) {
@@ -1094,7 +1117,7 @@ export class Game {
     b.hp = b.maxHp * ratio;
     this.hooks.onUnitChanged?.(b, true);
     this.hooks.fx?.burst(b.x, 0.8, b.z, 0xd8c8a0, 10, 2.5, 0.07, 0.6);
-    if (b.def.needsRoad) this.computeFood(b.owner);
+    this.computeFood(b.owner);
   }
 
   startResearch(b, upg) {
@@ -1104,7 +1127,7 @@ export class Game {
     if (b.researching || b.underConstruction || lvl >= (U.levels ?? 3)) return false;
     if (p.researchingUpg?.[upg]) return false;
     if (p.tier < U.tier[lvl]) {
-      if (p.isHuman) this.message(`Requires ${['', 'Town Hall', 'Keep', 'Castle'][U.tier[lvl]]}.`, '#ff8080');
+      if (p.isHuman) this.message(`Requires the ${AGE_NAMES[U.tier[lvl]]}.`, '#ff8080');
       return false;
     }
     if (!this.spend(p, U.cost[lvl])) return false;
@@ -1420,18 +1443,60 @@ export class Game {
       const anyUnit = p.units.some((u) => !u.dead && !u.isIllusion && !u.summoned);
       let out = false;
       if (p.mode === 'hero') out = !hasBuilding && !heroAlive;
-      else out = !hasBuilding && !anyUnit;
+      else {
+        out = !hasBuilding && !anyUnit;
+        // An empire falls 20 seconds after losing its last town center unless it starts another.
+        const hall = p.buildings.some((b) => !b.dead && b.def.tier);
+        if (hall) p.hallLostAt = null;
+        else {
+          if (p.hallLostAt == null) {
+            p.hallLostAt = this.time;
+            if (p.isHuman) {
+              this.message('Your last town center has fallen! Start building a new one within 20 seconds or your empire will collapse.', '#ff5a5a');
+              this.sound('warning');
+            } else this.notify(p, `${p.name} has lost their last town center!`);
+          }
+          if (this.time - p.hallLostAt >= 20) out = true;
+        }
+      }
       if (out) {
         p.defeated = true;
+        if (p.hiredBy) this.empires.endContract(p);
         for (const u of [...p.units]) if (!u.dead) this.kill(u, null);
-        if (p.isHuman) this.endGame(false, 'Your forces have been destroyed. Kalenden’s land will never be yours.');
+        if (p.mode === 'empire') for (const b of [...p.buildings]) if (!b.dead) this.kill(b, null);
+        if (p.isHuman) this.endGame(false, p.mode === 'empire' ? 'Your empire has collapsed. Kalenden’s land will never be yours.' : 'Your forces have been destroyed. Kalenden’s land will never be yours.');
         else this.message(`${p.name} has been defeated!`, this.isAlliedToHuman(p) ? '#ff8a7a' : '#ffd700');
       }
     }
-    const enemies = this.generals.filter((p) => p.team !== this.human.team);
+    const home = (p) => p.homeTeam ?? p.team;
+    const enemies = this.generals.filter((p) => home(p) !== home(this.human));
     if (!this.over && enemies.length && enemies.every((p) => p.defeated) && !this.human.defeated) {
       this.endGame(true, 'All rival generals have fallen. The land of Kalenden bows before you!');
     }
+  }
+
+  /** Change a general's team (Heroes hired by an empire fight on its side). */
+  setTeam(p, team) {
+    if (p.team === team) return;
+    p.team = team;
+    for (const b of p.buildings) {
+      if (b.dead || !b.def.gate) continue;
+      const fp = b.def.footprint;
+      for (let zz = b.cell.z; zz < b.cell.z + fp; zz++) {
+        for (let xx = b.cell.x; xx < b.cell.x + fp; xx++) if (this.grid.inBounds(xx, zz)) this.grid.gateTeam[zz * MAP_SIZE + xx] = team;
+      }
+    }
+    // Nobody keeps fighting a new friend.
+    for (const u of this.units) {
+      if (u.dead) continue;
+      const t = u.order.target;
+      if (t?.owner && (t.owner === p || u.owner === p) && !this.isEnemy(u.owner, t.owner) && (u.order.type === 'attack')) {
+        u.order = { type: 'idle' };
+        u.path = null;
+      }
+      if (u.windupTarget?.owner && !this.isEnemy(u.owner, u.windupTarget.owner)) u.windupTarget = null;
+    }
+    this.hooks.onTeamsChanged?.();
   }
 
   // ------------------------------------------------------------- feedback
@@ -1504,6 +1569,8 @@ export class Game {
     }
     this.creepMgr.update(dt);
     this.legionMgr.update(dt);
+    this.empires.update(dt);
+    this.events.update(dt);
     for (const p of this.generals) if (p.ai && !p.defeated) p.ai.update(dt);
     this.fog.update();
 

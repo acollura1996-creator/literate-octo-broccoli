@@ -1,5 +1,6 @@
 // Builds the 4x3 command card for the current selection.
-import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES } from '../data/units.js';
+import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES, AGES, ECONOMY } from '../data/units.js';
+import { moodOf } from '../game/empire.js';
 import { ITEMS, SHOP_STOCK } from '../data/items.js';
 import { ABILITIES, requiredHeroLevel } from '../game/abilities.js';
 
@@ -71,8 +72,8 @@ export function getCommands(game, input) {
   if ((input.cardMenu === 'build' || input.cardMenu === 'build2') && u.def.worker) {
     const order = input.cardMenu === 'build' ? BUILD_MENUS.basic : BUILD_MENUS.advanced;
     const keys = {
-      house: 'H', road: 'R', wall: 'W', gate: 'G', lumberyard: 'L', barracks: 'B', scouttower: 'T', townhall: 'N',
-      blacksmith: 'S', stable: 'E', sanctum: 'A', workshop: 'K',
+      house: 'H', road: 'R', farm: 'F', wall: 'W', gate: 'G', lumberyard: 'L', barracks: 'B', scouttower: 'T', townhall: 'N',
+      blacksmith: 'S', stable: 'E', sanctum: 'A', workshop: 'K', factory: 'Y', missile_silo: 'M',
     };
     order.forEach((type, i) => {
       const pos = { x: i % 4, y: Math.floor(i / 4) };
@@ -96,12 +97,34 @@ export function getCommands(game, input) {
         model: d.ageModels?.[Math.max(1, p.tier) - 1] ?? d.model,
         building: true,
         name: `Build ${d.ageNames?.[Math.max(1, p.tier) - 1] ?? d.name}`,
-        tooltip: `${d.description}${line ? '<br><span class="dim">Click and drag to build a line of wall.</span>' : ''}${d.foodByAge ? `<br><span class="dim">Population: ${d.foodByAge.join(' / ')} by age.</span>` : ''}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
+        tooltip: `${d.description}${line ? '<br><span class="dim">Click and drag to build a line of wall.</span>' : ''}${d.housingByAge ? `<br><span class="dim">Shelters ${d.housingByAge[Math.max(1, p.tier) - 1]} citizens in the ${AGE_NAMES[Math.max(1, p.tier)]} (more in later ages).</span>` : ''}${d.foodRateByAge ? `<br><span class="dim">Grows ${Math.round(d.foodRateByAge[Math.max(1, p.tier) - 1] * 60)} food per minute in the ${AGE_NAMES[Math.max(1, p.tier)]}.</span>` : ''}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
         cost: `${costLine(d.cost)}${line ? ' <span class="dim">per piece</span>' : ''}`,
         disabled: missing.length > 0 || !game.canAfford(p, d.cost),
         onClick: () => (line ? input.beginLine('wall') : input.beginPlacement(type)),
       });
     });
+    B.push({ id: 'cancel', x: 3, y: 2, hotkey: 'Escape', keyLabel: 'Esc', icon: '✖', name: 'Cancel', onClick: () => (input.cardMenu = null) });
+    return B;
+  }
+  if (input.cardMenu === 'hire' && u.def.tier && u.owner === p) {
+    const list = game.empires.heroesForHire(p);
+    list.slice(0, 8).forEach((hg, i) => {
+      const h = hg.hero;
+      const fee = game.empires.hireFee(hg);
+      B.push({
+        id: `hirehero:${hg.index}`, x: i % 4, y: Math.floor(i / 4), hotkey: GRID_KEYS[Math.floor(i / 4)][i % 4],
+        model: h.def.model, name: `Hire ${hg.name}'s ${h.def.name} (level ${h.level})`,
+        tooltip: `The Hero fights on your side for ${ECONOMY.hireTime / 60} minutes: your enemies become theirs.${hg.isHuman ? '' : ''}${hg.team === p.team ? '' : '<br><span class="dim">Currently not your ally.</span>'}`,
+        cost: costLine({ gold: fee }),
+        disabled: p.gold < fee,
+        onClick: () => {
+          if (game.empires.hire(p, hg)) input.cardMenu = null;
+        },
+      });
+    });
+    if (!list.length) {
+      B.push({ id: 'nohire', x: 0, y: 0, icon: '🛡️', iconBg: '#444', name: 'No Heroes available', tooltip: 'Every Hero is already your ally, hired by someone else, fallen, or there are no Hero generals in this game.', disabled: true });
+    }
     B.push({ id: 'cancel', x: 3, y: 2, hotkey: 'Escape', keyLabel: 'Esc', icon: '✖', name: 'Cancel', onClick: () => (input.cardMenu = null) });
     return B;
   }
@@ -149,7 +172,11 @@ export function getCommands(game, input) {
         onClick: () => (u.upgrading ? game.cancelUpgrade(u) : game.cancelResearch(u)),
       });
     }
-    (u.def.trains ?? []).forEach((type, i) => {
+    const trains = (u.def.trains ?? []).filter((type) => {
+      const a = UNITS[type].age ?? 1;
+      return type === 'peasant' || (a <= Math.max(1, p.tier) && a >= p.tier - 1);
+    });
+    trains.forEach((type, i) => {
       const d = UNITS[type];
       const missing = game.missingRequirements(p, d);
       B.push({
@@ -178,7 +205,7 @@ export function getCommands(game, input) {
         icon: U.icon,
         iconBg: '#555',
         name: `Research ${U.name[lvl]}`,
-        tooltip: `${U.description}${p.tier < U.tier[lvl] ? `<br><span class="req">Requires ${['', 'Town Hall', 'Keep', 'Castle'][U.tier[lvl]]}.</span>` : ''}`,
+        tooltip: `${U.description}${p.tier < U.tier[lvl] ? `<br><span class="req">Requires the ${AGE_NAMES[U.tier[lvl]]}.</span>` : ''}`,
         cost: costLine(U.cost[lvl]),
         level: lvl,
         disabled: !!u.researching || busy || p.tier < U.tier[lvl],
@@ -202,9 +229,74 @@ export function getCommands(game, input) {
         onClick: () => game.startUpgrade(u),
       });
     }
+    if (u.def.tier && u.owner.mode === 'empire') {
+      const next = game.empires.nextAge(p);
+      if (next && !u.upgrading) {
+        const missing = game.empires.ageMissing(p);
+        const advancing = p.buildings.some((o) => !o.dead && o.upgrading?.age);
+        B.push({
+          id: 'advance', x: 0, y: 2, hotkey: 'U', icon: next.icon, iconBg: '#6a5a2a',
+          name: `Advance to the ${next.name}`,
+          tooltip: `Unlocks the units and structures of the ${next.name}. Your town center, houses, farms, walls, gates and towers are rebuilt in the new style.${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
+          cost: `${costLine(next.cost)} <span class="dim">· ${next.time}s</span>`,
+          disabled: missing.length > 0 || u.trainQueue.length > 0 || advancing,
+          onClick: () => game.empires.startAgeUp(u),
+        });
+      }
+      const mood = moodOf(p.happiness);
+      const econ = `<br><span class="dim">Citizens ${Math.floor(p.citizens)}/${p.housing} · Mood ${mood.icon} ${mood.name} · Tax ${p.tax} · Rations ${p.rations}</span>`;
+      B.push({
+        id: 'tax-', x: 0, y: 1, hotkey: 'Z', icon: '💰', iconBg: '#3a5a3a', label: '−', name: `Lower Taxes (now ${p.tax})`,
+        tooltip: `Lower taxes make your people happier but bring in less gold.${econ}`,
+        disabled: p.tax <= 0, onClick: () => game.empires.setTax(p, p.tax - 1),
+      });
+      B.push({
+        id: 'tax+', x: 1, y: 1, hotkey: 'X', icon: '💰', iconBg: '#6a4a2a', label: '+', name: `Raise Taxes (now ${p.tax})`,
+        tooltip: `Each citizen pays more gold, but heavy taxes anger your people. No taxes are paid while they starve or hate you.${econ}`,
+        disabled: p.tax >= ECONOMY.taxMax, onClick: () => game.empires.setTax(p, p.tax + 1),
+      });
+      B.push({
+        id: 'rations-', x: 2, y: 1, hotkey: 'C', icon: '🍞', iconBg: '#5a4a2a', label: '−', name: `Smaller Rations (now ${p.rations})`,
+        tooltip: `Citizens eat less food, but meager rations make them unhappy.${econ}`,
+        disabled: p.rations <= 0, onClick: () => game.empires.setRations(p, p.rations - 1),
+      });
+      B.push({
+        id: 'rations+', x: 3, y: 1, hotkey: 'V', icon: '🍞', iconBg: '#3a5a3a', label: '+', name: `Bigger Rations (now ${p.rations})`,
+        tooltip: `Well-fed citizens are happier and resist plague, but eat more of your food.${econ}`,
+        disabled: p.rations >= ECONOMY.rationsMax, onClick: () => game.empires.setRations(p, p.rations + 1),
+      });
+      B.push({
+        id: 'hiremenu', x: 1, y: 0, hotkey: 'H', icon: '🤝', iconBg: '#4a3a6a', name: 'Hire a Hero',
+        tooltip: `Pay a Hero to fight for you for ${ECONOMY.hireTime / 60} minutes. Their fee grows with their level.`,
+        onClick: () => (input.cardMenu = 'hire'),
+      });
+    }
+    if (u.def.nukes) {
+      if (u.nukeBuild) {
+        B.push({
+          id: 'nukebuild', x: 0, y: 0, hotkey: '', icon: '☢️', iconBg: '#5a5a1a', name: 'Building nuclear missile…',
+          tooltip: `Ready in ${Math.ceil(u.nukeBuild.total - u.nukeBuild.time)} seconds.`, disabled: true,
+          progress: u.nukeBuild.time / u.nukeBuild.total,
+        });
+        B.push({ id: 'cancelnuke', x: 3, y: 2, hotkey: 'Escape', keyLabel: 'Esc', icon: '✖', name: 'Cancel', onClick: () => game.empires.cancelNuke(u) });
+      } else if (!u.nukeReady) {
+        B.push({
+          id: 'nukebuild', x: 0, y: 0, hotkey: 'B', icon: '☢️', iconBg: '#5a5a1a', name: 'Build Nuclear Missile',
+          tooltip: `Builds one nuclear missile (${ECONOMY.nuke.time}s). Its blast destroys almost anything within ${ECONOMY.nuke.radius} paces — friend or foe — and terrifies nearby citizens.`,
+          cost: costLine(ECONOMY.nuke.cost), disabled: !game.canAfford(p, ECONOMY.nuke.cost),
+          onClick: () => game.empires.startNuke(u),
+        });
+      }
+      B.push({
+        id: 'nukelaunch', x: 1, y: 0, hotkey: 'N', icon: '🚀', iconBg: '#7a2a2a', name: 'Launch Nuclear Missile',
+        tooltip: 'Choose a target anywhere in explored land. Everyone will see the warning, and the missile lands 7 seconds later.',
+        disabled: !u.nukeReady, glow: !!u.nukeReady,
+        onClick: () => input.beginTarget({ kind: 'nuke', silo: u }),
+      });
+    }
     if (u.def.trains) {
       B.push({
-        id: 'rally', x: 3, y: 1, hotkey: 'Y', icon: '🚩', iconBg: '#7a5a2a', name: 'Set Rally Point',
+        id: 'rally', x: 3, y: u.def.tier ? 0 : 1, hotkey: 'Y', icon: '🚩', iconBg: '#7a5a2a', name: 'Set Rally Point',
         tooltip: 'Trained units will move to the rally point. Rally on a gold mine or tree to send Peasants to work.',
         onClick: () => input.beginTarget({ kind: 'rally' }),
       });
@@ -237,10 +329,10 @@ export function getCommands(game, input) {
   if (u.def.worker) {
     B.push({ id: 'gather', x: 1, y: 1, hotkey: 'G', icon: '⛏', iconBg: '#6a5a2a', name: 'Gather', tooltip: 'Harvest gold from a Gold Mine or lumber from trees.', onClick: () => input.beginTarget({ kind: 'gather' }) });
     if (sel.some((s) => s.carry)) {
-      B.push({ id: 'return', x: 2, y: 1, hotkey: 'R', icon: '⤺', iconBg: '#5a4a2a', name: 'Return Resources', tooltip: 'Return carried resources to the nearest Town Hall.', onClick: () => input.orderWorkersReturn() });
+      B.push({ id: 'return', x: 2, y: 1, hotkey: 'R', icon: '⤺', iconBg: '#5a4a2a', name: 'Return Resources', tooltip: 'Return carried resources to the nearest town center.', onClick: () => input.orderWorkersReturn() });
     }
-    B.push({ id: 'buildmenu', x: 0, y: 2, hotkey: 'B', icon: '🔨', iconBg: '#5a4a3a', name: 'Build Basic Structure', tooltip: 'Houses, roads, walls, gates, the Lumber Yard, Barracks, towers and town halls.', onClick: () => (input.cardMenu = 'build') });
-    B.push({ id: 'buildmenu2', x: 1, y: 2, hotkey: 'V', icon: '🏛️', iconBg: '#4a4a5a', name: 'Build Advanced Structure', tooltip: 'Blacksmith, Stable, Arcane Sanctum and Workshop. These unlock with later ages.', onClick: () => (input.cardMenu = 'build2') });
+    B.push({ id: 'buildmenu', x: 0, y: 2, hotkey: 'B', icon: '🔨', iconBg: '#5a4a3a', name: 'Build Basic Structure', tooltip: 'Houses, roads, farms, walls, gates, the Lumber Yard, Barracks, towers and town centers.', onClick: () => (input.cardMenu = 'build') });
+    B.push({ id: 'buildmenu2', x: 1, y: 2, hotkey: 'V', icon: '🏛️', iconBg: '#4a4a5a', name: 'Build Advanced Structure', tooltip: 'Stable, Blacksmith, Workshop, Arcane Sanctum, Factory and Missile Silo. These unlock in later ages.', onClick: () => (input.cardMenu = 'build2') });
   }
   if (u.isHero && !u.isIllusion) {
     if (u.skillPoints > 0) {

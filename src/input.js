@@ -356,6 +356,16 @@ export class Input {
         else this.flash(res, true);
         break;
       }
+      case 'nuke': {
+        if (!ground || m.silo.dead || !m.silo.nukeReady) break;
+        if (!g.fog.isExplored(ground.x, ground.z)) {
+          g.message('You can only target explored land.', '#ff8080');
+          g.sound('error');
+          return;
+        }
+        g.empires.launchNuke(m.silo, ground.x, ground.z);
+        break;
+      }
       case 'rally': {
         const tree = !target && px !== null ? this.pickTree(px, py, ground) : null;
         for (const b of own.filter((u) => u.def.trains)) {
@@ -958,6 +968,8 @@ export class Input {
           return this.hoverTree ? 'Harvest lumber from this tree' : 'Choose a tree or gold mine';
         case 'rally':
           return this.hoverTree ? 'Rally on this tree' : h ? `Rally on ${h.def.name}` : 'Set rally point';
+        case 'nuke':
+          return 'Launch the nuclear missile here';
         case 'cast': {
           const ab = ABILITIES[tm.ability];
           if (ab.target === 'unit') return h ? `${ab.name}: ${h.def.name}` : `${ab.name}: choose a target`;
