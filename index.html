@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Heroes &amp; Empires 3D</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="gl"></canvas>
+      <canvas id="overlay"></canvas>
+
+      <div id="hud" class="hidden">
+        <div id="topbar">
+          <div class="tb-left">
+            <button id="btn-menu" class="tb-btn">Menu <span>F10</span></button>
+            <button id="btn-quests" class="tb-btn">Quests <span>F9</span></button>
+            <button id="btn-sound" class="tb-btn" title="Toggle sound">🔊</button>
+          </div>
+          <div class="tb-center">
+            <div id="clock"><div id="clock-dial"><span class="sunicon">☀</span><span class="moonicon">☾</span></div></div>
+            <div class="clock-text"><span id="clock-label">Day</span> · <span id="gametime">0:00</span></div>
+          </div>
+          <div class="tb-right" id="resources">
+            <div class="res" title="Gold"><span class="ico gold">◉</span><span id="r-gold">0</span></div>
+            <div class="res" title="Lumber"><span class="ico lumber">♣</span><span id="r-lumber">0</span></div>
+            <div class="res" title="Food"><span class="ico food">🍖</span><span id="r-food">0/0</span></div>
+            <div class="res mode" id="r-mode">Hero Path</div>
+          </div>
+        </div>
+        <div id="herobar"></div>
+        <div id="idleworkers" class="hidden" title="Select idle Peasant">⛏<span id="idle-count">0</span></div>
+        <div id="messages"></div>
+        <div id="tooltip" class="hidden"></div>
+        <div id="console">
+          <div id="minimap-wrap"><canvas id="minimap" width="200" height="200"></canvas></div>
+          <div id="portrait-wrap">
+            <div id="portrait"></div>
+            <div id="portrait-hp"></div>
+            <div id="portrait-mp"></div>
+          </div>
+          <div id="info"></div>
+          <div id="inventory">
+            <div class="inv-title">Inventory</div>
+            <div id="inv-grid"></div>
+          </div>
+          <div id="commandcard"></div>
+        </div>
+      </div>
+
+      <div id="screen-title" class="screen">
+        <div class="title-inner">
+          <h1>Heroes <span>&amp;</span> Empires</h1>
+          <p class="lore">
+            A group of Generals want to inhabit the land of Kalenden. Your mission is to kill Kalenden himself and
+            claim his lands as your own. Your choice to work together or against each other.
+          </p>
+          <div class="setup">
+            <div class="setup-col">
+              <h2>Choose your path</h2>
+              <div class="paths">
+                <button class="path selected" data-mode="hero">
+                  <div class="path-icon">⚔️</div>
+                  <div class="path-name">Hero</div>
+                  <div class="path-desc">Gain experience, buy items and survive.</div>
+                  <div class="path-tip">Recommended for new players</div>
+                </button>
+                <button class="path" data-mode="empire">
+                  <div class="path-icon">🏰</div>
+                  <div class="path-name">Empire</div>
+                  <div class="path-desc">Build a sprawling base.</div>
+                  <div class="path-tip">Gather, build, train an army</div>
+                </button>
+              </div>
+              <div id="hero-pick">
+                <h2>Choose your Hero</h2>
+                <div class="heroes" id="hero-list"></div>
+              </div>
+            </div>
+            <div class="setup-col narrow">
+              <h2>Game settings</h2>
+              <label>Rival generals
+                <select id="opt-opponents">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3" selected>3</option>
+                </select>
+              </label>
+              <label>Diplomacy
+                <select id="opt-diplomacy">
+                  <option value="ffa" selected>Against each other (free for all)</option>
+                  <option value="allied">Together against Kalenden</option>
+                </select>
+              </label>
+              <label>Difficulty
+                <select id="opt-difficulty">
+                  <option value="easy">Easy</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+              <button id="btn-start" class="big-btn">Begin the Conquest</button>
+              <button id="btn-help" class="small-btn">How to play</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="screen-loading" class="screen hidden"><div class="loading-text">Forging the land of Kalenden…</div></div>
+
+      <div id="modal-menu" class="modal hidden">
+        <div class="panel">
+          <h2>Game Menu</h2>
+          <button data-act="resume" class="big-btn">Resume Game</button>
+          <button data-act="help" class="small-btn">How to Play</button>
+          <button data-act="quests" class="small-btn">Quests</button>
+          <button data-act="restart" class="small-btn">Restart</button>
+          <button data-act="quit" class="small-btn">Quit to Title</button>
+        </div>
+      </div>
+
+      <div id="modal-quests" class="modal hidden">
+        <div class="panel wide">
+          <h2>Quests</h2>
+          <div class="quest main">
+            <h3>Main Quest — The Tyrant of Kalenden</h3>
+            <p>Kalenden rules this land from his walled citadel at its heart. Cross the moat at one of the four fords, break through his gates and slay <b>Kalenden</b> himself to claim his lands as your own.</p>
+            <ul>
+              <li>Kalenden is guarded by his Death Guard, skeletal warriors and Dark Spires.</li>
+              <li>Every few minutes his Legion marches on one of the generals. Destroy <b>Kalenden's Keep</b> to stop the marches.</li>
+            </ul>
+          </div>
+          <div class="quest">
+            <h3>Optional — Rival Generals</h3>
+            <p id="quest-rivals"></p>
+          </div>
+          <div class="quest">
+            <h3>Tips</h3>
+            <ul>
+              <li><b>Hero path:</b> slay creeps for experience and gold, buy items from Goblin Merchants and Arcane Vaults, hire mercenaries, and use Fountains of Health. Your Altar revives your Hero.</li>
+              <li><b>Empire path:</b> keep 5 Peasants on gold, put the rest on lumber, build Farms for food, then Barracks and a Blacksmith. Upgrade to a Keep for Knights, Priests, Sorceresses and Catapults.</li>
+              <li>Edge outposts hold an extra gold mine, a mercenary camp, an arcane vault and a fountain, guarded by drakes and golems.</li>
+            </ul>
+          </div>
+          <button data-act="close" class="big-btn">Close</button>
+        </div>
+      </div>
+
+      <div id="modal-help" class="modal hidden">
+        <div class="panel wide">
+          <h2>How to Play</h2>
+          <div class="help-grid">
+            <div>
+              <h3>Mouse</h3>
+              <ul>
+                <li><b>Left-click</b> selects; <b>drag</b> to box-select; <b>double-click</b> selects all of a type.</li>
+                <li><b>Right-click</b> moves, attacks, gathers, follows or picks up items.</li>
+                <li><b>Shift</b> queues orders or adds to the selection.</li>
+                <li><b>Mouse wheel</b> zooms; <b>middle-drag</b>, the screen edges or the <b>arrow keys</b> scroll.</li>
+                <li>Click the <b>minimap</b> to move the camera; right-click it to send units.</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Keyboard</h3>
+              <ul>
+                <li>Command card hotkeys are shown on each button (<b>A</b> attack, <b>M</b> move, <b>S</b> stop, <b>H</b> hold, <b>Q W E R</b> hero spells, <b>O</b> learn skill, <b>B</b> build).</li>
+                <li><b>F1</b> selects your Hero (twice to center). <b>Ctrl+1–9</b> assign groups, <b>1–9</b> recall.</li>
+                <li><b>Tab</b> cycles subgroup, <b>Space</b> jumps to the last alert, <b>Backspace</b> to your base.</li>
+                <li><b>Alt</b> shows all health bars. <b>Numpad 7 8 4 5 1 2</b> use inventory items.</li>
+                <li><b>F9</b> quests, <b>F10</b> menu (pauses the game), <b>Pause</b> pauses.</li>
+              </ul>
+            </div>
+          </div>
+          <button data-act="close" class="big-btn">Close</button>
+        </div>
+      </div>
+
+      <div id="modal-end" class="modal hidden">
+        <div class="panel wide">
+          <h2 id="end-title">Victory!</h2>
+          <p id="end-text"></p>
+          <table id="end-stats"></table>
+          <div class="row">
+            <button data-act="observe" class="small-btn">Continue watching</button>
+            <button data-act="restart" class="big-btn">Play Again</button>
+            <button data-act="quit" class="small-btn">Title Screen</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pause-banner" class="hidden">PAUSED</div>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

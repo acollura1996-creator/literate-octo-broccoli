@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Model Gallery</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #8fbbe0; font-family: system-ui, sans-serif; }
+      canvas { display: block; }
+      #labels { position: absolute; inset: 0; pointer-events: none; }
+      .lbl {
+        position: absolute; transform: translate(-50%, 0); white-space: nowrap;
+        font: 600 11px/1.2 system-ui, sans-serif; color: #fff; background: rgba(0, 0, 0, 0.55);
+        padding: 1px 5px; border-radius: 3px;
+      }
+      #help {
+        position: absolute; left: 8px; bottom: 8px; color: #fff; background: rgba(0, 0, 0, 0.45);
+        font: 11px/1.4 monospace; padding: 4px 8px; border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="labels"></div>
+    <div id="help">?ids=a,b &amp;animate=1 &amp;t=1.2 &amp;atk=2.4 &amp;team=0042ff &amp;zoom=2 &amp;pitch=55 &amp;yaw=0 &amp;dist=30 &amp;labels=0 &amp;help=0</div>
+    <script type="module" src="./gallery.js"></script>
+  </body>
+</html>
