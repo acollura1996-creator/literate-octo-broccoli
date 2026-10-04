@@ -1009,3 +1009,196 @@ select {
   font-size: 13px;
   margin-top: 10px;
 }
+
+/* ------------------------------------------------------------ scoreboard */
+#scoreboard {
+  position: absolute;
+  top: 48px;
+  right: 8px;
+  width: 300px;
+  max-width: calc(100% - 100px);
+  background: var(--panel);
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
+  font-size: 12px;
+  overflow: hidden;
+}
+.sb-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 5px 9px;
+  background: linear-gradient(180deg, #3a3326, #1f1b14);
+  border: 0;
+  border-bottom: 1px solid var(--gold-dim);
+  color: var(--gold-2);
+  font-family: var(--font-title);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+.sb-head span {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 400;
+}
+.sb-head:focus-visible {
+  outline: 2px solid var(--gold);
+}
+#scoreboard.collapsed #sb-body {
+  display: none;
+}
+#scoreboard.collapsed .sb-head {
+  border-bottom: 0;
+}
+.sb-row {
+  display: flex;
+  gap: 7px;
+  padding: 5px 9px;
+  border-bottom: 1px solid rgba(138, 111, 42, 0.35);
+  align-items: flex-start;
+}
+.sb-row .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-top: 3px;
+  flex: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8);
+}
+.sb-main {
+  min-width: 0;
+  flex: 1;
+}
+.sb-l1 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.sb-l1 b {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.sb-row.ally .sb-tag {
+  color: #8fe08f;
+}
+.sb-row.rival .sb-tag {
+  color: #ff9a8a;
+}
+.sb-kills {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.sb-l2 {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-l3 {
+  color: var(--text-dim);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-row.out {
+  opacity: 0.45;
+}
+#sb-kalenden {
+  padding: 6px 9px 7px;
+}
+.sb-k-l1 {
+  display: flex;
+  justify-content: space-between;
+  color: #ff9a8a;
+  font-variant-numeric: tabular-nums;
+}
+.sb-kbar {
+  height: 5px;
+  background: #000;
+  margin: 3px 0;
+  border: 1px solid #5a2a22;
+}
+.sb-kbar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(180deg, #e84a3a, #8a1a12);
+}
+
+/* ------------------------------------------------- title: computer generals */
+.setup-note {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin: 0 0 12px;
+}
+.rival-row {
+  border: 1px solid #4a3e22;
+  border-radius: 5px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: rgba(0, 0, 0, 0.25);
+}
+.rr-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.rr-head .swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+.rr-remove {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #4a3e22;
+  color: var(--text-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 6px;
+}
+.rr-remove:hover {
+  color: var(--text);
+  border-color: var(--gold-dim);
+}
+.rr-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.rr-fields label {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 0;
+}
+.rr-fields select {
+  font-size: 13px;
+  padding: 5px 3px;
+}
+.rr-fields select:disabled {
+  opacity: 0.4;
+}
+label.difficulty {
+  margin-top: 14px;
+}
+#btn-add-rival {
+  margin-top: 0;
+  margin-bottom: 4px;
+}

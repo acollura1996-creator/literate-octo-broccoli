@@ -31,6 +31,7 @@ export class GeneralAI {
     this.armyStart = 0;
     this.lastObjective = 0;
     this.buildRetry = {};
+    this.status = p.mode === 'hero' ? 'Setting out' : 'Founding its empire';
   }
 
   update(dt) {
@@ -99,6 +100,7 @@ export class GeneralAI {
     // Mercenaries follow the hero.
     const mercs = this.army().filter((u) => !u.summoned && !u.isIllusion);
     if (!h || h.dead) {
+      this.status = h?.reviveAt ? 'Hero reviving at the Altar' : 'Hero has fallen';
       const altar = p.buildings.find((b) => !b.dead && b.def.revivesHeroes);
       for (const m of mercs) if (m.order.type !== 'attackMove' && altar) g.issueOrder(m, { type: 'attackMove', point: { x: altar.x, z: altar.z } });
       return;
@@ -114,11 +116,13 @@ export class GeneralAI {
     if (this.state === 'retreat') {
       if (hpR > 0.85) this.state = 'idle';
       else {
+        this.status = 'Retreating to heal';
         this.retreat(h);
         return;
       }
     } else if (hpR < 0.3) {
       this.state = 'retreat';
+      this.status = 'Retreating to heal';
       if (!this.useItemOfType(h, 'townPortal')) this.retreat(h);
       return;
     }
@@ -126,6 +130,9 @@ export class GeneralAI {
     // Fight whatever is close.
     const foes = this.enemiesNear(h.x, h.z, 9);
     if (foes.length) {
+      const general = foes.find((f) => f.owner.general);
+      const legion = foes.find((f) => f.owner === g.legion);
+      this.status = general ? `Fighting ${general.owner.isHuman ? 'you' : general.owner.name}` : legion ? (Math.hypot(h.x - CENTER, h.z - CENTER) < 30 ? 'Assaulting Kalenden' : "Fighting Kalenden's Legion") : 'Fighting creeps';
       this.heroCombat(h, foes);
       for (const m of mercs) {
         if (m.order.type === 'idle' || m.order.type === 'follow') g.issueOrder(m, { type: 'attackMove', point: { x: h.x, z: h.z } });
@@ -135,17 +142,34 @@ export class GeneralAI {
 
     // Defend home (portal back if far away).
     if (g.time < this.defendUntil && this.defendPos) {
+      this.status = 'Defending its base';
       if (h.distTo(this.defendPos) > 35 && this.useItemOfType(h, 'townPortal')) return;
       this.go(h, this.defendPos, true);
       this.rallyMercs(mercs, h);
       return;
     }
 
+    // Help allies that are under attack or storming the citadel.
+    const call = this.allyCall();
+    const answer = call && (call.kind === 'defend' ? h.distTo(call) < 75 : call.kind === 'skirmish' ? hpR > 0.5 : h.level >= 6 && hpR > 0.6);
+    if (answer) {
+      this.status = this.callLabel(call);
+      this.go(h, call, true);
+      this.rallyMercs(mercs, h);
+      return;
+    }
+
     // Shopping.
-    if (this.shop(h)) return;
+    if (this.shop(h)) {
+      this.status = 'Shopping for items';
+      return;
+    }
 
     // Hire mercenaries with spare gold.
-    this.hireMercs(h);
+    if (this.hireMercs(h)) {
+      this.status = 'Hiring mercenaries';
+      return;
+    }
 
     // Objective: creep, raid, or hunt Kalenden.
     if (h.order.type === 'attackMove' && g.time - this.lastObjective < 25) {
@@ -155,9 +179,36 @@ export class GeneralAI {
     const obj = this.heroObjective(h, mercs);
     if (obj) {
       this.lastObjective = g.time;
+      this.status = obj.label;
       this.go(h, obj, true);
     }
     this.rallyMercs(mercs, h);
+  }
+
+  /** An ally who needs help: their base under attack, or an assault on Kalenden in progress. */
+  allyCall() {
+    const g = this.g;
+    for (const o of g.generals) {
+      if (o === this.p || o.defeated || o.team !== this.p.team) continue;
+      const ua = o.underAttack;
+      if (ua && g.time - ua.time < 6) return { x: ua.x, z: ua.z, kind: 'defend', ally: o };
+      const f = o.lastFight;
+      if (f && g.time - f.time < 5 && f.vs === g.legion && Math.hypot(f.x - CENTER, f.z - CENTER) < 30) {
+        return { x: f.x, z: f.z, kind: 'assault', ally: o };
+      }
+      // An ally's hero skirmishing with a rival general nearby.
+      if (f && g.time - f.time < 4 && f.vs?.general && g.isEnemy(this.p, f.vs) && this.p.hero && !this.p.hero.dead) {
+        if (Math.hypot(f.x - this.p.hero.x, f.z - this.p.hero.z) < 35) return { x: f.x, z: f.z, kind: 'skirmish', ally: o, vs: f.vs };
+      }
+    }
+    return null;
+  }
+
+  callLabel(call) {
+    const who = call.ally.isHuman ? 'you' : call.ally.name;
+    if (call.kind === 'defend') return `Defending ${call.ally.isHuman ? 'your' : `${call.ally.name}'s`} base`;
+    if (call.kind === 'skirmish') return `Helping ${who} fight ${call.vs.isHuman ? 'you' : call.vs.name}`;
+    return `Assaulting Kalenden with ${who}`;
   }
 
   rallyMercs(mercs, h) {
@@ -172,25 +223,34 @@ export class GeneralAI {
     return pw;
   }
 
+  hasAllies() {
+    return this.g.generals.some((o) => o !== this.p && !o.defeated && o.team === this.p.team);
+  }
+
+  raidsAllowed() {
+    return this.g.time > [16, 12, 8][this.g.difficulty] * 60;
+  }
+
   heroObjective(h, mercs) {
     const g = this.g;
     const power = this.heroPower(h, mercs);
     // Endgame: go for Kalenden.
     const k = g.legionMgr.kalenden;
-    const ready = h.level >= 10 || (h.level >= 9 && mercs.length >= 2) || (g.allied && h.level >= 8 && g.time > 16 * 60) || g.time > 45 * 60;
+    const ready = h.level >= 10 || (h.level >= 9 && mercs.length >= 2) || (this.hasAllies() && h.level >= 8 && g.time > 16 * 60) || g.time > 45 * 60;
     if (!k.dead && ready && h.hp > h.maxHp * 0.8) {
-      return { x: k.x, z: k.z };
+      return { x: k.x, z: k.z, label: 'Marching on Kalenden' };
     }
     // Occasionally raid a rival.
-    if (!g.allied && h.level >= 6 && g.time > [16, 12, 8][g.difficulty] * 60 && Math.random() < 0.18) {
+    if (h.level >= 6 && this.raidsAllowed() && Math.random() < 0.18) {
       const base = this.nearestEnemyBase();
-      if (base) return base;
+      if (base) return { ...base, label: `Raiding ${base.player.isHuman ? 'you' : base.player.name}` };
     }
-    // Creep the best camp we can handle.
+    // Creep the best camp we can handle (carefully while low level).
     let best = null;
     let bestScore = Infinity;
+    const margin = h.level <= 2 ? 0.85 : h.level <= 4 ? 1.0 : 1.15;
     for (const c of g.creepMgr.aliveCamps()) {
-      if (c.power > power * 1.15) continue;
+      if (c.power > power * margin) continue;
       const d = Math.hypot(c.at.x - h.x, c.at.z - h.z);
       const score = d - c.power * 2.5;
       if (score < bestScore) {
@@ -198,11 +258,11 @@ export class GeneralAI {
         best = c;
       }
     }
-    if (best) return best.at;
-    // Nothing to do: go to the closest fountain or home.
-    const base = this.nearestEnemyBase();
-    if (base && h.level >= 5 && !g.allied) return base;
-    return this.home();
+    if (best) return { ...best.at, label: `Hunting creeps (level ${h.level})` };
+    // Nothing to do: raid a rival, or guard home.
+    const base = this.raidsAllowed() ? this.nearestEnemyBase() : null;
+    if (base && h.level >= 5) return { ...base, label: `Raiding ${base.player.isHuman ? 'you' : base.player.name}` };
+    return { ...this.home(), label: 'Guarding its base' };
   }
 
   heroCombat(h, foes) {
@@ -434,13 +494,14 @@ export class GeneralAI {
     return false;
   }
 
+  /** Returns true while on the way to (or at) a mercenary camp. */
   hireMercs(h) {
     const g = this.g;
     const p = this.p;
-    if (p.gold < 650) return;
+    if (p.gold < 450 || h.level < 3 || (this.hireCooldown ?? 0) > g.time) return false;
     g.computeFood(p);
     const free = p.foodCap - p.foodUsed;
-    if (free < 2) return;
+    if (free < 2) return false;
     let camp = null;
     let bd = Infinity;
     for (const s of g.passive.buildings) {
@@ -451,16 +512,20 @@ export class GeneralAI {
         camp = s;
       }
     }
-    if (!camp || bd > 30) return;
+    if (!camp) return false;
     const pick = ['rock_golem', 'ogre', 'forest_troll', 'gnoll'].find(
-      (t) => UNITS[t].food <= free && camp.stock[t] > 0 && p.gold >= UNITS[t].cost.gold + 300,
+      (t) => UNITS[t].food <= free && camp.stock[t] > 0 && p.gold >= UNITS[t].cost.gold + 200,
     );
-    if (!pick) return;
+    if (!pick) return false;
+    // Only make a long trip when well funded.
+    if (bd > 30 && p.gold < 800) return false;
     if (h.distTo(camp) > camp.radius + 6) {
       this.go(h, camp, false);
-      return;
+      return true;
     }
     g.hireMerc(p, camp, pick);
+    this.hireCooldown = g.time + 4;
+    return true;
   }
 
   // =============================================================== EMPIRE
@@ -710,22 +775,32 @@ export class GeneralAI {
         }
       }
       this.state = 'defend';
+      this.status = `Defending its base (${army.length} units)`;
       return;
     }
-    if (this.state === 'defend') this.state = 'gather';
+    if (this.state === 'defend' || this.state === 'assist') this.state = 'gather';
+
+    // Break off an attack to defend an ally, or to join an assault instead of clearing creeps.
+    const call = this.allyCall();
+    if (this.state === 'attack' && call && call.kind !== 'skirmish' && this.target && (call.kind === 'defend' || !this.target.player)) {
+      if ((call.kind === 'defend' && food >= 8) || (call.kind === 'assault' && food >= 20)) this.state = 'gather';
+    }
 
     if (this.state === 'attack') {
       if (food < this.armyStart * 0.35 || !this.target) {
         this.state = 'gather';
+        this.status = 'Retreating to regroup';
         for (const u of army) g.issueOrder(u, { type: 'move', point: rally });
         return;
       }
+      this.status = `${this.target.label} (${army.length} units)`;
       // Re-target when the objective is gone.
       const tgt = this.target;
       for (const u of army) {
         if (u.order.type === 'idle') {
           const next = this.attackObjective(true);
           if (next) {
+            if (next.label !== this.target.label) this.announceAttack(next, army.length);
             this.target = next;
             g.issueOrder(u, { type: 'attackMove', point: next });
           }
@@ -734,11 +809,25 @@ export class GeneralAI {
       return;
     }
 
+    // Answer an ally's call for help.
+    if (call && call.kind !== 'skirmish' && ((call.kind === 'defend' && food >= 8) || (call.kind === 'assault' && food >= 20))) {
+      this.state = 'assist';
+      this.status = `${this.callLabel(call)} (${army.length} units)`;
+      for (const u of army) {
+        if (u.order.type === 'attack') continue;
+        if (u.order.type !== 'attackMove' || Math.hypot(u.order.point.x - call.x, u.order.point.z - call.z) > 6) {
+          g.issueOrder(u, { type: 'attackMove', point: { x: call.x, z: call.z } });
+        }
+      }
+      return;
+    }
+
     // Gather near the base.
     for (const u of army) {
       if (u.order.type === 'idle' && Math.hypot(u.x - rally.x, u.z - rally.z) > 6) g.issueOrder(u, { type: 'attackMove', point: rally });
     }
-    const threshold = Math.min(44, 14 + this.attacks * 6) * [1.15, 1, 0.9][g.difficulty];
+    const threshold = Math.round(Math.min(44, 14 + this.attacks * 6) * [1.15, 1, 0.9][g.difficulty]);
+    this.status = `Building an army (${food}/${threshold} food)`;
     if (food >= threshold || (this.expansionGuard && food >= 16)) {
       const obj = this.attackObjective(false);
       if (!obj) return;
@@ -746,23 +835,41 @@ export class GeneralAI {
       this.target = obj;
       this.armyStart = food;
       this.attacks++;
-      for (const u of army) g.issueOrder(u, { type: 'attackMove', point: obj });
+      this.status = `${obj.label} (${army.length} units)`;
+      for (const u of army) g.issueOrder(u, { type: 'attackMove', point: { x: obj.x, z: obj.z } });
+      this.announceAttack(obj, army.length);
+    }
+  }
+
+  announceAttack(obj, count) {
+    const g = this.g;
+    const p = this.p;
+    if (obj.player?.isHuman) {
+      g.message(`${p.name}'s army (${count} units) is marching on your base!`, g.nameColor(p));
+      g.sound('warning');
+      g.ping(obj.x, obj.z, g.nameColor(p));
+    } else if (obj.player) {
+      g.notify(p, `${p.name}'s army marches on ${obj.player.name}.`);
+    } else if (obj.kalenden) {
+      g.notify(p, `${p.name}'s army marches on Kalenden's citadel!`);
     }
   }
 
   attackObjective(continuing) {
     const g = this.g;
     const food = this.armyFood();
-    if (this.expansionGuard && food >= 16) return this.expansionGuard;
+    if (this.expansionGuard && food >= 16) return { ...this.expansionGuard, label: 'Clearing a gold mine to expand' };
     const k = g.legionMgr.kalenden;
-    const late = g.time > 26 * 60 || (g.allied && g.time > 16 * 60);
-    if (!k.dead && late && food >= (g.allied ? 30 : 40)) return { x: k.x, z: k.z };
+    const teamPlay = this.hasAllies();
+    const late = g.time > 26 * 60 || (teamPlay && g.time > 16 * 60);
+    if (!k.dead && late && food >= (teamPlay ? 30 : 40)) return { x: k.x, z: k.z, label: 'Assaulting Kalenden', kalenden: true };
     // Rival bases are only raided after a grace period that depends on difficulty.
-    if (!g.allied && g.time > [16, 12, 8][g.difficulty] * 60) {
+    if (this.raidsAllowed()) {
       const base = this.nearestEnemyBase();
       if (base && (this.attacks >= 2 || continuing)) {
         const near = base.player.buildings.filter((b) => !b.dead).sort((a, b) => Math.hypot(a.x - base.x, a.z - base.z) - Math.hypot(b.x - base.x, b.z - base.z))[0];
-        return near ? { x: near.x, z: near.z } : base;
+        const label = `Attacking ${base.player.isHuman ? 'you' : base.player.name}`;
+        return near ? { x: near.x, z: near.z, label, player: base.player } : { ...base, label };
       }
     }
     // Early: clear nearby creep camps for bounty.
@@ -771,8 +878,8 @@ export class GeneralAI {
       .aliveCamps()
       .filter((c) => c.tier <= (this.attacks >= 3 ? 3 : 2))
       .sort((a, b) => Math.hypot(a.at.x - h.x, a.at.z - h.z) - Math.hypot(b.at.x - h.x, b.at.z - h.z));
-    if (camps[0]) return camps[0].at;
-    if (!k.dead && food >= 34) return { x: CENTER, z: CENTER + CITADEL.half - 3 };
+    if (camps[0]) return { ...camps[0].at, label: 'Clearing creep camps' };
+    if (!k.dead && food >= 34) return { x: CENTER, z: CENTER + CITADEL.half - 3, label: 'Assaulting Kalenden', kalenden: true };
     return null;
   }
 }

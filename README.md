@@ -47,12 +47,34 @@ Every few minutes **Kalenden's Legion** marches on one of the generals. Destroy 
 stop the marches. You win by slaying Kalenden, or in free-for-all by being the last general
 standing.
 
-### Game setup
+### Single player: the computer generals
 
-- **Rival generals**: 1–3 computer opponents, each randomly on the Hero or Empire path.
-- **Diplomacy**: free-for-all, or all generals allied against Kalenden.
-- **Difficulty**: Easy / Normal / Hard (affects AI bonuses, Kalenden's health and the Legion's
-  strength).
+You play against (or alongside) up to three computer-controlled generals. For each one you
+choose:
+
+- **Path**: Hero, Empire, or Random. Random slots are resolved so the computer generals include
+  both heroes and empires.
+- **Hero**: a specific hero or Random (for the Hero path).
+- **Side**: Rival or Ally.
+
+The default lineup is one AI hero, one AI empire and one random rival. **Difficulty**
+(Easy / Normal / Hard) affects AI bonuses, how soon rivals start raiding bases (16 / 12 / 8
+minutes), Kalenden's health and the Legion's strength.
+
+What the computer generals do on their own:
+
+- **AI heroes** hunt creep camps suited to their level, learn skills, buy items from merchants and
+  arcane vaults, hire mercenaries, retreat to heal, Town-Portal home to defend, raid rivals, and
+  march on Kalenden once strong enough.
+- **AI empires** keep peasants on gold and lumber, build farms, barracks, a blacksmith, towers, a
+  sanctum and a workshop, upgrade to a Keep and Castle, research upgrades, expand to new gold
+  mines, clear creeps, attack rival bases and finally assault the citadel.
+- **Allies** come to defend your base, join you when you fight a rival nearby, and join your
+  assault on Kalenden.
+
+The **Generals board** (top right, `F11`) shows every general's hero level or army, kills and
+what they are doing right now, along with Kalenden's health and the next Legion march. Messages
+announce their milestones: level-ups, new Keeps, armies on the march, heroes slain.
 
 ### Heroes
 
@@ -82,7 +104,7 @@ WC3's attack-type/armor-type damage table and armor formula.
 | `Alt` | Show all health bars |
 | Numpad `7 8 4 5 1 2` | Use inventory items (Shift-click an item near a shop to sell it) |
 | Arrow keys, screen edges, middle-drag, wheel | Scroll and zoom the camera |
-| `F9` / `F10` / `Pause` | Quests / menu / pause |
+| `F9` / `F10` / `F11` / `Pause` | Quests / menu / Generals board / pause |
 
 ## Code layout
 
@@ -103,8 +125,9 @@ tools/
 ```
 
 Testing helpers (dev server only): `?autostart=hero:paladin` or `?autostart=empire` skips the
-title screen. `&reveal=1` removes the fog of war, `&aiplayer=1` lets the AI play for you, and
-`&speed=4` speeds up the game.
+title screen, and `&rivals=hero-ranger-ally,empire,random` sets the computer generals
+(`path[-hero][-side]` each). `&reveal=1` removes the fog of war, `&aiplayer=1` lets the AI play
+for you, and `&speed=4` speeds up the game.
 
 ## Notes
 

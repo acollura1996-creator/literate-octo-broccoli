@@ -33,6 +33,13 @@
           </div>
         </div>
         <div id="herobar"></div>
+        <div id="scoreboard">
+          <button id="sb-toggle" class="sb-head" type="button">Generals <span>F11</span></button>
+          <div id="sb-body">
+            <div id="sb-rows"></div>
+            <div id="sb-kalenden"></div>
+          </div>
+        </div>
         <div id="idleworkers" class="hidden" title="Select idle Peasant">⛏<span id="idle-count">0</span></div>
         <div id="messages"></div>
         <div id="tooltip" class="hidden"></div>
@@ -82,21 +89,14 @@
               </div>
             </div>
             <div class="setup-col narrow">
-              <h2>Game settings</h2>
-              <label>Rival generals
-                <select id="opt-opponents">
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3" selected>3</option>
-                </select>
-              </label>
-              <label>Diplomacy
-                <select id="opt-diplomacy">
-                  <option value="ffa" selected>Against each other (free for all)</option>
-                  <option value="allied">Together against Kalenden</option>
-                </select>
-              </label>
-              <label>Difficulty
+              <h2>Computer generals</h2>
+              <p class="setup-note">
+                Single player: you face up to three computer generals. AI heroes hunt creeps, shop, hire mercenaries
+                and raid; AI empires gather, build and send armies. Make any of them your ally.
+              </p>
+              <div id="rival-rows"></div>
+              <button id="btn-add-rival" class="small-btn" type="button">Add a computer general</button>
+              <label class="difficulty">Difficulty
                 <select id="opt-difficulty">
                   <option value="easy">Easy</option>
                   <option value="normal" selected>Normal</option>
@@ -135,7 +135,7 @@
             </ul>
           </div>
           <div class="quest">
-            <h3>Optional — Rival Generals</h3>
+            <h3>The Generals</h3>
             <p id="quest-rivals"></p>
           </div>
           <div class="quest">
@@ -171,7 +171,7 @@
                 <li><b>F1</b> selects your Hero (twice to center). <b>Ctrl+1–9</b> assign groups, <b>1–9</b> recall.</li>
                 <li><b>Tab</b> cycles subgroup, <b>Space</b> jumps to the last alert, <b>Backspace</b> to your base.</li>
                 <li><b>Alt</b> shows all health bars. <b>Numpad 7 8 4 5 1 2</b> use inventory items.</li>
-                <li><b>F9</b> quests, <b>F10</b> menu (pauses the game), <b>Pause</b> pauses.</li>
+                <li><b>F9</b> quests, <b>F10</b> menu (pauses the game), <b>F11</b> Generals board, <b>Pause</b> pauses.</li>
               </ul>
             </div>
           </div>

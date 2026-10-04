@@ -30,7 +30,13 @@ export class Hud {
     this.input.onInventoryClick = (slot, e) => this.inventoryClick(slot, e);
     this.buildInventory();
     this.bindTopbar();
+    $('sb-toggle').addEventListener('click', () => this.toggleScoreboard());
     this.attach(game);
+  }
+
+  toggleScoreboard() {
+    $('scoreboard').classList.toggle('collapsed');
+    this.sbHtml = '';
   }
 
   /** Point the HUD at a (new) game. */
@@ -43,6 +49,8 @@ export class Hud {
     this.invSig = '';
     this.heroSig = '';
     this.msgHtml = '';
+    this.sbHtml = '';
+    this.sbTimer = 0;
     this.timer = 0;
     this.tooltipBtn = null;
     this.el.classList.remove('hidden');
@@ -90,6 +98,11 @@ export class Hud {
     if (idle) $('idle-count').textContent = idle;
 
     this.updateHeroBar();
+    this.sbTimer = (this.sbTimer ?? 0) - 1;
+    if (this.sbTimer <= 0) {
+      this.sbTimer = 5;
+      this.updateScoreboard();
+    }
     this.updateCommandCard();
     this.updateInfo(unit);
     this.updateInventory(unit);
@@ -135,6 +148,54 @@ export class Hud {
     btn.querySelector('.hp i').style.width = `${h.dead ? 0 : (h.hp / h.maxHp) * 100}%`;
     btn.querySelector('.mp i').style.width = `${h.dead || !h.maxMana ? 0 : (h.mana / h.maxMana) * 100}%`;
     btn.querySelector('.revive').textContent = h.dead && h.reviveAt ? Math.max(0, Math.ceil(h.reviveAt - g.time)) : '';
+  }
+
+  // ---------------------------------------------------------- scoreboard
+  updateScoreboard() {
+    const g = this.game;
+    if ($('scoreboard').classList.contains('collapsed')) return;
+    const rows = g.generals
+      .map((p) => {
+        const side = p.isHuman ? 'You' : g.isAlliedToHuman(p) ? 'Ally' : 'Rival';
+        const alive = p.units.filter((u) => !u.dead && !u.isIllusion && !u.summoned);
+        let line2;
+        if (p.mode === 'hero') {
+          const h = p.hero;
+          const mercs = alive.filter((u) => !u.isHero).length;
+          line2 = h
+            ? `${h.def.name} · level ${h.level}${h.dead ? ` · reviving${h.reviveAt ? ` in ${Math.max(0, Math.ceil(h.reviveAt - g.time))}s` : ''}` : ''}${mercs ? ` · ${mercs} merc${mercs > 1 ? 's' : ''}` : ''}`
+            : 'Hero';
+        } else {
+          const hall = ['No town hall', 'Town Hall', 'Keep', 'Castle'][p.tier] ?? 'Town Hall';
+          const army = alive.filter((u) => !u.def.worker).length;
+          const workers = alive.length - army;
+          line2 = `${hall} · ${army} soldiers · ${workers} peasants`;
+        }
+        let status = '';
+        if (p.defeated) status = 'Defeated';
+        else if (p.ai) status = p.ai.status ?? '';
+        return `<div class="sb-row ${side.toLowerCase()}${p.defeated ? ' out' : ''}">
+          <span class="swatch" style="background:#${p.color.toString(16).padStart(6, '0')}"></span>
+          <div class="sb-main">
+            <div class="sb-l1"><b style="color:${g.nameColor(p)}">${esc(p.name)}</b><span class="sb-tag">${side}</span><span class="sb-kills" title="Kills">⚔ ${p.stats.kills}</span></div>
+            <div class="sb-l2">${p.mode === 'hero' ? '⚔' : '🏰'} ${esc(line2)}</div>
+            ${status ? `<div class="sb-l3">${esc(status)}</div>` : ''}
+          </div>
+        </div>`;
+      })
+      .join('');
+    const L = g.legionMgr;
+    const k = L.kalenden;
+    const kHtml = k.dead
+      ? '<div class="sb-k-l1"><b>Kalenden</b> has been slain</div>'
+      : `<div class="sb-k-l1"><b>Kalenden</b><span>${Math.ceil(k.hp)} / ${k.maxHp}</span></div>
+         <div class="sb-kbar"><i style="width:${(k.hp / k.maxHp) * 100}%"></i></div>
+         <div class="sb-l3">${L.keep.dead ? "Keep destroyed: the Legion no longer marches" : `Legion wave ${L.wave + 1} marches in ${fmtTime(Math.max(0, L.waveTimer))}`}</div>`;
+    const html = rows + kHtml;
+    if (html === this.sbHtml) return;
+    this.sbHtml = html;
+    $('sb-rows').innerHTML = rows;
+    $('sb-kalenden').innerHTML = kHtml;
   }
 
   // -------------------------------------------------------- command card

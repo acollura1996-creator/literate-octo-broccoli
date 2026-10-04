@@ -18,10 +18,64 @@ const params = new URLSearchParams(location.search);
 const settings = {
   mode: 'hero',
   heroId: 'paladin',
-  opponents: 3,
-  diplomacy: 'ffa',
+  // Computer generals. By default a mix of AI heroes and AI empires, all rivals.
+  rivals: [
+    { mode: 'hero', hero: 'random', team: 'rival' },
+    { mode: 'empire', hero: 'random', team: 'rival' },
+    { mode: 'random', hero: 'random', team: 'rival' },
+  ],
   difficulty: 'normal',
 };
+
+const RIVAL_COLORS = [
+  ['Blue', '#0042ff'],
+  ['Teal', '#1ce6b9'],
+  ['Purple', '#8a3ad0'],
+];
+
+/** Editable rows for the computer generals on the title screen. */
+function renderRivalRows() {
+  const box = $('rival-rows');
+  box.innerHTML = '';
+  settings.rivals.forEach((r, i) => {
+    const [cname, ccol] = RIVAL_COLORS[i];
+    const row = document.createElement('div');
+    row.className = 'rival-row';
+    const heroOpts = ['random', ...HERO_IDS]
+      .map((h) => `<option value="${h}"${r.hero === h ? ' selected' : ''}>${h === 'random' ? 'Random' : UNITS[h].name}</option>`)
+      .join('');
+    row.innerHTML = `
+      <div class="rr-head">
+        <span class="swatch" style="background:${ccol}"></span>
+        <b>${cname} general</b>
+        ${settings.rivals.length > 1 ? `<button class="rr-remove" type="button" aria-label="Remove the ${cname} general">✕</button>` : ''}
+      </div>
+      <div class="rr-fields">
+        <label>Path<select id="rival-${i}-mode" data-k="mode">
+          <option value="random"${r.mode === 'random' ? ' selected' : ''}>Random</option>
+          <option value="hero"${r.mode === 'hero' ? ' selected' : ''}>Hero</option>
+          <option value="empire"${r.mode === 'empire' ? ' selected' : ''}>Empire</option>
+        </select></label>
+        <label>Hero<select id="rival-${i}-hero" data-k="hero"${r.mode === 'empire' ? ' disabled' : ''}>${heroOpts}</select></label>
+        <label>Side<select id="rival-${i}-team" data-k="team">
+          <option value="rival"${r.team === 'rival' ? ' selected' : ''}>Rival</option>
+          <option value="ally"${r.team === 'ally' ? ' selected' : ''}>Ally</option>
+        </select></label>
+      </div>`;
+    row.querySelectorAll('select').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        r[sel.dataset.k] = sel.value;
+        if (sel.dataset.k === 'mode') renderRivalRows();
+      });
+    });
+    row.querySelector('.rr-remove')?.addEventListener('click', () => {
+      settings.rivals.splice(i, 1);
+      renderRivalRows();
+    });
+    box.appendChild(row);
+  });
+  $('btn-add-rival').classList.toggle('hidden', settings.rivals.length >= 3);
+}
 
 let view = null;
 let overlay = null;
@@ -85,9 +139,14 @@ function buildTitle() {
       playSfx('click', 0.6);
     });
   });
+  $('btn-add-rival').addEventListener('click', () => {
+    if (settings.rivals.length >= 3) return;
+    const heroes = settings.rivals.filter((r) => r.mode === 'hero').length;
+    const empires = settings.rivals.filter((r) => r.mode === 'empire').length;
+    settings.rivals.push({ mode: heroes <= empires ? 'hero' : 'empire', hero: 'random', team: 'rival' });
+    renderRivalRows();
+  });
   $('btn-start').addEventListener('click', () => {
-    settings.opponents = Number($('opt-opponents').value);
-    settings.diplomacy = $('opt-diplomacy').value;
     settings.difficulty = $('opt-difficulty').value;
     initAudio();
     startGame();
@@ -95,8 +154,7 @@ function buildTitle() {
   $('btn-help').addEventListener('click', () => openModal('modal-help'));
   document.querySelectorAll('.path').forEach((x) => x.classList.toggle('selected', x.dataset.mode === settings.mode));
   $('hero-pick').classList.toggle('hidden', settings.mode !== 'hero');
-  $('opt-opponents').value = String(settings.opponents);
-  $('opt-diplomacy').value = settings.diplomacy;
+  renderRivalRows();
   $('opt-difficulty').value = settings.difficulty;
   if (matchMedia('(pointer: coarse)').matches) {
     const n = document.createElement('div');
@@ -164,6 +222,9 @@ function bindModals() {
     } else if (e.key === 'F9') {
       e.preventDefault();
       showQuests();
+    } else if (e.key === 'F11') {
+      e.preventDefault();
+      hud?.toggleScoreboard();
     } else if (e.key === 'Pause') {
       setPaused(!paused);
     } else if (e.key === 'Escape' && !$('modal-menu').classList.contains('hidden')) {
@@ -186,12 +247,17 @@ function toggleMenu() {
 
 function showQuests() {
   if (!game) return;
-  const rivals = game.generals.filter((p) => !p.isHuman);
-  $('quest-rivals').innerHTML = game.allied
-    ? 'All generals are allied against Kalenden. Fight together and bring the tyrant down.'
-    : `Defeat the rival generals: ${rivals
-        .map((p) => `<span style="color:#${p.color.toString(16).padStart(6, '0')}">${p.name}</span> (${p.mode === 'hero' ? 'Hero' : 'Empire'})${p.defeated ? ' — <b>defeated</b>' : ''}`)
-        .join(', ')}.`;
+  const others = game.generals.filter((p) => !p.isHuman);
+  const describe = (p) =>
+    `<span style="color:${game.nameColor(p)}">${p.name}</span> (${p.mode === 'hero' ? UNITS[p.heroType].name : 'Empire'})${p.defeated ? ' — <b>defeated</b>' : ''}`;
+  const allies = others.filter((p) => game.isAlliedToHuman(p));
+  const rivals = others.filter((p) => !game.isAlliedToHuman(p));
+  $('quest-rivals').innerHTML = [
+    allies.length ? `Your allies: ${allies.map(describe).join(', ')}. They defend your base and join your assault on Kalenden.` : '',
+    rivals.length ? `Rival generals: ${rivals.map(describe).join(', ')}. Defeat them all, or slay Kalenden before they do.` : 'Every general is on your side. Bring the tyrant down together.',
+  ]
+    .filter(Boolean)
+    .join('<br>');
   openModal('modal-quests');
   setPaused(true);
 }
@@ -322,7 +388,8 @@ function showEnd(over) {
   const rows = game.generals
     .map((p) => {
       const col = `#${p.color.toString(16).padStart(6, '0')}`;
-      return `<tr><td style="color:${col}">${p.name}${p.isHuman ? ' (you)' : ''}</td><td>${p.mode === 'hero' ? `${UNITS[p.heroType].name} ${p.hero ? `L${p.hero.level}` : ''}` : 'Empire'}</td>
+      const side = p.isHuman ? ' (you)' : game.isAlliedToHuman(p) ? ' (ally)' : '';
+      return `<tr><td style="color:${col}">${p.name}${side}</td><td>${p.mode === 'hero' ? `${UNITS[p.heroType].name} ${p.hero ? `L${p.hero.level}` : ''}` : 'Empire'}</td>
       <td>${p.stats.kills}</td><td>${p.stats.creepsKilled}</td><td>${p.stats.unitsLost}</td><td>${p.stats.goldMined}</td><td>${p.stats.unitsTrained}</td><td>${p.defeated ? 'Defeated' : 'Alive'}</td></tr>`;
     })
     .join('');
@@ -357,13 +424,14 @@ function frame(now) {
 
 function boot(data) {
   if (data?.settings) Object.assign(settings, data.settings);
+  if (!Array.isArray(settings.rivals) || !settings.rivals.length) settings.rivals = [{ mode: 'random', hero: 'random', team: 'rival' }];
   buildTitle();
   bindModals();
   requestAnimationFrame(frame);
 }
 // When hosted in the Artifact viewer, keep the chosen settings across page updates.
 const hot = window.claude?.hot;
-hot?.snapshot?.(() => ({ settings: { ...settings } }));
+hot?.snapshot?.(() => ({ settings: { ...settings, rivals: settings.rivals.map((r) => ({ ...r })) } }));
 if (hot?.ready) hot.ready(boot);
 else boot(hot?.data ?? {});
 
@@ -373,8 +441,21 @@ if (auto) {
   const [mode, heroId] = auto.split(':');
   settings.mode = mode === 'empire' ? 'empire' : 'hero';
   if (heroId && HEROES[heroId]) settings.heroId = heroId;
-  if (params.get('opponents')) settings.opponents = Number(params.get('opponents'));
-  if (params.get('diplomacy')) settings.diplomacy = params.get('diplomacy');
+  // ?rivals=hero-ranger-ally,empire,random  (mode[-hero][-team] per computer general)
+  if (params.get('rivals')) {
+    settings.rivals = params
+      .get('rivals')
+      .split(',')
+      .slice(0, 3)
+      .map((tok) => {
+        const [mode = 'random', hero = 'random', team = 'rival'] = tok.split('-');
+        return { mode, hero: HEROES[hero] ? hero : 'random', team: team === 'ally' ? 'ally' : 'rival' };
+      });
+  } else if (params.get('opponents') || params.get('diplomacy')) {
+    const n = Math.max(1, Math.min(3, Number(params.get('opponents') || 3)));
+    const team = params.get('diplomacy') === 'allied' ? 'ally' : 'rival';
+    settings.rivals = Array.from({ length: n }, () => ({ mode: 'random', hero: 'random', team }));
+  }
   if (params.get('difficulty')) settings.difficulty = params.get('difficulty');
   startGame();
 }

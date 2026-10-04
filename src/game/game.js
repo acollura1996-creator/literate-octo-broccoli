@@ -28,8 +28,9 @@ const HASH_DIM = Math.ceil(MAP_SIZE / HASH_CELL);
 
 export class Game {
   /**
-   * opts: { mode: 'hero'|'empire', heroId, opponents (1-3), diplomacy: 'ffa'|'allied',
-   *         difficulty: 'easy'|'normal'|'hard' }
+   * opts: { mode: 'hero'|'empire', heroId, difficulty: 'easy'|'normal'|'hard',
+   *         rivals: [{ mode: 'random'|'hero'|'empire', hero: 'random'|heroId, team: 'rival'|'ally' }] }
+   *   (legacy: opponents (1-3) and diplomacy: 'ffa'|'allied' are still accepted)
    * hooks: { scene, onUnitAdded(u), onUnitRemoved(u), onUnitChanged(u), fx, projectiles, sound(name, vol) }
    */
   constructor(opts, hooks) {
@@ -46,7 +47,7 @@ export class Game {
     this.messages = [];
     this.floats = [];
     this.pings = [];
-    this.allied = opts.diplomacy === 'allied';
+    this.allied = false; // true when every general is on the player's team (set in createPlayers)
     this.over = null; // { victory: bool, text }
     this.pathBudget = 0;
     this.lastAlert = -99;
@@ -120,17 +121,41 @@ export class Game {
     this.fog.update(true);
   }
 
+  /** The computer generals: [{ mode, hero, team }], also accepting the legacy options. */
+  rivalLineup() {
+    let rivals = this.opts.rivals;
+    if (!rivals?.length) {
+      const n = Math.max(1, Math.min(3, this.opts.opponents ?? 3));
+      const team = this.opts.diplomacy === 'allied' ? 'ally' : 'rival';
+      rivals = Array.from({ length: n }, () => ({ mode: 'random', hero: 'random', team }));
+    }
+    return rivals.slice(0, 3);
+  }
+
   createPlayers() {
-    const n = 1 + Math.max(1, Math.min(3, this.opts.opponents ?? 3));
+    const rivals = this.rivalLineup();
+    const n = 1 + rivals.length;
     this.generals = [];
     const names = [...AI_GENERAL_NAMES].sort(() => Math.random() - 0.5);
-    // Rival heroes are all different from each other and from the player's.
-    const heroPool = HERO_IDS.filter((h) => h !== this.opts.heroId).sort(() => Math.random() - 0.5);
+    // Random paths are resolved so the computer generals mix heroes and empires.
+    const modes = rivals.map((r) => (r.mode === 'hero' || r.mode === 'empire' ? r.mode : null));
+    rivals.forEach((r, i) => {
+      if (modes[i]) return;
+      const heroes = modes.filter((m) => m === 'hero').length;
+      const empires = modes.filter((m) => m === 'empire').length;
+      modes[i] = heroes < empires ? 'hero' : empires < heroes ? 'empire' : Math.random() < 0.5 ? 'hero' : 'empire';
+    });
+    // Random heroes avoid the ones already in play.
+    const taken = new Set([this.opts.mode === 'hero' ? this.opts.heroId : null, ...rivals.map((r) => r.hero)]);
+    const heroPool = HERO_IDS.filter((h) => !taken.has(h)).sort(() => Math.random() - 0.5);
+    let poolIndex = 0;
+    const pickHero = (r) => (r.hero && r.hero !== 'random' ? r.hero : heroPool[poolIndex++ % Math.max(1, heroPool.length)] ?? HERO_IDS[0]);
     const handicap = [0.85, 1.0, 1.15][this.difficulty];
     for (let i = 0; i < n; i++) {
       const isHuman = i === 0;
-      const mode = isHuman ? this.opts.mode : Math.random() < 0.5 ? 'hero' : 'empire';
-      const heroType = isHuman ? this.opts.heroId : heroPool[(i - 1) % heroPool.length];
+      const r = rivals[i - 1];
+      const mode = isHuman ? this.opts.mode : modes[i - 1];
+      const heroType = isHuman ? this.opts.heroId : pickHero(r);
       const [colorName, color] = GENERAL_COLORS[i];
       const p = this.makePlayer({
         index: i,
@@ -140,6 +165,7 @@ export class Game {
         isHuman,
         general: true,
         mode,
+        team: isHuman || r.team === 'ally' ? 0 : i,
         heroType: mode === 'hero' ? heroType : null,
         slot: PLAYER_SLOTS[i],
         handicap: isHuman ? 1 : handicap,
@@ -148,6 +174,7 @@ export class Game {
       this.generals.push(p);
     }
     this.human = this.generals[0];
+    this.allied = this.generals.every((p) => p.team === this.human.team);
     this.creeps = this.makePlayer({ index: 10, name: 'Neutral Hostile', colorName: 'Creeps', color: TEAM_COLORS.neutral, mode: 'creep' });
     this.legion = this.makePlayer({ index: 11, name: 'Kalenden', colorName: 'Legion', color: TEAM_COLORS.kalenden, mode: 'legion' });
     this.passive = this.makePlayer({ index: 12, name: 'Neutral Passive', colorName: 'Neutral', color: TEAM_COLORS.neutral, mode: 'passive' });
@@ -266,14 +293,24 @@ export class Game {
     if (!a || !b || a === b) return false;
     if (a.mode === 'passive' || b.mode === 'passive') return false;
     if (!a.general && !b.general) return false;
-    if (a.general && b.general) return !this.allied;
+    if (a.general && b.general) return a.team !== b.team;
     return true;
   }
   isAlly(a, b) {
     return a === b || (!this.isEnemy(a, b) && a.mode !== 'passive' && b.mode !== 'passive');
   }
   isAlliedToHuman(p) {
-    return p === this.human || (this.allied && p.general);
+    return p === this.human || (p.general && p.team === this.human.team);
+  }
+  /** CSS color for a player's name in messages (team colors lightened to read on dark UI). */
+  nameColor(p) {
+    const c = new THREE.Color(p.color).lerp(new THREE.Color(0xffffff), 0.35);
+    return `#${c.getHexString()}`;
+  }
+  /** A message about another general's doings, in their color. */
+  notify(p, text) {
+    if (p?.isHuman) return;
+    this.message(text, p ? this.nameColor(p) : '#ffd700');
   }
   get isNight() {
     const h = this.timeOfDay;
@@ -403,6 +440,8 @@ export class Game {
     t.hp -= dmg;
     t.lastAttackedAt = this.time;
     if (src && !src.dead) t.lastAttacker = src;
+    if (src?.owner?.general) src.owner.lastFight = { time: this.time, x: t.x, z: t.z, vs: t.owner };
+    if (src && t.owner.general) t.owner.lastFight = { time: this.time, x: t.x, z: t.z, vs: src.owner };
 
     if (src && src.owner !== t.owner) this.onDamaged(t, src);
     if (t.hp <= 0) this.kill(t, src);
@@ -429,6 +468,17 @@ export class Game {
       }
     }
     t.owner.ai?.onAttacked?.(t, src);
+    if (t.isBuilding && t.owner.general && src.owner !== this.creeps) {
+      t.owner.underAttack = { time: this.time, x: t.x, z: t.z, by: src.owner };
+    }
+    // Let the player know when another general storms the citadel.
+    if (t.owner === this.legion && src.owner.general && !src.owner.isHuman && (t.def.boss || t.type === 'kalenden_keep')) {
+      const p = src.owner;
+      if (this.time - (p.lastCitadelNotice ?? -999) > 90) {
+        p.lastCitadelNotice = this.time;
+        this.notify(p, `${p.name}${this.isAlliedToHuman(p) ? ' (your ally)' : ''} is attacking ${t.def.boss ? 'Kalenden himself' : "Kalenden's Keep"}!`);
+      }
+    }
     if (t.owner.isHuman && this.time - this.lastAlert > 20) {
       this.lastAlert = this.time;
       this.lastAlertPos = { x: t.x, z: t.z };
@@ -572,6 +622,13 @@ export class Game {
         this.message(`You have slain ${owner.name}'s ${u.def.name}!`, '#ffd700');
       }
     }
+    if (owner.general && !u.isIllusion && kOwner && kOwner !== owner) {
+      const by = kOwner?.general ? (kOwner.isHuman ? 'you' : kOwner.name) : kOwner === this.legion ? "Kalenden's Legion" : 'creeps';
+      if (u.isHero && !owner.isHuman && !kOwner?.isHuman) this.notify(owner, `${owner.name}'s ${u.def.name} was slain by ${by}.`);
+      if (u.isBuilding && (u.def.dropOff || u.def.revivesHeroes) && !owner.isHuman && !u.underConstruction) {
+        this.notify(owner, `${owner.name}'s ${u.def.name} was destroyed by ${by}!`);
+      }
+    }
     if (u.type === 'kalenden') this.onKalendenSlain(killer);
     if (u.type === 'kalenden_keep') {
       this.message("Kalenden's Keep has fallen! The Legion will march no more.", '#ffd700');
@@ -589,7 +646,7 @@ export class Game {
     const heroes = [];
     for (const p of this.generals) {
       if (!p.hero || p.hero.dead || p.defeated) continue;
-      if (p !== killer.owner && !(this.allied && p.general && killer.owner.general)) continue;
+      if (p.team !== killer.owner.team) continue; // allied heroes nearby share experience
       if (p.hero.distTo(victim) <= 14) heroes.push(p.hero);
     }
     if (!heroes.length) return;
@@ -615,6 +672,8 @@ export class Game {
       if (h.owner.isHuman) {
         this.sound('levelUp', h.x, h.z);
         this.message(`${h.def.name} has reached level ${h.level}!`, '#ffd700');
+      } else if (!h.isIllusion && [3, 6, 8, 10].includes(h.level)) {
+        this.notify(h.owner, `${h.owner.name}'s ${h.def.name} has reached level ${h.level}.`);
       }
       h.owner.ai?.onLevelUp?.(h);
     }
@@ -916,6 +975,8 @@ export class Game {
     if (b.owner.isHuman) {
       this.sound('buildComplete', b.x, b.z);
       this.message(`Upgrade complete: ${b.def.name}.`, '#9fe89f');
+    } else if (b.def.tier) {
+      this.notify(b.owner, `${b.owner.name} has raised a ${b.def.name}.`);
     }
   }
 
@@ -1217,10 +1278,10 @@ export class Game {
     const p = killer?.owner?.general ? killer.owner : null;
     this.kalendenSlainBy = p;
     this.sound('roar');
-    if (this.allied || !p) {
-      this.endGame(true, 'Kalenden has been slain! The generals divide the land of Kalenden among themselves.');
-    } else if (p.isHuman) {
+    if (p?.isHuman) {
       this.endGame(true, 'You have slain Kalenden and claimed his lands as your own!');
+    } else if (!p || p.team === this.human.team) {
+      this.endGame(true, p ? `Your ally ${p.name} has slain Kalenden. Together you claim his lands!` : 'Kalenden has been slain! The land is yours to divide.');
     } else {
       this.endGame(false, `${p.name} has slain Kalenden and claimed the land. Your campaign has failed.`);
     }
@@ -1246,17 +1307,12 @@ export class Game {
         p.defeated = true;
         for (const u of [...p.units]) if (!u.dead) this.kill(u, null);
         if (p.isHuman) this.endGame(false, 'Your forces have been destroyed. Kalenden’s land will never be yours.');
-        else this.message(`${p.name} has been defeated!`, '#ffd700');
+        else this.message(`${p.name} has been defeated!`, this.isAlliedToHuman(p) ? '#ff8a7a' : '#ffd700');
       }
     }
-    if (!this.over && !this.allied) {
-      const rivals = this.generals.filter((p) => !p.isHuman && !p.defeated);
-      if (rivals.length === 0 && !this.human.defeated) {
-        this.endGame(true, 'All rival generals have fallen. The land of Kalenden bows before you!');
-      }
-    }
-    if (!this.over && this.allied && this.generals.every((p) => p.defeated)) {
-      this.endGame(false, 'All generals have fallen. Kalenden reigns supreme.');
+    const enemies = this.generals.filter((p) => p.team !== this.human.team);
+    if (!this.over && enemies.length && enemies.every((p) => p.defeated) && !this.human.defeated) {
+      this.endGame(true, 'All rival generals have fallen. The land of Kalenden bows before you!');
     }
   }
 
