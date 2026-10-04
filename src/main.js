@@ -11,6 +11,7 @@ import { ABILITIES } from './game/abilities.js';
 import { TEAM_COLORS } from './render/assets.js';
 import { initAudio, playSfx, startMusic, stopMusic, setMuted, isMuted } from './audio.js';
 import { GeneralAI } from './ai/general.js';
+import { Roads } from './game/roads.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -210,6 +211,10 @@ function bindModals() {
   });
   $('btn-menu').addEventListener('click', () => toggleMenu());
   $('btn-quests').addEventListener('click', () => showQuests());
+  $('btn-fullscreen').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    else document.documentElement.requestFullscreen?.().catch(() => game?.message('Fullscreen is not available here.', '#ccc'));
+  });
   $('btn-sound').addEventListener('click', () => {
     setMuted(!isMuted());
     $('btn-sound').textContent = isMuted() ? '🔇' : '🔊';
@@ -231,6 +236,26 @@ function bindModals() {
       closeModal('modal-menu');
       setPaused(false);
     }
+  });
+}
+
+function bindCameraOptions() {
+  const s = input.settings;
+  $('opt-scroll').value = String(s.scrollSpeed);
+  if (!$('opt-scroll').value) $('opt-scroll').value = '1';
+  $('opt-wheel').value = s.wheelMode;
+  $('opt-edge').checked = !!s.edgeScroll;
+  $('opt-scroll').addEventListener('change', () => {
+    s.scrollSpeed = Number($('opt-scroll').value);
+    input.saveSettings();
+  });
+  $('opt-wheel').addEventListener('change', () => {
+    s.wheelMode = $('opt-wheel').value;
+    input.saveSettings();
+  });
+  $('opt-edge').addEventListener('change', () => {
+    s.edgeScroll = $('opt-edge').checked;
+    input.saveSettings();
   });
 }
 
@@ -338,7 +363,10 @@ function createGame() {
     input.enabled = true;
     input.targetMode = null;
     input.cardMenu = null;
-  } else input = new Input(game, view, $('gl'));
+  } else {
+    input = new Input(game, view, $('gl'));
+    bindCameraOptions();
+  }
   overlay.game = game;
   overlay.input = input;
   overlay.resize();
@@ -361,6 +389,8 @@ function createGame() {
   window.__game = game;
   window.__input = input;
   window.__view = view;
+  window.__U = UNITS;
+  window.__R = Roads;
   paused = false;
   setPaused(false);
   startMusic();

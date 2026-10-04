@@ -49,7 +49,7 @@ export class UnitView {
   buildModel() {
     const u = this.unit;
     if (this.model) this.group.remove(this.model.root);
-    const m = createModel(u.def.model, u.def.modelColor ?? u.owner.color);
+    const m = createModel(u.modelId, u.def.modelColor ?? u.owner.color);
     this.model = m;
     this.height = m.height ?? 1.2;
     this.parts = m.parts ?? {};
@@ -244,6 +244,13 @@ export class UnitView {
       } else lerpTo(P.weapon, 'x', w, 10);
     }
     for (const sp of P.spin ?? []) sp.rotation.y += dt * 1.6;
+    // Gates swing open for their owner's team.
+    if (P.doors?.length) {
+      const g = this.game;
+      const friend = g.unitsNear(u.x, u.z, 2.6).some((o) => !o.isBuilding && !o.dead && o.owner.team !== undefined && o.owner.team === u.owner.team);
+      this.doorOpen = (this.doorOpen ?? 0) + ((friend ? 1 : 0) - (this.doorOpen ?? 0)) * Math.min(1, dt * 5);
+      for (const d of P.doors) d.obj.rotation.y = (d.side ?? 1) * this.doorOpen * 1.4;
+    }
     for (const b of P.bob ?? []) {
       b.userData.baseY ??= b.position.y;
       b.position.y = b.userData.baseY + Math.sin(time * 2.2 + u.id) * 0.12;

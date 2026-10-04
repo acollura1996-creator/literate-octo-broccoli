@@ -1,6 +1,6 @@
 // The Warcraft III-style console: resources, clock, hero buttons, minimap,
 // 3D portrait, unit info, inventory and the command card.
-import { UNITS, UPGRADES } from '../data/units.js';
+import { UNITS, UPGRADES, AGE_NAMES } from '../data/units.js';
 import { ITEMS } from '../data/items.js';
 import { getCommands } from './commands.js';
 import { modelIcon, Portrait } from './icons.js';
@@ -86,6 +86,10 @@ export class Hud {
     $('r-gold').textContent = Math.floor(p.gold);
     $('r-lumber').textContent = Math.floor(p.lumber);
     $('r-food').textContent = `${p.foodUsed}/${p.foodCap}`;
+    if (p.mode === 'empire') {
+      const age = AGE_NAMES[p.tier] || 'No Town Hall';
+      if ($('r-mode').textContent !== age) $('r-mode').textContent = age;
+    }
     $('r-food').classList.toggle('warn', p.foodUsed >= p.foodCap && p.mode === 'empire');
     $('gametime').textContent = fmtTime(g.time);
     const hour = g.timeOfDay;
@@ -328,7 +332,7 @@ export class Hud {
     // Single unit.
     const u = unit;
     const parts = [];
-    let title = u.def.name;
+    let title = u.name;
     let sub = '';
     if (u.isHero) {
       sub = `Level ${u.level} ${u.def.title ?? ''}${u.isIllusion ? ' (Illusion)' : ''}`;
@@ -371,7 +375,16 @@ export class Hud {
       }
       if (u.type === 'goldmine') stats.push(`<div class="stat"><span class="si">◉</span>Gold: <b>${u.goldLeft}</b></div>`);
       if (u.carry) stats.push(`<div class="stat dim">Carrying ${u.carry.amount} ${u.carry.kind}</div>`);
-      if (u.def.foodProvided && !u.underConstruction) stats.push(`<div class="stat dim">Provides ${u.def.foodProvided} food</div>`);
+      if (u.def.foodProvided && !u.underConstruction) stats.push(`<div class="stat dim">Provides ${u.def.foodProvided} population</div>`);
+      if (u.def.foodByAge && !u.underConstruction) {
+        stats.push(
+          u.roadConnected
+            ? `<div class="stat ok">Houses ${u.def.foodByAge[u.ageLevel - 1]} population (${AGE_NAMES[u.ageLevel]})</div>`
+            : '<div class="stat warn">Not connected to your Town Hall by road: provides no population. Lay a road linking it.</div>',
+        );
+      }
+      if (u.def.tier && u.owner.general) stats.push(`<div class="stat">Age: <b>${AGE_NAMES[u.def.tier]}</b></div>`);
+      if (u.def.gate) stats.push('<div class="stat dim">Opens for you and your allies.</div>');
       if (u.def.shop) {
         const cust = g.shopCustomer(g.human, u);
         stats.push(`<div class="stat ${cust ? 'ok' : 'dim'}">${cust ? `${cust.def.name} may trade here.` : 'Bring your Hero close to trade.'}</div>`);

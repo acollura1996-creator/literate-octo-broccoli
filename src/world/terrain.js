@@ -197,9 +197,9 @@ export class Terrain {
         const cornerDist = Math.min(
           Math.hypot(x, z), Math.hypot(MAP_SIZE - x, z), Math.hypot(x, MAP_SIZE - z), Math.hypot(MAP_SIZE - x, MAP_SIZE - z),
         );
-        if (cornerDist < 22) p = Math.max(p, 0.9);
-        if (n > 0.18) p = Math.max(p, 0.75);
-        else if (n > 0.08) p = Math.max(p, 0.25);
+        if (cornerDist < 34) p = Math.max(p, 0.9);
+        if (n > 0.24) p = Math.max(p, 0.75);
+        else if (n > 0.15) p = Math.max(p, 0.2);
         if (rand() < p) {
           const species = t === T_BLIGHT ? 2 : rand() < 0.55 ? 0 : 1;
           this.trees.push({
@@ -370,6 +370,23 @@ export class Terrain {
     tex.generateMipmaps = true;
     tex.minFilter = THREE.LinearMipmapLinearFilter;
     const material = patchFog(new THREE.MeshLambertMaterial({ map: tex }));
+    // A tiling detail texture keeps the ground crisp up close on the large map.
+    const detail = makeDetailTexture();
+    const fogCompile = material.onBeforeCompile;
+    material.onBeforeCompile = (shader) => {
+      fogCompile(shader);
+      shader.uniforms.uDetail = { value: detail };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D uDetail;')
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+          float dA = texture2D(uDetail, vFogWorldPos.xz * 0.37).r;
+          float dB = texture2D(uDetail, vFogWorldPos.xz * 0.091 + 0.37).g;
+          diffuseColor.rgb *= 0.62 + 0.5 * dA + 0.26 * (dB - 0.5);`,
+        );
+    };
+    material.customProgramCacheKey = () => 'ground-detail';
     const m = new THREE.Mesh(geom, material);
     m.receiveShadow = true;
     m.name = 'ground';
@@ -463,47 +480,49 @@ export class Terrain {
       return mergeGeometries([a, b, c, d]);
     })();
 
-    const counts = [0, 0, 0];
-    for (const t of this.trees) counts[t.species]++;
+    // Trees are batched per 32x32-cell chunk so off-screen forests are culled
+    // (in both the main and the shadow pass).
+    const CH = 32;
+    const chunksPerSide = Math.ceil(MAP_SIZE / CH);
     const trunkMat = mat(0x6b4a2b);
     const leafMats = [mat(0xffffff), mat(0xffffff), mat(0x4a3a40)];
     const canopyGeos = [pineGeo, ashGeo, deadGeo];
-    this.treeMeshes = [];
+    const buckets = new Map();
+    for (const t of this.trees) {
+      const key = `${Math.floor(t.cx / CH) + Math.floor(t.cz / CH) * chunksPerSide}:${t.species}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(t);
+    }
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
     const rand = mulberry32(this.seed + 7);
-    for (let s = 0; s < 3; s++) {
-      const trunks = new THREE.InstancedMesh(trunkGeo, s === 2 ? mat(0x3d3236) : trunkMat, Math.max(1, counts[s]));
-      const canopy = new THREE.InstancedMesh(canopyGeos[s], leafMats[s], Math.max(1, counts[s]));
+    for (const list of buckets.values()) {
+      const s = list[0].species;
+      const trunks = new THREE.InstancedMesh(trunkGeo, s === 2 ? mat(0x3d3236) : trunkMat, list.length);
+      const canopy = new THREE.InstancedMesh(canopyGeos[s], leafMats[s], list.length);
       trunks.castShadow = true;
       canopy.castShadow = true;
       canopy.receiveShadow = true;
-      trunks.count = counts[s];
-      canopy.count = counts[s];
-      this.treeMeshes.push({ trunks, canopy });
+      list.forEach((t, i) => {
+        t.index = i;
+        t.mesh = { trunks, canopy };
+        dummy.position.set(t.x, this.heightAt(t.x, t.z) - 0.05, t.z);
+        dummy.rotation.set(0, t.rot, 0);
+        dummy.scale.setScalar(t.scale);
+        dummy.updateMatrix();
+        trunks.setMatrixAt(i, dummy.matrix);
+        canopy.setMatrixAt(i, dummy.matrix);
+        if (s === 0) color.setRGB(0.13 + rand() * 0.05, 0.36 + rand() * 0.1, 0.16 + rand() * 0.05);
+        else if (s === 1) color.setRGB(0.27 + rand() * 0.1, 0.5 + rand() * 0.12, 0.14 + rand() * 0.05);
+        else color.setRGB(0.32, 0.27, 0.3);
+        canopy.setColorAt(i, color);
+      });
+      trunks.instanceMatrix.needsUpdate = true;
+      canopy.instanceMatrix.needsUpdate = true;
+      if (canopy.instanceColor) canopy.instanceColor.needsUpdate = true;
+      trunks.computeBoundingSphere();
+      canopy.computeBoundingSphere();
       this.group.add(trunks, canopy);
-    }
-    const idx = [0, 0, 0];
-    for (const t of this.trees) {
-      const s = t.species;
-      t.index = idx[s]++;
-      dummy.position.set(t.x, this.heightAt(t.x, t.z) - 0.05, t.z);
-      dummy.rotation.set(0, t.rot, 0);
-      dummy.scale.setScalar(t.scale);
-      dummy.updateMatrix();
-      this.treeMeshes[s].trunks.setMatrixAt(t.index, dummy.matrix);
-      this.treeMeshes[s].canopy.setMatrixAt(t.index, dummy.matrix);
-      if (s === 0) color.setRGB(0.13 + rand() * 0.05, 0.36 + rand() * 0.1, 0.16 + rand() * 0.05);
-      else if (s === 1) color.setRGB(0.27 + rand() * 0.1, 0.5 + rand() * 0.12, 0.14 + rand() * 0.05);
-      else color.setRGB(0.32, 0.27, 0.3);
-      this.treeMeshes[s].canopy.setColorAt(t.index, color);
-    }
-    for (const tm of this.treeMeshes) {
-      tm.trunks.instanceMatrix.needsUpdate = true;
-      tm.canopy.instanceMatrix.needsUpdate = true;
-      if (tm.canopy.instanceColor) tm.canopy.instanceColor.needsUpdate = true;
-      tm.trunks.computeBoundingSphere();
-      tm.canopy.computeBoundingSphere();
     }
   }
 
@@ -511,7 +530,7 @@ export class Terrain {
   fellTree(tree) {
     if (!tree.alive) return;
     tree.alive = false;
-    const tm = this.treeMeshes[tree.species];
+    const tm = tree.mesh;
     const dummy = new THREE.Object3D();
     dummy.position.set(tree.x, this.heightAt(tree.x, tree.z) - 0.05, tree.z);
     dummy.scale.set(tree.scale * 1.3, 0.12, tree.scale * 1.3);
@@ -531,7 +550,7 @@ export class Terrain {
     const rocks = [];
     const bushes = [];
     const flowers = [];
-    for (let i = 0; i < 2600; i++) {
+    for (let i = 0; i < Math.round(2600 * (MAP_SIZE / 160) ** 2); i++) {
       const x = 2 + rand() * (MAP_SIZE - 4);
       const z = 2 + rand() * (MAP_SIZE - 4);
       const cx = Math.floor(x);
@@ -605,6 +624,59 @@ export class Terrain {
   update(time) {
     if (this.waterUniforms) this.waterUniforms.uTime.value = time;
   }
+}
+
+/** Grayscale tiling noise (R: fine blades/specks, G: soft blotches) for ground detail. */
+function makeDetailTexture() {
+  const N = 256;
+  const c = document.createElement('canvas');
+  c.width = N;
+  c.height = N;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(N, N);
+  const rand = mulberry32(777);
+  const fine = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) fine[i] = rand();
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      // Short vertical streaks read as grass blades from the RTS camera.
+      let v = 0;
+      for (let k = 0; k < 3; k++) v += fine[((y + k) % N) * N + x];
+      v = v / 3;
+      // Tileable soft noise from wrapped value noise.
+      const u = (x / N) * 8;
+      const w = (y / N) * 8;
+      const s = valueNoiseWrap(u, w, 8);
+      const o = (y * N + x) * 4;
+      img.data[o] = Math.round(v * 255);
+      img.data[o + 1] = Math.round(s * 255);
+      img.data[o + 2] = 0;
+      img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  return t;
+}
+
+function valueNoiseWrap(x, z, period) {
+  const xi = Math.floor(x);
+  const zi = Math.floor(z);
+  const fx = x - xi;
+  const fz = z - zi;
+  const h = (a, b) => valueNoise(((a % period) + period) % period, ((b % period) + period) % period, 99);
+  const sx = fx * fx * (3 - 2 * fx);
+  const sz = fz * fz * (3 - 2 * fz);
+  const a = h(xi, zi);
+  const b = h(xi + 1, zi);
+  const c = h(xi, zi + 1);
+  const d = h(xi + 1, zi + 1);
+  return a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz;
 }
 
 /** Minimal geometry merge (non-indexed output) to avoid pulling in addons. */

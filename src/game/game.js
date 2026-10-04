@@ -1,14 +1,15 @@
 // The Game: owns the world state and runs the simulation.
 import * as THREE from 'three';
 import { Unit } from './unit.js';
-import { UNITS, ATTACK_TABLE, UPGRADES, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL } from '../data/units.js';
+import { UNITS, ATTACK_TABLE, UPGRADES, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES } from '../data/units.js';
 import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.js';
 import { ITEMS } from '../data/items.js';
 import { ABILITIES } from './abilities.js';
 import { updateUnit, stopMoving, finishOrder } from './behavior.js';
-import { PathGrid, BLOCK_BUILDING } from '../world/pathgrid.js';
+import { PathGrid, BLOCK_BUILDING, BLOCK_GATE } from '../world/pathgrid.js';
+import { Roads } from './roads.js';
 import { Terrain } from '../world/terrain.js';
-import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS } from '../world/layout.js';
+import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, CITY_RADIUS } from '../world/layout.js';
 import { Fog } from './fog.js';
 import { TEAM_COLORS } from '../render/assets.js';
 import { createModel } from '../render/models.js';
@@ -63,6 +64,7 @@ export class Game {
     this.grid = new PathGrid(MAP_SIZE);
     this.terrain = new Terrain(this.layout, this.grid);
     this.fog = new Fog(this);
+    this.roads = new Roads(this);
 
     this.createPlayers();
 
@@ -81,7 +83,7 @@ export class Game {
     // Keep these areas free of trees.
     const clear = [];
     for (const b of this.layout.bases) {
-      clear.push({ x: b.hall[0], z: b.hall[1], r: 15 });
+      clear.push({ x: b.hall[0], z: b.hall[1], r: CITY_RADIUS });
       clear.push({ x: b.mine[0], z: b.mine[1], r: 4.5 });
       clear.push({ x: b.shop[0], z: b.shop[1], r: 5 });
       // Lane between mine and hall.
@@ -188,7 +190,7 @@ export class Game {
       foodUsed: 0,
       foodCap: 0,
       tier: 0,
-      upgrades: { weapons: 0, armor: 0 },
+      upgrades: { weapons: 0, armor: 0, lumber: 0 },
       units: [],
       buildings: [],
       hero: null,
@@ -211,7 +213,8 @@ export class Game {
     if (p.mode === 'empire') {
       p.gold = 500;
       p.lumber = 150;
-      this.spawnUnit('townhall', p, hx, hz);
+      const th = this.spawnUnit('townhall', p, hx, hz);
+      this.layStartingRoads(p, th);
       const mx = base.mine[0];
       const mz = base.mine[1];
       for (let i = 0; i < 5; i++) {
@@ -231,6 +234,22 @@ export class Game {
       p.hero = hero;
     }
     if (!p.isHuman) p.ai = new GeneralAI(this, p);
+  }
+
+  /** A town square: roads ringing the Town Hall plus a high street toward the map center. */
+  layStartingRoads(p, th) {
+    const { x: cx, z: cz } = th.cell;
+    const fp = th.def.footprint;
+    const cells = [];
+    for (let i = -1; i <= fp; i++) cells.push([cx + i, cz - 1], [cx + i, cz + fp], [cx - 1, cz + i], [cx + fp, cz + i]);
+    // High street: from the ring toward the center of the map.
+    const [tx, tz] = p.base.toCenter;
+    const sx = Math.round(th.x + tx * (fp / 2 + 1));
+    const sz = Math.round(th.z + tz * (fp / 2 + 1));
+    const ex = Math.round(th.x + tx * (fp / 2 + 12));
+    const ez = Math.round(th.z + tz * (fp / 2 + 12));
+    cells.push(...Roads.line(sx, sz, ex, ez));
+    this.roads.place(cells, p, true);
   }
 
   blockCitadelWalls() {
@@ -336,7 +355,13 @@ export class Game {
     if (u.isBuilding) {
       const fp = def.footprint;
       u.cell = { x: Math.round(x - fp / 2), z: Math.round(z - fp / 2) };
-      this.grid.setRect(u.cell.x, u.cell.z, fp, fp, BLOCK_BUILDING, true);
+      if (def.gate) {
+        this.grid.setRect(u.cell.x, u.cell.z, fp, fp, BLOCK_GATE, true);
+        for (let zz = u.cell.z; zz < u.cell.z + fp; zz++) {
+          for (let xx = u.cell.x; xx < u.cell.x + fp; xx++) if (this.grid.inBounds(xx, zz)) this.grid.gateTeam[zz * MAP_SIZE + xx] = owner.team ?? -1;
+        }
+      } else this.grid.setRect(u.cell.x, u.cell.z, fp, fp, BLOCK_BUILDING, true);
+      if (!def.gate) this.roads?.clear(u.cell.x, u.cell.z, fp, fp); // gates keep the road running through them
       owner.buildings.push(u);
       if (opts.construction) {
         u.underConstruction = true;
@@ -521,6 +546,7 @@ export class Game {
         stun = t.isHero ? 1 : 2;
       }
     }
+    if (u.def.bonusVsCavalry && t.def.cavalry) dmg *= u.def.bonusVsCavalry;
     const dealt = this.dealDamage(u, t, dmg, u.def.attackType);
     if (crit && dealt > 0) this.floatText(t.x, t.z, `${Math.round(dealt)}!`, '#ff4040', 1.2);
     if (stun && !t.dead && !t.spellImmune) this.stun(t, stun);
@@ -577,7 +603,11 @@ export class Game {
     const owner = u.owner;
     if (u.isBuilding) {
       const fp = u.def.footprint;
-      this.grid.setRect(u.cell.x, u.cell.z, fp, fp, BLOCK_BUILDING, false);
+      this.grid.setRect(u.cell.x, u.cell.z, fp, fp, u.def.gate ? BLOCK_GATE : BLOCK_BUILDING, false);
+      if (owner.general && (u.def.tier || u.def.needsRoad)) {
+        this.updateTier(owner);
+        this.roads.recompute(owner);
+      }
       // Refund queued training.
       for (const q of u.trainQueue) this.refund(owner, UNITS[q.type].cost);
       u.trainQueue = [];
@@ -773,9 +803,15 @@ export class Game {
   }
 
   hasRequirement(p, req) {
-    if (req === 'keep') return p.tier >= 2;
-    if (req === 'castle') return p.tier >= 3;
+    if (req === 'keep' || req === 'age2') return p.tier >= 2;
+    if (req === 'castle' || req === 'age3') return p.tier >= 3;
+    if (req === 'age4') return p.tier >= 4;
     return p.buildings.some((b) => !b.dead && !b.underConstruction && (b.type === req || (req === 'scouttower' && b.type === 'guardtower')));
+  }
+  requirementName(req) {
+    const m = /^age(\d)$/.exec(req);
+    if (m) return AGE_NAMES[Number(m[1])];
+    return UNITS[req]?.name ?? req;
   }
   missingRequirements(p, def) {
     return (def.requires || []).filter((r) => !this.hasRequirement(p, r));
@@ -796,6 +832,7 @@ export class Game {
     for (const b of p.buildings) {
       if (b.dead) continue;
       if (!b.underConstruction && b.def.foodProvided) cap += b.def.foodProvided;
+      if (!b.underConstruction && b.def.foodByAge && b.roadConnected) cap += b.def.foodByAge[b.ageLevel - 1];
       for (const q of b.trainQueue) used += UNITS[q.type].food;
     }
     for (const u of p.units) {
@@ -803,18 +840,43 @@ export class Game {
       used += u.def.food;
     }
     for (const r of p.pendingRevives ?? []) used += r;
-    p.foodCap = Math.min(100, cap);
+    p.foodCap = Math.min(p.mode === 'empire' ? 150 : 100, cap);
     p.foodUsed = used;
   }
 
+  /**
+   * Can `type` be placed centered at (x, z)? Sets this.placeReason when not.
+   * Houses must touch one of the owner's roads; gates may replace the owner's walls.
+   */
   canPlace(type, x, z, p = null) {
     const def = UNITS[type];
     const fp = def.footprint;
     const cx = Math.round(x - fp / 2);
     const cz = Math.round(z - fp / 2);
-    if (!this.grid.rectFree(cx, cz, fp, fp)) return false;
-    if (p?.isHuman) {
+    this.placeReason = "Can't build there";
+    if (def.gate && p) {
+      for (let zz = cz; zz < cz + fp; zz++) {
+        for (let xx = cx; xx < cx + fp; xx++) {
+          if (this.grid.rectFree(xx, zz, 1, 1)) continue;
+          const w = this.wallAt(xx, zz);
+          if (!w || w.owner !== p) return false;
+        }
+      }
+    } else if (!this.grid.rectFree(cx, cz, fp, fp)) return false;
+    for (let zz = cz; zz < cz + fp; zz++) {
+      for (let xx = cx; xx < cx + fp; xx++) {
+        if (this.roads.isRoad(xx, zz) && !def.gate) {
+          this.placeReason = "Can't build on a road";
+          return false;
+        }
+      }
+    }
+    if (p?.isHuman && !p.ai) {
       for (let zz = cz; zz < cz + fp; zz++) for (let xx = cx; xx < cx + fp; xx++) if (!this.fog.isExplored(xx + 0.5, zz + 0.5)) return false;
+    }
+    if (def.needsRoad && p && !this.roads.touchesRoad(cx, cz, fp, p)) {
+      this.placeReason = 'Must be built next to one of your roads';
+      return false;
     }
     // Keep town halls a little away from gold mines, everything off the mine itself.
     for (const m of this.units) {
@@ -825,12 +887,36 @@ export class Game {
     return true;
   }
 
+  /** The wall piece occupying a cell, if any. */
+  wallAt(cx, cz) {
+    for (const u of this.unitsNear(cx + 0.5, cz + 0.5, 0.2)) {
+      if (u.def.wall && !u.dead && u.cell.x === cx && u.cell.z === cz) return u;
+    }
+    return null;
+  }
+
   placeBuilding(builder, type, x, z) {
     const def = UNITS[type];
     const fp = def.footprint;
     const sx = this.snap(x, fp);
     const sz = this.snap(z, fp);
-    if (!this.canPlace(type, sx, sz)) return null;
+    if (!this.canPlace(type, sx, sz, builder.owner)) return null;
+    if (def.gate) {
+      // A gate replaces the builder's own wall pieces under it.
+      const cx = Math.round(sx - fp / 2);
+      const cz = Math.round(sz - fp / 2);
+      for (let zz = cz; zz < cz + fp; zz++) {
+        for (let xx = cx; xx < cx + fp; xx++) {
+          const w = this.wallAt(xx, zz);
+          if (w && w.owner === builder.owner) {
+            this.grid.setRect(w.cell.x, w.cell.z, 1, 1, BLOCK_BUILDING, false);
+            w.dead = true;
+            w.deathTime = this.time - 10;
+            this.removeUnit(w);
+          }
+        }
+      }
+    }
     const b = this.spawnUnit(type, builder.owner, sx, sz, { construction: true, facing: Math.PI });
     // Shove units out of the footprint.
     for (const u of this.unitsNear(sx, sz, fp * 0.75)) {
@@ -865,6 +951,10 @@ export class Game {
     b.underConstruction = false;
     b.buildProgress = 1;
     this.updateTier(b.owner);
+    if (b.def.tier || b.def.needsRoad) this.roads.recompute(b.owner);
+    if (b.def.needsRoad && !b.roadConnected && b.owner.isHuman) {
+      this.message('This house is not connected to your Town Hall by road, so it adds no population.', '#ffb070');
+    }
     this.hooks.onUnitChanged?.(b);
     if (b.owner.isHuman) {
       this.sound('buildComplete', b.x, b.z);
@@ -883,7 +973,7 @@ export class Game {
     }
     const missing = this.missingRequirements(p, def);
     if (missing.length) {
-      if (p.isHuman) this.message(`Requires: ${missing.map((m) => UNITS[m].name).join(', ')}.`, '#ff8080');
+      if (p.isHuman) this.message(`Requires: ${missing.map((m) => this.requirementName(m)).join(', ')}.`, '#ff8080');
       return false;
     }
     this.computeFood(p);
@@ -949,7 +1039,7 @@ export class Game {
     const def = UNITS[to];
     const missing = this.missingRequirements(p, def);
     if (missing.length) {
-      if (p.isHuman) this.message(`Requires: ${missing.map((m) => UNITS[m].name).join(', ')}.`, '#ff8080');
+      if (p.isHuman) this.message(`Requires: ${missing.map((m) => this.requirementName(m)).join(', ')}.`, '#ff8080');
       return false;
     }
     if (!this.spend(p, def.cost)) return false;
@@ -967,24 +1057,51 @@ export class Game {
     const to = b.upgrading.to;
     b.upgrading = null;
     const ratio = b.hp / b.maxHp;
+    const p = b.owner;
+    const before = p.tier;
     b.def = UNITS[to];
     b.type = to;
     b.hp = b.maxHp * ratio;
-    this.updateTier(b.owner);
+    this.updateTier(p);
     this.hooks.onUnitChanged?.(b, true);
-    if (b.owner.isHuman) {
+    if (p.tier > before) this.onAgeAdvanced(p);
+    else if (p.isHuman) {
       this.sound('buildComplete', b.x, b.z);
       this.message(`Upgrade complete: ${b.def.name}.`, '#9fe89f');
-    } else if (b.def.tier) {
-      this.notify(b.owner, `${b.owner.name} has raised a ${b.def.name}.`);
     }
+  }
+
+  /** A general reached a new age: houses, walls and gates rebuild in the new style. */
+  onAgeAdvanced(p) {
+    const age = AGE_NAMES[p.tier];
+    if (p.isHuman) {
+      this.sound('levelUp');
+      this.message(`Your empire has advanced to the ${age}! Your houses, walls and gates are being rebuilt.`, '#ffe680');
+    } else {
+      this.notify(p, `${p.name} has advanced to the ${age}.`);
+    }
+    for (const b of p.buildings) {
+      if (b.dead || !b.def.ageModels || b.ageLevel >= p.tier) continue;
+      this.later(0.5 + Math.random() * 5, () => this.upgradeStructureAge(b, p.tier));
+    }
+    this.roads.dirty = true;
+  }
+
+  upgradeStructureAge(b, tier) {
+    if (b.dead || b.ageLevel >= tier) return;
+    const ratio = b.hp / b.maxHp;
+    b.ageLevel = tier;
+    b.hp = b.maxHp * ratio;
+    this.hooks.onUnitChanged?.(b, true);
+    this.hooks.fx?.burst(b.x, 0.8, b.z, 0xd8c8a0, 10, 2.5, 0.07, 0.6);
+    if (b.def.needsRoad) this.computeFood(b.owner);
   }
 
   startResearch(b, upg) {
     const p = b.owner;
     const U = UPGRADES[upg];
     const lvl = p.upgrades[upg];
-    if (b.researching || b.underConstruction || lvl >= 3) return false;
+    if (b.researching || b.underConstruction || lvl >= (U.levels ?? 3)) return false;
     if (p.researchingUpg?.[upg]) return false;
     if (p.tier < U.tier[lvl]) {
       if (p.isHuman) this.message(`Requires ${['', 'Town Hall', 'Keep', 'Castle'][U.tier[lvl]]}.`, '#ff8080');
@@ -1360,6 +1477,7 @@ export class Game {
     for (let i = 0; i < list.length; i++) updateUnit(this, list[i], dt);
 
     this.separate(dt);
+    this.grid.passTeam = -99;
     this.hooks.projectiles?.update(dt);
 
     // Remove dead units after their death animation.
@@ -1509,12 +1627,14 @@ export class Game {
         const po = (push * wo) / total;
         const ux = u.x - nx * pu;
         const uz = u.z - nz * pu;
+        grid.passTeam = u.owner.team ?? -99;
         if (grid.walkableAt(ux, uz)) {
           u.x = ux;
           u.z = uz;
         }
         const ox = o.x + nx * po;
         const oz = o.z + nz * po;
+        grid.passTeam = o.owner.team ?? -99;
         if (grid.walkableAt(ox, oz)) {
           o.x = ox;
           o.z = oz;

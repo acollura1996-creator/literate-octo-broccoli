@@ -36,6 +36,8 @@ export class Unit {
       this.tomes = { str: 0, agi: 0, int: 0 };
       this.inventory = [null, null, null, null, null, null];
     }
+    // Age-styled structures remember the age they were built (or rebuilt) in.
+    this.ageLevel = Math.max(1, Math.min(4, opts.ageLevel ?? owner?.tier ?? 1));
     this.isIllusion = !!opts.illusion;
     this.summoned = !!def.summoned || !!opts.summoned;
     this.lifetime = opts.lifetime ?? null; // seconds remaining for summons
@@ -94,7 +96,11 @@ export class Unit {
   }
 
   get name() {
-    return this.def.name;
+    return this.def.ageNames?.[this.ageLevel - 1] ?? this.def.name;
+  }
+  /** Model for this unit (houses, walls and gates change with the age). */
+  get modelId() {
+    return this.def.ageModels?.[this.ageLevel - 1] ?? this.def.model;
   }
 
   // ------------------------------------------------------------- attributes
@@ -124,7 +130,7 @@ export class Unit {
   }
 
   get maxHp() {
-    let hp = this.isHero ? 100 + 25 * this.str : this.def.hp;
+    let hp = this.isHero ? 100 + 25 * this.str : (this.def.hpByAge?.[this.ageLevel - 1] ?? this.def.hp);
     hp += this.itemStat('hp') + (this.mods.hp || 0);
     if (this.owner?.handicap && !this.isBuilding) hp *= this.owner.handicap;
     return Math.round(hp);
@@ -142,7 +148,7 @@ export class Unit {
     return r + this.itemStat('manaRegen') + (this.mods.manaRegen || 0);
   }
   get armor() {
-    let a = this.def.armor;
+    let a = this.def.armorByAge?.[this.ageLevel - 1] ?? this.def.armor;
     if (this.isHero) a += this.agi * 0.3;
     else if (!this.isBuilding && this.owner?.upgrades) a += this.owner.upgrades.armor * 2;
     return a + this.itemStat('armor') + (this.mods.armor || 0);

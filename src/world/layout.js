@@ -4,7 +4,7 @@
 // hold outposts (expansion gold mine, mercenary camp, arcane vault and a
 // fountain of health) guarded by powerful creeps.
 
-export const MAP_SIZE = 160;
+export const MAP_SIZE = 256;
 export const CENTER = MAP_SIZE / 2;
 
 /** Rotate a point around the map center by k quarter turns (NW -> NE -> SE -> SW). */
@@ -21,53 +21,58 @@ export const PLAYER_SLOTS = [3, 1, 0, 2];
 
 // --- North-west quadrant template (rotated for every corner) ------------------
 const BASE = {
-  hall: [28, 28], // town hall (4x4) / altar (3x3, snapped)
-  mine: [21.5, 21.5],
-  towers: [[35, 23], [23, 35]],
-  shop: [41.5, 33.5],
+  hall: [46, 46], // town hall (4x4) / altar (3x3, snapped)
+  mine: [39.5, 39.5],
+  towers: [[55, 41], [41, 55]],
+  shop: [80.5, 52.5],
 };
+
+/** Radius around a start location kept free of trees and creeps, for building a city. */
+export const CITY_RADIUS = 24;
 
 // Creep camps: tier 1 easy ... tier 4 deadly.
 const QUAD_CAMPS = [
-  { at: [47, 23], tier: 1, units: ['kobold', 'kobold', 'kobold'] },
-  { at: [23, 47], tier: 1, units: ['gnoll', 'gnoll', 'gnoll_archer'] },
-  { at: [42, 52], tier: 2, units: ['wolf', 'wolf', 'forest_troll'] },
-  { at: [61, 31], tier: 2, units: ['forest_troll', 'forest_troll', 'spider'] },
-  { at: [31, 61], tier: 2, units: ['spider', 'spider', 'gnoll'] },
-  { at: [51, 64], tier: 3, units: ['ogre', 'ogre', 'forest_troll', 'forest_troll'] },
+  { at: [84, 32], tier: 1, units: ['kobold', 'kobold', 'kobold'] },
+  { at: [32, 84], tier: 1, units: ['gnoll', 'gnoll', 'gnoll_archer'] },
+  { at: [64, 20], tier: 1, units: ['kobold', 'kobold', 'gnoll_archer'] },
+  { at: [20, 64], tier: 2, units: ['wolf', 'wolf', 'gnoll'] },
+  { at: [78, 94], tier: 2, units: ['wolf', 'wolf', 'forest_troll'] },
+  { at: [100, 48], tier: 2, units: ['forest_troll', 'forest_troll', 'spider'] },
+  { at: [48, 100], tier: 2, units: ['spider', 'spider', 'gnoll'] },
+  { at: [92, 110], tier: 3, units: ['ogre', 'ogre', 'forest_troll', 'forest_troll'] },
+  { at: [112, 70], tier: 3, units: ['ogre_lord', 'ogre', 'forest_troll'] },
 ];
 
 // --- North edge template (rotated for every edge) ----------------------------
 const EDGE = {
-  mine: [80.5, 9.5],
-  merc: [67.5, 14.5],
-  vault: [93.5, 14.5],
-  fountain: [80.5, 36.5],
-  camp: { at: [80, 22], tier: 4, units: ['drake', 'drake', 'rock_golem'] },
+  mine: [CENTER + 0.5, 13.5],
+  merc: [CENTER - 17.5, 22.5],
+  vault: [CENTER + 18.5, 22.5],
+  fountain: [CENTER + 0.5, 50.5],
+  camp: { at: [CENTER, 30], tier: 4, units: ['drake', 'drake', 'rock_golem'] },
 };
 
-// Center: Kalenden's citadel.
+// Center: Kalenden's citadel (offsets are relative to the map center).
+const C = (dx, dz) => [CENTER + dx, CENTER + dz];
 export const CITADEL = {
-  keep: [80, 80],
+  keep: C(0, 0),
   half: 13, // walls run from CENTER-13 to CENTER+13
   gateHalf: 2,
-  kalenden: [80, 86.5],
-  towers: [
-    [73, 73], [87, 73], [87, 87], [73, 87],
-  ],
+  kalenden: C(0, 6.5),
+  towers: [C(-7, -7), C(7, -7), C(7, 7), C(-7, 7)],
   guards: [
-    { type: 'dark_knight', at: [78, 70] }, { type: 'dark_knight', at: [90, 78] },
-    { type: 'dark_knight', at: [82, 90] }, { type: 'dark_knight', at: [70, 82] },
-    { type: 'skeleton', at: [75, 72] }, { type: 'skeleton', at: [85, 72] },
-    { type: 'skeleton', at: [88, 75] }, { type: 'skeleton', at: [88, 85] },
-    { type: 'skeleton', at: [75, 88] }, { type: 'skeleton', at: [85, 88] },
-    { type: 'skeleton', at: [72, 75] }, { type: 'skeleton', at: [72, 85] },
-    { type: 'skeleton_archer', at: [76, 76] }, { type: 'skeleton_archer', at: [84, 76] },
-    { type: 'skeleton_archer', at: [76, 84] }, { type: 'skeleton_archer', at: [84, 84] },
+    { type: 'dark_knight', at: C(-2, -10) }, { type: 'dark_knight', at: C(10, -2) },
+    { type: 'dark_knight', at: C(2, 10) }, { type: 'dark_knight', at: C(-10, 2) },
+    { type: 'skeleton', at: C(-5, -8) }, { type: 'skeleton', at: C(5, -8) },
+    { type: 'skeleton', at: C(8, -5) }, { type: 'skeleton', at: C(8, 5) },
+    { type: 'skeleton', at: C(-5, 8) }, { type: 'skeleton', at: C(5, 8) },
+    { type: 'skeleton', at: C(-8, -5) }, { type: 'skeleton', at: C(-8, 5) },
+    { type: 'skeleton_archer', at: C(-4, -4) }, { type: 'skeleton_archer', at: C(4, -4) },
+    { type: 'skeleton_archer', at: C(-4, 4) }, { type: 'skeleton_archer', at: C(4, 4) },
   ],
 };
 
-export const MOAT = { inner: 24, outer: 29, fordHalfWidth: 3.6 };
+export const MOAT = { inner: 32, outer: 38, fordHalfWidth: 4 };
 
 function rotCamp(c, k) {
   return { ...c, at: rotate(c.at, k) };
@@ -107,16 +112,17 @@ export function buildLayout() {
 
   // Roads (polylines) used for terrain painting and to keep paths free of trees.
   const roads = [];
+  const fordR = (MOAT.inner + MOAT.outer) / 2 / Math.SQRT2;
   for (let k = 0; k < 4; k++) {
     const hall = rotate(BASE.hall, k);
-    const ford = rotate([CENTER - 18.8, CENTER - 18.8], k);
+    const ford = rotate([CENTER - fordR, CENTER - fordR], k);
     const gateA = rotate([CENTER, CENTER - CITADEL.half - 1], k);
     const gateB = rotate([CENTER - CITADEL.half - 1, CENTER], k);
     roads.push([hall, ford]);
-    roads.push([ford, rotate([CENTER - 9, CENTER - 21], k), gateA]);
-    roads.push([ford, rotate([CENTER - 21, CENTER - 9], k), gateB]);
-    roads.push([hall, rotate([52, 26], k), rotate([CENTER, 26], k), rotate(EDGE.mine, k)]);
-    roads.push([rotate([CENTER, 26], k), rotate(EDGE.fountain, k)]);
+    roads.push([ford, rotate([CENTER - 11, CENTER - 27], k), gateA]);
+    roads.push([ford, rotate([CENTER - 27, CENTER - 11], k), gateB]);
+    roads.push([hall, rotate([80, 40], k), rotate([CENTER, 40], k), rotate(EDGE.mine, k)]);
+    roads.push([rotate([CENTER, 40], k), rotate(EDGE.fountain, k)]);
   }
 
   return { bases, camps, neutrals, roads };

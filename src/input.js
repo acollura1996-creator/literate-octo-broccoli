@@ -1,12 +1,16 @@
 // Mouse & keyboard: selection, smart right-click orders, targeting modes,
 // building placement, control groups and camera controls.
 import * as THREE from 'three';
-import { UNITS } from './data/units.js';
+import { UNITS, ROAD } from './data/units.js';
+import { Roads } from './game/roads.js';
 import { ABILITIES } from './game/abilities.js';
 import { canCast } from './game/behavior.js';
 import { createModel } from './render/models.js';
 
 const MAX_SELECTION = 24;
+
+const linePreviewMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false });
+const MAX_LINE = 160;
 
 const ghostOk = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.45, depthWrite: false });
 const ghostBad = new THREE.MeshBasicMaterial({ color: 0xff3030, transparent: true, opacity: 0.45, depthWrite: false });
@@ -32,6 +36,12 @@ export class Input {
     this.placement = null;
     this.buttons = []; // current command-card buttons (set by the HUD)
     this.enabled = true;
+    this.settings = { scrollSpeed: 1, wheelMode: 'auto', edgeScroll: true };
+    try {
+      Object.assign(this.settings, JSON.parse(localStorage.getItem('he3d-camera') || '{}'));
+    } catch {
+      // Storage unavailable: keep the defaults.
+    }
     this.bind();
   }
 
@@ -69,7 +79,9 @@ export class Input {
       this.selection = alive;
       this.sortSelection();
     }
-    if (this.placement && !this.selection.some((u) => u.def.worker && u.owner === this.game.human)) this.cancelPlacement();
+    const hasWorker = this.selection.some((u) => u.def.worker && u.owner === this.game.human);
+    if (this.placement && !hasWorker) this.cancelPlacement();
+    if (this.linePlan && !hasWorker) this.cancelLine();
   }
 
   ownSelected() {
@@ -246,12 +258,20 @@ export class Input {
       for (const u of movers) {
         if (u.def.worker) g.issueOrder(u, { type: 'harvest', target: tree }, shift);
       }
-      this.view.fx.orderMarker(tree.x, tree.z, 0x40ff40);
+      this.flashTree(tree);
       return;
     }
     if (!ground) return;
     this.moveGroup(movers, ground.x, ground.z, 'move', shift);
     this.view.fx.orderMarker(ground.x, ground.z, 0x40ff40);
+  }
+
+  /** Show clearly which tree was chosen for harvesting. */
+  flashTree(tree) {
+    this.treeFlash = { tree, until: performance.now() + 1100 };
+    this.view.fx.ring(tree.x, tree.z, 0x40ff40, 1.6, 0.5, 0.5);
+    this.view.fx.orderMarker(tree.x, tree.z, 0x40ff40);
+    this.game.sound('click', undefined, undefined, 0.4);
   }
 
   flash(target, friendly = false) {
@@ -332,6 +352,8 @@ export class Input {
           return;
         }
         for (const u of movers) if (u.def.worker) g.issueOrder(u, { type: 'harvest', target: res }, shift);
+        if (tree) this.flashTree(tree);
+        else this.flash(res, true);
         break;
       }
       case 'rally': {
@@ -390,7 +412,8 @@ export class Input {
       return;
     }
     this.cancelPlacement();
-    const m = createModel(def.model, g.human.color);
+    this.cancelLine();
+    const m = createModel(def.ageModels?.[Math.max(1, g.human.tier) - 1] ?? def.model, g.human.color);
     const ghost = new THREE.Group();
     ghost.add(m.root);
     const fp = def.footprint;
@@ -451,6 +474,119 @@ export class Input {
     if (!shift || !g.canAfford(g.human, def.cost)) this.cancelPlacement();
   }
 
+  // ------------------------------------------------------- road / wall lines
+  beginLine(kind) {
+    this.cancelPlacement();
+    this.cancelLine();
+    this.cancelTarget();
+    const geo = new THREE.BoxGeometry(0.96, 1, 0.96);
+    geo.translate(0, 0.5, 0);
+    const mesh = new THREE.InstancedMesh(geo, linePreviewMat, MAX_LINE);
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 4;
+    this.view.scene.add(mesh);
+    this.linePlan = { kind, start: null, cells: [], ok: [], mesh };
+    this.cardMenu = null;
+  }
+
+  cancelLine() {
+    if (!this.linePlan) return;
+    this.linePlan.mesh.removeFromParent();
+    this.linePlan.mesh.geometry.dispose();
+    this.linePlan.mesh.dispose();
+    this.linePlan = null;
+  }
+
+  lineCellOk(kind, cx, cz) {
+    const g = this.game;
+    if (kind === 'road') return g.roads.canPlace(cx, cz, g.human);
+    return g.canPlace('wall', cx + 0.5, cz + 0.5, g.human);
+  }
+
+  updateLine() {
+    const lp = this.linePlan;
+    if (!lp) return;
+    const ground = this.view.screenToGround(this.mouse.x, this.mouse.y);
+    if (!ground) return;
+    const cur = [Math.floor(ground.x), Math.floor(ground.z)];
+    let cells = lp.start ? Roads.line(lp.start[0], lp.start[1], cur[0], cur[1]) : [cur];
+    if (cells.length > MAX_LINE) cells = cells.slice(0, MAX_LINE);
+    lp.cells = cells;
+    lp.ok = cells.map(([cx, cz]) => this.lineCellOk(lp.kind, cx, cz));
+    const m = new THREE.Matrix4();
+    const col = new THREE.Color();
+    const tall = lp.kind === 'wall' ? 1.4 : 0.08;
+    cells.forEach(([cx, cz], i) => {
+      const x = cx + 0.5;
+      const z = cz + 0.5;
+      m.makeScale(1, tall, 1).setPosition(x, this.game.terrain.heightAt(x, z) + 0.02, z);
+      lp.mesh.setMatrixAt(i, m);
+      lp.mesh.setColorAt(i, col.set(lp.ok[i] ? 0x40ff60 : 0xff3030));
+    });
+    lp.mesh.count = cells.length;
+    lp.mesh.instanceMatrix.needsUpdate = true;
+    if (lp.mesh.instanceColor) lp.mesh.instanceColor.needsUpdate = true;
+  }
+
+  lineSummary() {
+    const lp = this.linePlan;
+    const n = lp.ok.filter(Boolean).length;
+    if (lp.kind === 'road') {
+      return lp.start ? `Road: ${n} tile${n === 1 ? '' : 's'} · ${n * ROAD.cost.gold} gold` : 'Lay road: click and drag';
+    }
+    const c = UNITS.wall.cost;
+    return lp.start ? `Wall: ${n} piece${n === 1 ? '' : 's'} · ${n * c.gold} gold, ${n * c.lumber} lumber` : 'Build wall: click and drag';
+  }
+
+  confirmLine(shift) {
+    const g = this.game;
+    const lp = this.linePlan;
+    const cells = lp.cells.filter((_, i) => lp.ok[i]);
+    lp.start = null;
+    if (!cells.length) {
+      g.message(lp.kind === 'road' ? "Can't lay a road there." : "Can't build a wall there.", '#ff8080');
+      g.sound('error');
+      return;
+    }
+    if (lp.kind === 'road') {
+      const n = g.roads.place(cells, g.human);
+      if (n > 0) {
+        g.sound('build', undefined, undefined, 0.6);
+        if (n < cells.length) g.message(`Laid ${n} of ${cells.length} road tiles: not enough gold.`, '#ffb070');
+      }
+    } else {
+      const workers = this.ownSelected().filter((u) => u.def.worker);
+      if (!workers.length) return;
+      const plan = [];
+      for (const c of cells) {
+        if (!g.canAfford(g.human, UNITS.wall.cost)) break;
+        g.spend(g.human, UNITS.wall.cost);
+        plan.push(c);
+      }
+      if (!plan.length) {
+        g.spend(g.human, UNITS.wall.cost); // explains what is missing
+      } else {
+        if (plan.length < cells.length) g.message(`Planned ${plan.length} of ${cells.length} wall pieces: not enough resources.`, '#ffb070');
+        // Split the line into contiguous stretches, one per Peasant (nearest stretch first).
+        const per = Math.ceil(plan.length / workers.length);
+        const chunks = [];
+        for (let i = 0; i < plan.length; i += per) chunks.push(plan.slice(i, i + per));
+        const free = [...workers];
+        for (const chunk of chunks) {
+          const [fx, fz] = chunk[0];
+          free.sort((a, b) => Math.hypot(a.x - fx, a.z - fz) - Math.hypot(b.x - fx, b.z - fz));
+          const w = free.shift();
+          chunk.forEach(([cx, cz], i) => {
+            g.issueOrder(w, { type: 'build', building: 'wall', x: cx + 0.5, z: cz + 0.5, paid: true }, i > 0 || (shift && w.order.type !== 'idle'));
+          });
+        }
+        g.sound('build', undefined, undefined, 0.6);
+      }
+    }
+    if (!shift) this.cancelLine();
+  }
+
   cancelConstruction(b) {
     const g = this.game;
     if (!b.underConstruction || b.dead) return;
@@ -466,11 +602,7 @@ export class Input {
     c.addEventListener('mousedown', (e) => this.onMouseDown(e));
     window.addEventListener('mousemove', (e) => this.onMouseMove(e));
     window.addEventListener('mouseup', (e) => this.onMouseUp(e));
-    c.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const cam = this.view.cam;
-      cam.distance = Math.max(cam.minDist, Math.min(cam.maxDist, cam.distance + Math.sign(e.deltaY) * 2.5));
-    }, { passive: false });
+    c.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     c.addEventListener('mouseleave', () => (this.mouse.inside = false));
     c.addEventListener('mouseenter', () => (this.mouse.inside = true));
     // Edge scrolling works over the HUD too, but stops when the pointer leaves the window.
@@ -488,6 +620,28 @@ export class Input {
     });
   }
 
+  /**
+   * Mouse wheels zoom; trackpads pan with two fingers and zoom with a pinch
+   * (pinches arrive as ctrl+wheel). `wheelMode` can force either behaviour.
+   */
+  onWheel(e) {
+    e.preventDefault();
+    const cam = this.view.cam;
+    const clampZoom = (v) => Math.max(cam.minDist, Math.min(cam.maxDist, v));
+    const lineMode = e.deltaMode === 1;
+    const looksLikeWheel = lineMode || (e.deltaX === 0 && Math.abs(e.deltaY) >= 40 && Number.isInteger(e.deltaY));
+    const mode = this.settings.wheelMode;
+    if (e.ctrlKey) {
+      cam.zoomTarget = clampZoom(cam.zoomTarget * Math.exp(e.deltaY * 0.012));
+    } else if (mode === 'zoom' || (mode === 'auto' && looksLikeWheel)) {
+      const steps = lineMode ? e.deltaY / 3 : e.deltaY / 100;
+      cam.zoomTarget = clampZoom(cam.zoomTarget + Math.sign(steps) * Math.max(1, Math.abs(steps)) * 3.5);
+    } else {
+      const k = (cam.distance / 700) * this.settings.scrollSpeed;
+      cam.setTarget(cam.target.x + e.deltaX * k, cam.target.z + e.deltaY * k * 1.25);
+    }
+  }
+
   localXY(e) {
     const r = this.canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -497,13 +651,19 @@ export class Input {
     if (!this.enabled) return;
     const { x, y } = this.localXY(e);
     if (e.button === 1) {
+      // Grab the ground under the cursor and drag the map with it.
       e.preventDefault();
-      this.panDrag = { x, y, tx: this.view.cam.target.x, tz: this.view.cam.target.z };
+      const anchor = this.view.screenToGround(x, y);
+      if (anchor) this.panDrag = { anchor };
       return;
     }
     const ground = this.view.screenToGround(x, y);
     const target = this.pickUnit(x, y);
     if (e.button === 2) {
+      if (this.linePlan) {
+        this.cancelLine();
+        return;
+      }
       if (this.placement) {
         this.cancelPlacement();
         return;
@@ -516,6 +676,11 @@ export class Input {
       return;
     }
     if (e.button !== 0) return;
+    if (this.linePlan) {
+      // Start dragging a road / wall line.
+      if (ground) this.linePlan.start = [Math.floor(ground.x), Math.floor(ground.z)];
+      return;
+    }
     if (this.placement) {
       this.confirmPlacement(e.shiftKey);
       return;
@@ -533,8 +698,12 @@ export class Input {
     this.mouse.y = y;
     this.mouse.inWindow = true;
     if (this.panDrag) {
-      const k = this.view.cam.distance / 260;
-      this.view.cam.setTarget(this.panDrag.tx - (x - this.panDrag.x) * k, this.panDrag.tz - (y - this.panDrag.y) * k * 1.3);
+      const now = this.view.screenToGround(x, y);
+      if (now) {
+        const cam = this.view.cam;
+        cam.setTarget(cam.target.x + (this.panDrag.anchor.x - now.x), cam.target.z + (this.panDrag.anchor.z - now.z));
+        cam.update(this.game.terrain);
+      }
     }
     if (this.drag) {
       this.drag.x1 = x;
@@ -545,6 +714,11 @@ export class Input {
 
   onMouseUp(e) {
     if (e.button === 1) this.panDrag = null;
+    if (e.button === 0 && this.linePlan?.start) {
+      this.updateLine();
+      this.confirmLine(e.shiftKey);
+      return;
+    }
     if (e.button !== 0 || !this.drag) return;
     const d = this.drag;
     this.drag = null;
@@ -613,7 +787,8 @@ export class Input {
       return;
     }
     if (e.key === 'Escape') {
-      if (this.placement) this.cancelPlacement();
+      if (this.linePlan) this.cancelLine();
+      else if (this.placement) this.cancelPlacement();
       else if (this.targetMode) this.cancelTarget();
       else if (this.cardMenu) this.cardMenu = null;
       else {
@@ -691,6 +866,14 @@ export class Input {
     }
   }
 
+  saveSettings() {
+    try {
+      localStorage.setItem('he3d-camera', JSON.stringify(this.settings));
+    } catch {
+      // Storage unavailable: settings last for this session only.
+    }
+  }
+
   centerOn(x, z) {
     this.view.cam.setTarget(x, z + this.view.cam.distance * 0.12);
   }
@@ -699,21 +882,37 @@ export class Input {
   update(dt) {
     this.pruneSelection();
     const cam = this.view.cam;
-    const speed = cam.distance * 1.15 * dt;
+    // Smooth zoom.
+    cam.distance += (cam.zoomTarget - cam.distance) * Math.min(1, dt * 10);
+    // Desired scroll direction from the keys and the screen edges. The edge
+    // zone is wide and speed ramps up toward the very edge.
     let dx = 0;
     let dz = 0;
     if (this.keys.has('ArrowLeft')) dx -= 1;
     if (this.keys.has('ArrowRight')) dx += 1;
     if (this.keys.has('ArrowUp')) dz -= 1;
     if (this.keys.has('ArrowDown')) dz += 1;
-    if (this.mouse.inWindow && this.enabled && !this.drag && document.hasFocus()) {
-      const m = 4;
-      if (this.mouse.x <= m) dx -= 1;
-      if (this.mouse.x >= this.view.width - m) dx += 1;
-      if (this.mouse.y <= m) dz -= 1;
-      if (this.mouse.y >= this.view.height - m) dz += 1;
+    if (this.settings.edgeScroll && this.mouse.inWindow && this.enabled && !this.drag && !this.panDrag && document.hasFocus()) {
+      const zone = 26;
+      const ramp = (d) => (d >= zone ? 0 : 0.3 + 0.7 * (1 - d / zone));
+      const { x, y } = this.mouse;
+      dx -= ramp(x);
+      dx += ramp(this.view.width - 1 - x);
+      dz -= ramp(y);
+      dz += ramp(this.view.height - 1 - y);
     }
-    if (dx || dz) cam.setTarget(cam.target.x + dx * speed, cam.target.z + dz * speed);
+    const len = Math.hypot(dx, dz);
+    if (len > 1) {
+      dx /= len;
+      dz /= len;
+    }
+    const top = cam.distance * 1.7 * this.settings.scrollSpeed;
+    const k = Math.min(1, dt * (len > 0 ? 9 : 12));
+    cam.vel.x += (dx * top - cam.vel.x) * k;
+    cam.vel.z += (dz * top - cam.vel.z) * k;
+    if (Math.abs(cam.vel.x) > 0.01 || Math.abs(cam.vel.z) > 0.01) {
+      cam.setTarget(cam.target.x + cam.vel.x * dt, cam.target.z + cam.vel.z * dt);
+    }
 
     // Hover
     const h = this.mouse.inside && !this.drag ? this.pickUnit(this.mouse.x, this.mouse.y) : null;
@@ -722,6 +921,81 @@ export class Input {
       if (h?.view) h.view.hovered = true;
       this.hovered = h;
     }
+    // Trees under the cursor light up when Peasants could harvest them.
+    const workers = this.ownSelected().some((u) => u.def.worker);
+    const wantsTree = workers || this.targetMode?.kind === 'gather' || this.targetMode?.kind === 'rally';
+    let ht = null;
+    if (wantsTree && this.mouse.inside && !this.drag && !h && !this.placement && !this.linePlan) {
+      ht = this.pickTree(this.mouse.x, this.mouse.y, this.view.screenToGround(this.mouse.x, this.mouse.y));
+    }
+    this.hoverTree = ht;
+    const flash = this.treeFlash && performance.now() < this.treeFlash.until && this.treeFlash.tree.alive ? this.treeFlash.tree : null;
+    if (flash) this.view.fx.highlightTree(flash, 0x40ff40);
+    else if (ht) this.view.fx.highlightTree(ht, 0xffe14a);
+    else this.view.fx.clearTreeHighlight();
     this.updatePlacement();
+    this.updateLine();
+    this.updateCursorLabel();
+  }
+
+  /** What a click would do right now, shown next to the cursor. */
+  cursorText() {
+    const g = this.game;
+    if (this.linePlan) return this.lineSummary();
+    if (this.placement) return this.placement.ok ? `Place ${UNITS[this.placement.type].name}` : g.placeReason || "Can't build here";
+    const h = this.hovered;
+    const tm = this.targetMode;
+    if (tm) {
+      switch (tm.kind) {
+        case 'move':
+          return h ? `Follow ${h.def.name}` : 'Move here';
+        case 'attack':
+          return h && g.isEnemy(g.human, h.owner) ? `Attack ${h.def.name}` : 'Attack-move here';
+        case 'patrol':
+          return 'Patrol to here';
+        case 'gather':
+          if (h?.type === 'goldmine') return 'Mine gold';
+          return this.hoverTree ? 'Harvest lumber from this tree' : 'Choose a tree or gold mine';
+        case 'rally':
+          return this.hoverTree ? 'Rally on this tree' : h ? `Rally on ${h.def.name}` : 'Set rally point';
+        case 'cast': {
+          const ab = ABILITIES[tm.ability];
+          if (ab.target === 'unit') return h ? `${ab.name}: ${h.def.name}` : `${ab.name}: choose a target`;
+          return `${ab.name}: choose an area`;
+        }
+        default:
+          return null;
+      }
+    }
+    const own = this.ownSelected();
+    const movers = own.filter((u) => !u.isBuilding);
+    if (!movers.length) {
+      if (own.some((u) => u.def.trains) && this.mouse.inside) return 'Right-click: set rally point';
+      return null;
+    }
+    const workers = movers.some((u) => u.def.worker);
+    if (h) {
+      if (g.isEnemy(g.human, h.owner) && h.targetableBy(movers[0])) return `Attack ${h.def.name}`;
+      if (workers && h.type === 'goldmine') return 'Mine gold';
+      if (workers && h.owner === g.human && h.isBuilding && h.underConstruction) return 'Help build';
+      if (workers && h.owner === g.human && h.def.dropOff && movers.some((u) => u.carry)) return 'Return resources';
+      if (h.def.shop && movers.some((u) => u.isHero)) return 'Go to the shop';
+      if (!h.isBuilding && h.owner.general && h !== movers[0]) return `Follow ${h.def.name}`;
+      return null;
+    }
+    if (workers && this.hoverTree) return 'Harvest lumber';
+    return null;
+  }
+
+  updateCursorLabel() {
+    const el = (this.cursorEl ??= document.getElementById('cursor-label'));
+    if (!el) return;
+    const text = this.mouse.inside && !this.drag ? this.cursorText() : null;
+    if (text !== this.cursorTextShown) {
+      this.cursorTextShown = text;
+      el.textContent = text ?? '';
+      el.classList.toggle('hidden', !text);
+    }
+    if (text) el.style.transform = `translate(${this.mouse.x + 18}px, ${this.mouse.y + 14}px)`;
   }
 }

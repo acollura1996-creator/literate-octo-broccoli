@@ -20,6 +20,7 @@
             <button id="btn-menu" class="tb-btn">Menu <span>F10</span></button>
             <button id="btn-quests" class="tb-btn">Quests <span>F9</span></button>
             <button id="btn-sound" class="tb-btn" title="Toggle sound">🔊</button>
+            <button id="btn-fullscreen" class="tb-btn" title="Fullscreen (best for edge scrolling)">⛶</button>
           </div>
           <div class="tb-center">
             <div id="clock"><div id="clock-dial"><span class="sunicon">☀</span><span class="moonicon">☾</span></div></div>
@@ -28,7 +29,7 @@
           <div class="tb-right" id="resources">
             <div class="res" title="Gold"><span class="ico gold">◉</span><span id="r-gold">0</span></div>
             <div class="res" title="Lumber"><span class="ico lumber">♣</span><span id="r-lumber">0</span></div>
-            <div class="res" title="Food"><span class="ico food">🍖</span><span id="r-food">0/0</span></div>
+            <div class="res" title="Population (houses connected by road add more)"><span class="ico food">🍖</span><span id="r-food">0/0</span></div>
             <div class="res mode" id="r-mode">Hero Path</div>
           </div>
         </div>
@@ -116,6 +117,24 @@
         <div class="panel">
           <h2>Game Menu</h2>
           <button data-act="resume" class="big-btn">Resume Game</button>
+          <div class="opts">
+            <label>Camera scroll speed
+              <select id="opt-scroll">
+                <option value="0.6">Slow</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.5">Fast</option>
+                <option value="2.2">Very fast</option>
+              </select>
+            </label>
+            <label>Mouse wheel and trackpad
+              <select id="opt-wheel">
+                <option value="auto" selected>Auto: wheel zooms, two fingers pan</option>
+                <option value="zoom">Always zoom</option>
+                <option value="pan">Always pan</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="opt-edge" checked /> Scroll at the screen edges</label>
+          </div>
           <button data-act="help" class="small-btn">How to Play</button>
           <button data-act="quests" class="small-btn">Quests</button>
           <button data-act="restart" class="small-btn">Restart</button>
@@ -142,7 +161,7 @@
             <h3>Tips</h3>
             <ul>
               <li><b>Hero path:</b> slay creeps for experience and gold, buy items from Goblin Merchants and Arcane Vaults, hire mercenaries, and use Fountains of Health. Your Altar revives your Hero.</li>
-              <li><b>Empire path:</b> keep 5 Peasants on gold, put the rest on lumber, build Farms for food, then Barracks and a Blacksmith. Upgrade to a Keep for Knights, Priests, Sorceresses and Catapults.</li>
+              <li><b>Empire path:</b> keep 5 Peasants on gold and the rest on lumber (build a Lumber Yard by the woods). Lay roads out from your Town Hall and build Houses touching them: a house only adds population while a road links it to your Town Hall. Advance through the Tribal, Feudal, Kingdom and Imperial Ages from the Town Hall to unlock new troops; houses, walls and gates rebuild themselves in each new age.</li>
               <li>Edge outposts hold an extra gold mine, a mercenary camp, an arcane vault and a fountain, guarded by drakes and golems.</li>
             </ul>
           </div>
@@ -158,9 +177,10 @@
               <h3>Mouse</h3>
               <ul>
                 <li><b>Left-click</b> selects; <b>drag</b> to box-select; <b>double-click</b> selects all of a type.</li>
-                <li><b>Right-click</b> moves, attacks, gathers, follows or picks up items.</li>
+                <li><b>Right-click</b> moves, attacks, gathers, follows or picks up items. The label next to the cursor says what a right-click will do; with Peasants selected, trees light up under the cursor.</li>
+                <li><b>Roads and walls:</b> choose them from the Peasant's build menu, then click and drag a line.</li>
                 <li><b>Shift</b> queues orders or adds to the selection.</li>
-                <li><b>Mouse wheel</b> zooms; <b>middle-drag</b>, the screen edges or the <b>arrow keys</b> scroll.</li>
+                <li><b>Mouse wheel</b> or <b>pinch</b> zooms. Scroll with the <b>screen edges</b>, the <b>arrow keys</b>, <b>middle-drag</b> (grabs the map) or a <b>two-finger trackpad swipe</b>. Scroll speed is in the Menu (F10); fullscreen (⛶) makes edge scrolling easiest.</li>
                 <li>Click the <b>minimap</b> to move the camera; right-click it to send units.</li>
               </ul>
             </div>
@@ -193,6 +213,7 @@
       </div>
 
       <div id="pause-banner" class="hidden">PAUSED</div>
+      <div id="cursor-label" class="hidden"></div>
     </div>
     <script type="module" src="./src/main.js"></script>
   </body>

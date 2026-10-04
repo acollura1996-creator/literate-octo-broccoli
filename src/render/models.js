@@ -14,6 +14,7 @@ import * as U from './models/units.js';
 import * as C from './models/creeps.js';
 import * as B from './models/buildings.js';
 import * as N from './models/neutral.js';
+import * as A from './models/ages.js';
 
 const BUILDERS = {
   // Empire units
@@ -80,6 +81,16 @@ const BUILDERS = {
   banner_pole: N.banner_pole,
   stump: N.stump,
   mushrooms: N.mushrooms,
+  // Ages: units
+  militia: A.militia,
+  hunter: A.hunter,
+  spearman: A.spearman,
+  scout_rider: A.scout_rider,
+  crossbowman: A.crossbowman,
+  champion: A.champion,
+  royal_knight: A.royal_knight,
+  battlemage: A.battlemage,
+  trebuchet: A.trebuchet,
 };
 
 export const MODEL_IDS = Object.keys(BUILDERS);

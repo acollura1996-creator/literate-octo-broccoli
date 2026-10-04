@@ -1202,3 +1202,42 @@ label.difficulty {
   margin-top: 0;
   margin-bottom: 4px;
 }
+
+.opts {
+  margin: 12px 0 4px;
+  padding-top: 10px;
+  border-top: 1px solid #4a3e22;
+}
+.opts label {
+  font-size: 13px;
+}
+.opts label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.opts input[type='checkbox'] {
+  accent-color: var(--gold);
+  width: 16px;
+  height: 16px;
+}
+
+#cursor-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff3c4;
+  background: rgba(10, 9, 7, 0.82);
+  border: 1px solid var(--gold-dim);
+  border-radius: 3px;
+  white-space: nowrap;
+  z-index: 5;
+}
+
+.stat.warn {
+  color: #ffb070;
+}

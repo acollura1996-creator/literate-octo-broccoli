@@ -3,6 +3,8 @@
 export const BLOCK_TREE = 1;
 export const BLOCK_BUILDING = 2;
 export const BLOCK_TERRAIN = 4;
+/** Gates: impassable except for units of the gate owner's team (see passTeam). */
+export const BLOCK_GATE = 8;
 
 const SQRT2 = Math.SQRT2;
 
@@ -68,6 +70,11 @@ export class PathGrid {
     this.size = size;
     const n = size * size;
     this.flags = new Uint8Array(n);
+    this.road = new Uint8Array(n); // 1 where a road speeds movement (and is preferred by A*)
+    this.gateTeam = new Int16Array(n).fill(-1);
+    // Team allowed through gates for the current query. Set per unit before moving it;
+    // -99 (nobody) for placement checks.
+    this.passTeam = -99;
     this.g = new Float32Array(n);
     this.parent = new Int32Array(n);
     this.seen = new Uint32Array(n);
@@ -82,7 +89,10 @@ export class PathGrid {
   }
 
   walkable(cx, cz) {
-    return cx >= 0 && cz >= 0 && cx < this.size && cz < this.size && this.flags[cz * this.size + cx] === 0;
+    if (cx < 0 || cz < 0 || cx >= this.size || cz >= this.size) return false;
+    const i = cz * this.size + cx;
+    const f = this.flags[i];
+    return f === 0 || (f === BLOCK_GATE && this.gateTeam[i] === this.passTeam);
   }
 
   walkableAt(x, z) {
@@ -103,7 +113,11 @@ export class PathGrid {
   }
 
   rectFree(cx, cz, w, h) {
-    for (let z = cz; z < cz + h; z++) for (let x = cx; x < cx + w; x++) if (!this.walkable(x, z)) return false;
+    for (let z = cz; z < cz + h; z++) {
+      for (let x = cx; x < cx + w; x++) {
+        if (!this.inBounds(x, z) || this.flags[z * this.size + x] !== 0) return false;
+      }
+    }
     return true;
   }
 
@@ -156,7 +170,7 @@ export class PathGrid {
    * A* from (sx, sz) toward (gx, gz). Stops once within `range` of the goal.
    * Returns an array of {x, z} waypoints (excluding the start) or null.
    */
-  findPath(sx, sz, gx, gz, range = 0, maxNodes = 16000) {
+  findPath(sx, sz, gx, gz, range = 0, maxNodes = 60000) {
     const size = this.size;
     let start = { x: sx, z: sz };
     if (!this.walkableAt(sx, sz)) {
@@ -186,6 +200,10 @@ export class PathGrid {
     const seen = this.seen;
     const closed = this.closed;
     const flags = this.flags;
+    const road = this.road;
+    const gateTeam = this.gateTeam;
+    const team = this.passTeam;
+    const blocked = (i) => flags[i] !== 0 && !(flags[i] === BLOCK_GATE && gateTeam[i] === team);
     const heap = this.heap;
     heap.clear();
 
@@ -238,12 +256,13 @@ export class PathGrid {
           const nx = cx + dx;
           if (nx < 0 || nx >= size) continue;
           const ni = nz * size + nx;
-          if (flags[ni] !== 0 || closed[ni] === gen) continue;
+          if (closed[ni] === gen || blocked(ni)) continue;
           let cost = 1;
           if (dx !== 0 && dz !== 0) {
-            if (flags[cz * size + nx] !== 0 || flags[nz * size + cx] !== 0) continue;
+            if (blocked(cz * size + nx) || blocked(nz * size + cx)) continue;
             cost = SQRT2;
           }
+          if (road[ni]) cost *= 0.75;
           const ng = gc + cost;
           if (seen[ni] !== gen || ng < g[ni]) {
             seen[ni] = gen;

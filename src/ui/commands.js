@@ -1,5 +1,5 @@
 // Builds the 4x3 command card for the current selection.
-import { UNITS, UPGRADES } from '../data/units.js';
+import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES } from '../data/units.js';
 import { ITEMS, SHOP_STOCK } from '../data/items.js';
 import { ABILITIES, requiredHeroLevel } from '../game/abilities.js';
 
@@ -68,24 +68,38 @@ export function getCommands(game, input) {
   if (!own) return [];
 
   // ---------------------------------------------------------------- menus
-  if (input.cardMenu === 'build' && u.def.worker) {
-    const order = ['townhall', 'farm', 'barracks', 'blacksmith', 'scouttower', 'sanctum', 'workshop'];
-    const keys = { townhall: 'H', farm: 'F', barracks: 'B', blacksmith: 'S', scouttower: 'T', sanctum: 'A', workshop: 'W' };
+  if ((input.cardMenu === 'build' || input.cardMenu === 'build2') && u.def.worker) {
+    const order = input.cardMenu === 'build' ? BUILD_MENUS.basic : BUILD_MENUS.advanced;
+    const keys = {
+      house: 'H', road: 'R', wall: 'W', gate: 'G', lumberyard: 'L', barracks: 'B', scouttower: 'T', townhall: 'N',
+      blacksmith: 'S', stable: 'E', sanctum: 'A', workshop: 'K',
+    };
     order.forEach((type, i) => {
+      const pos = { x: i % 4, y: Math.floor(i / 4) };
+      if (type === 'road') {
+        B.push({
+          id: 'build:road', ...pos, hotkey: keys.road, icon: '🛤️', iconBg: '#8a6a3a', name: 'Lay Road',
+          tooltip: `${ROAD.description}<br><span class="dim">Click and drag to lay a line of road.</span>`,
+          cost: `${costLine(ROAD.cost)} <span class="dim">per tile</span>`,
+          disabled: p.gold < ROAD.cost.gold,
+          onClick: () => input.beginLine('road'),
+        });
+        return;
+      }
       const d = UNITS[type];
       const missing = game.missingRequirements(p, d);
+      const line = !!d.wall;
       B.push({
         id: `build:${type}`,
-        x: i % 4,
-        y: Math.floor(i / 4),
+        ...pos,
         hotkey: keys[type],
-        model: d.model,
+        model: d.ageModels?.[Math.max(1, p.tier) - 1] ?? d.model,
         building: true,
-        name: `Build ${d.name}`,
-        tooltip: `${d.description}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => UNITS[m].name).join(', ')}</span>` : ''}`,
-        cost: costLine(d.cost),
+        name: `Build ${d.ageNames?.[Math.max(1, p.tier) - 1] ?? d.name}`,
+        tooltip: `${d.description}${line ? '<br><span class="dim">Click and drag to build a line of wall.</span>' : ''}${d.foodByAge ? `<br><span class="dim">Population: ${d.foodByAge.join(' / ')} by age.</span>` : ''}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
+        cost: `${costLine(d.cost)}${line ? ' <span class="dim">per piece</span>' : ''}`,
         disabled: missing.length > 0 || !game.canAfford(p, d.cost),
-        onClick: () => input.beginPlacement(type),
+        onClick: () => (line ? input.beginLine('wall') : input.beginPlacement(type)),
       });
     });
     B.push({ id: 'cancel', x: 3, y: 2, hotkey: 'Escape', keyLabel: 'Esc', icon: '✖', name: 'Cancel', onClick: () => (input.cardMenu = null) });
@@ -140,12 +154,12 @@ export function getCommands(game, input) {
       const missing = game.missingRequirements(p, d);
       B.push({
         id: `train:${type}`,
-        x: i,
-        y: 0,
+        x: i % 4,
+        y: Math.floor(i / 4),
         hotkey: d.hotkey,
         model: d.model,
         name: `Train ${d.name}`,
-        tooltip: `${d.description ?? ''}<br><span class="dim">HP ${d.hp} · Damage ${d.damage[0]}-${d.damage[1]} · Armor ${d.armor}</span>${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => UNITS[m].name).join(', ')}</span>` : ''}`,
+        tooltip: `${d.description ?? ''}<br><span class="dim">HP ${d.hp} · Damage ${d.damage[0]}-${d.damage[1]} · Armor ${d.armor}</span>${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
         cost: costLine(d.cost, d.food),
         disabled: missing.length > 0 || !!u.upgrading,
         onClick: () => game.trainUnit(u, type),
@@ -154,7 +168,7 @@ export function getCommands(game, input) {
     (u.def.researches ?? []).forEach((upg, i) => {
       const U = UPGRADES[upg];
       const lvl = p.upgrades[upg];
-      if (lvl >= 3) return;
+      if (lvl >= (U.levels ?? 3)) return;
       const busy = p.researchingUpg?.[upg];
       B.push({
         id: `research:${upg}`,
@@ -181,8 +195,8 @@ export function getCommands(game, input) {
         hotkey: 'U',
         model: d.model,
         building: true,
-        name: `Upgrade to ${d.name}`,
-        tooltip: `${d.description}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => UNITS[m].name).join(', ')}</span>` : ''}`,
+        name: d.tier ? `Advance to the ${AGE_NAMES[d.tier]} (${d.name})` : `Upgrade to ${d.name}`,
+        tooltip: `${d.description}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
         cost: costLine(d.cost),
         disabled: missing.length > 0 || u.trainQueue.length > 0,
         onClick: () => game.startUpgrade(u),
@@ -225,7 +239,8 @@ export function getCommands(game, input) {
     if (sel.some((s) => s.carry)) {
       B.push({ id: 'return', x: 2, y: 1, hotkey: 'R', icon: '⤺', iconBg: '#5a4a2a', name: 'Return Resources', tooltip: 'Return carried resources to the nearest Town Hall.', onClick: () => input.orderWorkersReturn() });
     }
-    B.push({ id: 'buildmenu', x: 0, y: 2, hotkey: 'B', icon: '🔨', iconBg: '#5a4a3a', name: 'Build Structure', tooltip: 'Opens the list of structures this Peasant can build.', onClick: () => (input.cardMenu = 'build') });
+    B.push({ id: 'buildmenu', x: 0, y: 2, hotkey: 'B', icon: '🔨', iconBg: '#5a4a3a', name: 'Build Basic Structure', tooltip: 'Houses, roads, walls, gates, the Lumber Yard, Barracks, towers and town halls.', onClick: () => (input.cardMenu = 'build') });
+    B.push({ id: 'buildmenu2', x: 1, y: 2, hotkey: 'V', icon: '🏛️', iconBg: '#4a4a5a', name: 'Build Advanced Structure', tooltip: 'Blacksmith, Stable, Arcane Sanctum and Workshop. These unlock with later ages.', onClick: () => (input.cardMenu = 'build2') });
   }
   if (u.isHero && !u.isIllusion) {
     if (u.skillPoints > 0) {

@@ -291,6 +291,42 @@ export class Effects {
     });
   }
 
+  /** Persistent highlight around one tree (hover / chosen for harvesting). */
+  highlightTree(tree, color) {
+    if (!this.treeHL) {
+      const g = new THREE.Group();
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
+      const ring = new THREE.Mesh(geo.ring(0.62, 0.82, 32), ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.1;
+      ring.renderOrder = 3;
+      const shellMat = basic(0xffffff, 0.28, true);
+      const shells = [
+        new THREE.Mesh(geo.cone(1.0, 2.7, 8), shellMat),
+        new THREE.Mesh(geo.sphere(1.15, 10, 8), shellMat),
+        new THREE.Mesh(geo.cyl(0.35, 0.45, 2.4, 6), shellMat),
+      ];
+      shells[0].position.y = 1.95;
+      shells[1].position.y = 1.9;
+      shells[2].position.y = 1.4;
+      g.add(ring, ...shells);
+      this.scene.add(g);
+      this.treeHL = { g, ringMat, shellMat, shells };
+    }
+    const h = this.treeHL;
+    h.g.visible = true;
+    h.g.position.set(tree.x, this.h(tree.x, tree.z), tree.z);
+    h.g.scale.setScalar(tree.scale);
+    h.shells.forEach((m, i) => (m.visible = i === tree.species));
+    h.ringMat.color.set(color);
+    h.shellMat.color.set(color);
+    h.shellMat.opacity = 0.22 + Math.sin(performance.now() / 160) * 0.08;
+  }
+
+  clearTreeHighlight() {
+    if (this.treeHL) this.treeHL.g.visible = false;
+  }
+
   later(delay, fn) {
     const dummy = new THREE.Object3D();
     this.add(dummy, (t) => {

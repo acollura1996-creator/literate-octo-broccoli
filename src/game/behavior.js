@@ -82,7 +82,7 @@ export function moveToward(game, u, x, z, range, dt) {
   const dx = wp.x - u.x;
   const dz = wp.z - u.z;
   const d = Math.hypot(dx, dz);
-  const step = u.speed * dt;
+  const step = u.speed * dt * (game.grid.road[Math.floor(u.z) * game.grid.size + Math.floor(u.x)] ? 1.3 : 1);
   const desired = Math.atan2(dx, dz);
   const angDiff = turnToward(u, desired, dt);
   u.moving = true;
@@ -234,9 +234,15 @@ export function finishOrder(game, u) {
   stopMoving(u);
 }
 
+/** Team id used to let units through their own (and allied) gates. */
+export function passTeamOf(u) {
+  return u.owner.team ?? -99;
+}
+
 export function updateUnit(game, u, dt) {
   if (u.dead) return;
   u.animTime += dt;
+  game.grid.passTeam = passTeamOf(u);
 
   if (u.lifetime !== null) {
     u.lifetime -= dt;
@@ -457,11 +463,13 @@ function doAttackMove(game, u, dt) {
 }
 
 // --------------------------------------------------------------- harvesting
-function nearestDropOff(game, u) {
+/** Nearest building that accepts `kind` ('gold' or 'lumber'); town centers take both. */
+function nearestDropOff(game, u, kind = u.carry?.kind) {
   let best = null;
   let bd = Infinity;
   for (const b of u.owner.buildings) {
     if (b.dead || !b.def.dropOff || b.underConstruction) continue;
+    if (b.def.dropOff !== true && kind && b.def.dropOff !== kind) continue;
     const d = u.distTo(b);
     if (d < bd) {
       bd = d;
@@ -501,6 +509,10 @@ export function findNearestTree(game, x, z, maxR = 14) {
   return best;
 }
 
+function carryCap(u, kind) {
+  return kind === 'lumber' ? 10 + 2 * (u.owner.upgrades?.lumber ?? 0) : 10;
+}
+
 function doHarvest(game, u, dt) {
   const o = u.order;
   const h = (u.harvest ||= { phase: 'goto', timer: 0 });
@@ -508,7 +520,7 @@ function doHarvest(game, u, dt) {
   if (h.kind === 'gold') h.mine = o.target;
   else h.tree = o.target;
 
-  if (u.carry && (u.carry.kind !== h.kind || u.carry.amount >= 10) && h.phase !== 'inside') {
+  if (u.carry && (u.carry.kind !== h.kind || u.carry.amount >= carryCap(u, u.carry.kind)) && h.phase !== 'inside') {
     u.order = { type: 'returnRes', resume: { type: 'harvest', target: h.kind === 'gold' ? h.mine : h.tree } };
     h.phase = 'goto';
     return;
@@ -581,8 +593,9 @@ function doHarvest(game, u, dt) {
       tree.lumber -= amt;
       u.carry = { kind: 'lumber', amount: (u.carry?.kind === 'lumber' ? u.carry.amount : 0) + amt };
       game.sound('chop', u.x, u.z, 0.35);
+      game.hooks.fx?.burst(tree.x, 0.7, tree.z, 0xb07a40, 4, 1.8, 0.05, 0.45);
       if (tree.lumber <= 0) game.terrain.fellTree(tree);
-      if (u.carry.amount >= 10) {
+      if (u.carry.amount >= carryCap(u, 'lumber')) {
         u.order = { type: 'returnRes', resume: { type: 'harvest', target: tree } };
         h.phase = 'goto';
       } else if (!tree.alive) {
@@ -608,7 +621,7 @@ function exitMine(game, u, mine) {
   u.harvest.inside = false;
   if (!mine) return;
   if (mine.occupant === u) mine.occupant = null;
-  const drop = nearestDropOff(game, u);
+  const drop = nearestDropOff(game, u, 'gold');
   const tx = drop ? drop.x : u.x;
   const tz = drop ? drop.z : u.z;
   const a = Math.atan2(tx - mine.x, tz - mine.z);

@@ -115,7 +115,7 @@ export class Portrait {
   }
 
   show(unit) {
-    const key = unit ? `${unit.def.model}|${unit.owner.color}|${unit.id}` : null;
+    const key = unit ? `${unit.modelId}|${unit.owner.color}|${unit.id}` : null;
     if (key === this.current) return;
     this.current = key;
     if (this.model) this.scene.remove(this.model.root);
@@ -126,7 +126,7 @@ export class Portrait {
       this.renderer.clear();
       return;
     }
-    this.model = createModel(unit.def.model, unit.def.modelColor ?? unit.owner.color);
+    this.model = createModel(unit.modelId, unit.def.modelColor ?? unit.owner.color);
     this.scene.add(this.model.root);
     this.model.root.rotation.y = 0.35;
     frame(this.cam, this.model.root, unit.isBuilding, true);

@@ -10,9 +10,11 @@ export class RTSCamera {
   constructor(aspect) {
     this.camera = new THREE.PerspectiveCamera(42, aspect, 0.5, 400);
     this.target = new THREE.Vector3(40, 0, 120);
-    this.distance = 30;
-    this.minDist = 14;
-    this.maxDist = 52;
+    this.distance = 34;
+    this.zoomTarget = 34;
+    this.minDist = 12;
+    this.maxDist = 68;
+    this.vel = { x: 0, z: 0 };
     this.pitch = THREE.MathUtils.degToRad(56);
     this.yaw = 0;
     this.shake = 0;
@@ -179,6 +181,7 @@ export class View {
     const g = this.game;
     const time = g.time;
     g.terrain.update(time);
+    g.roads?.update(this.scene);
     this.updateLighting();
     for (const v of this.unitViews.values()) v.sync(dt, time);
     for (const v of this.itemViews.values()) v.sync(dt, time);

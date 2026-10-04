@@ -84,6 +84,46 @@ export class Overlay {
       }
     }
 
+    // Houses that are not connected to the Town Hall by road.
+    for (const b of g.human.buildings) {
+      if (b.dead || !b.def.needsRoad || b.roadConnected || b.underConstruction) continue;
+      const p = v.project(b.x, g.terrain.heightAt(b.x, b.z) + (b.view?.height ?? 2) + 0.9, b.z, this.pt);
+      if (p.behind || p.y > maxY || p.y < 0) continue;
+      ctx.fillStyle = 'rgba(30,10,5,0.8)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ff7a4a';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffb070';
+      ctx.fillText('🛤', p.x, p.y + 4);
+      ctx.beginPath();
+      ctx.moveTo(p.x - 7, p.y - 7);
+      ctx.lineTo(p.x + 7, p.y + 7);
+      ctx.stroke();
+    }
+
+    // Axe markers above the trees the selected Peasants are cutting.
+    const marked = new Set();
+    for (const u of this.input.selection) {
+      if (u.dead || !u.def.worker || u.owner !== g.human) continue;
+      const tr = u.harvest?.kind === 'lumber' ? u.harvest.tree : u.order.type === 'harvest' && u.order.target?.lumber !== undefined ? u.order.target : null;
+      if (!tr || !tr.alive || marked.has(tr)) continue;
+      marked.add(tr);
+      const p = v.project(tr.x, g.terrain.heightAt(tr.x, tr.z) + 3.2 * tr.scale, tr.z, this.pt);
+      if (p.behind || p.y > maxY) continue;
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 5, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillText('🪓', p.x, p.y);
+    }
+
     // Floating text
     ctx.textAlign = 'center';
     for (const f of g.floats) {

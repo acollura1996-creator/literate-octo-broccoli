@@ -1,11 +1,12 @@
 // Computer-controlled rival generals. Each plays either the Hero path
 // (level up on creeps, buy items, hire mercenaries, raid and hunt Kalenden)
 // or the Empire path (gather, build a base, train an army and attack).
-import { UNITS, UPGRADES } from '../data/units.js';
+import { UNITS, UPGRADES, ROAD } from '../data/units.js';
+import { Roads } from '../game/roads.js';
 import { ITEMS } from '../data/items.js';
 import { ABILITIES } from '../game/abilities.js';
 import { canCast, findNearestTree } from '../game/behavior.js';
-import { CENTER, CITADEL } from '../world/layout.js';
+import { CENTER, CITADEL, MAP_SIZE } from '../world/layout.js';
 import { distToSegment } from '../world/noise.js';
 
 const WISHLIST = {
@@ -543,6 +544,7 @@ export class GeneralAI {
     }
     if (hall) this.economy(hall, peasants);
     if (hall) this.expand(hall, peasants);
+    if (hall) this.city(hall, peasants);
     this.construction(hall, peasants);
     this.production();
     this.militaryEmpire();
@@ -599,7 +601,7 @@ export class GeneralAI {
         g.issueOrder(u, { type: 'harvest', target: mine });
         onGold.push(u);
       } else {
-        const tree = findNearestTree(g, hall.x, hall.z, 24);
+        const tree = this.woodTree(hall);
         if (tree) {
           g.issueOrder(u, { type: 'harvest', target: tree });
           onWood.push(u);
@@ -614,11 +616,242 @@ export class GeneralAI {
     // Rebalance: too many on gold → move one to wood.
     if (onGold.length > 6) {
       const u = onGold.find((x) => !x.harvest?.inside && !x.carry);
-      const tree = findNearestTree(g, hall.x, hall.z, 24);
+      const tree = this.woodTree(hall);
       if (u && tree) g.issueOrder(u, { type: 'harvest', target: tree });
     }
-    const wanted = (mine ? 5 : 0) + woodTarget + 1;
-    if (peasants.length < Math.min(wanted, 13) && hall.trainQueue.length === 0 && !hall.upgrading) g.trainUnit(hall, 'peasant');
+    const wanted = (mine ? 5 : 0) + woodTarget + 2;
+    if (peasants.length < Math.min(wanted, 14) && hall.trainQueue.length === 0 && !hall.upgrading) g.trainUnit(hall, 'peasant');
+  }
+
+  /** Trees near the Lumber Yard if there is one, otherwise near the hall. */
+  woodTree(hall) {
+    const yard = this.p.buildings.find((b) => !b.dead && !b.underConstruction && b.def.dropOff === 'lumber');
+    const from = yard ?? hall;
+    return findNearestTree(this.g, from.x, from.z, 30);
+  }
+
+  // ---------------------------------------------------------------- city
+  /**
+   * Plan a grid of streets around the town hall (every 7 cells, inside the
+   * city radius, avoiding the lane to the gold mine), then lay it out as
+   * houses are needed.
+   */
+  planStreets(hall) {
+    const g = this.g;
+    const mine = this.mainMine(hall);
+    const hx = Math.round(hall.x);
+    const hz = Math.round(hall.z);
+    const R = 23;
+    const plan = new Set();
+    const ok = (x, z) => {
+      if (x < 2 || z < 2 || x >= MAP_SIZE - 2 || z >= MAP_SIZE - 2) return false;
+      if (Math.hypot(x + 0.5 - hall.x, z + 0.5 - hall.z) > R) return false;
+      if (mine && distToSegment(x + 0.5, z + 0.5, hall.x, hall.z, mine.x, mine.z) < 3.5) return false;
+      if (mine && Math.hypot(x + 0.5 - mine.x, z + 0.5 - mine.z) < 4) return false;
+      return g.terrain.heightAt(x + 0.5, z + 0.5) > -0.2;
+    };
+    for (let k = -3; k <= 3; k++) {
+      for (let t = -R; t <= R; t++) {
+        const a = hx + k * 7;
+        if (ok(a, hz + t)) plan.add((hz + t) * MAP_SIZE + a);
+        if (ok(hx + t, hz + k * 7)) plan.add((hz + k * 7) * MAP_SIZE + hx + t);
+      }
+    }
+    this.streets = plan;
+  }
+
+  /** Lay the next stretch of planned street that joins the existing network. */
+  extendStreets(n = 10) {
+    const g = this.g;
+    const p = this.p;
+    const S = MAP_SIZE;
+    const R = g.roads;
+    const cells = [];
+    // Grow out from the current network over planned cells.
+    const seen = new Set();
+    const queue = [];
+    for (const k of this.streets) {
+      const x = k % S;
+      const z = (k - x) / S;
+      if (R.isRoad(x, z)) continue;
+      const touching = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => R.isRoad(x + dx, z + dz) && R.ownerAt(x + dx, z + dz) === p);
+      if (touching) queue.push(k);
+    }
+    while (queue.length && cells.length < n) {
+      const k = queue.shift();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const x = k % S;
+      const z = (k - x) / S;
+      if (!R.canPlace(x, z, p, true)) continue;
+      cells.push([x, z]);
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nk = (z + dz) * S + x + dx;
+        if (this.streets.has(nk) && !seen.has(nk)) queue.push(nk);
+      }
+    }
+    if (!cells.length || p.gold < cells.length * ROAD.cost.gold + 60) return 0;
+    return R.place(cells, p);
+  }
+
+  /** A free 2x2 spot touching one of our connected roads, off the planned streets. */
+  findHouseSpot(hall) {
+    const g = this.g;
+    const p = this.p;
+    const S = MAP_SIZE;
+    const R = g.roads;
+    const mine = this.mainMine(hall);
+    const cands = [];
+    for (let k = 0; k < R.owner.length; k++) {
+      if (R.owner[k] !== p.index || !R.connected[k]) continue;
+      const x = k % S;
+      const z = (k - x) / S;
+      cands.push([x, z, Math.hypot(x - hall.x, z - hall.z)]);
+    }
+    cands.sort((a, b) => a[2] - b[2]);
+    for (const [x, z] of cands) {
+      // House cell origins that put the 2x2 footprint edge-adjacent to (x, z).
+      for (const [ox, oz] of [[1, 0], [1, -1], [-2, 0], [-2, -1], [0, 1], [-1, 1], [0, -2], [-1, -2]]) {
+        const cx = x + ox;
+        const cz = z + oz;
+        let clash = false;
+        for (let dz = 0; dz < 2 && !clash; dz++) for (let dx = 0; dx < 2; dx++) if (this.streets?.has((cz + dz) * S + cx + dx)) clash = true;
+        if (clash) continue;
+        const wx = cx + 1;
+        const wz = cz + 1;
+        if (mine && distToSegment(wx, wz, hall.x, hall.z, mine.x, mine.z) < 3.5) continue;
+        if (!g.canPlace('house', wx, wz, p)) continue;
+        if (!R.touchesRoad(cx, cz, 2, p, true)) continue;
+        return { x: wx, z: wz };
+      }
+    }
+    return null;
+  }
+
+  city(hall, peasants) {
+    const g = this.g;
+    const p = this.p;
+    if (!this.streets || this.streetsHall !== hall.id) {
+      this.planStreets(hall);
+      this.streetsHall = hall.id;
+    }
+    g.computeFood(p);
+    // Houses whenever population runs short.
+    const building = p.buildings.filter((b) => !b.dead && b.def.needsRoad && b.underConstruction).length + (this.pendingBuild('house') ? 1 : 0);
+    const short = p.foodCap < 150 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5);
+    if (short && building < (p.foodUsed > 40 ? 2 : 1) && g.canAfford(p, UNITS.house.cost)) {
+      const spot = this.findHouseSpot(hall);
+      if (spot) this.buildAt('house', spot, peasants);
+      else this.extendStreets(12);
+    } else if (g.time - (this.lastStreet ?? 0) > 45 && p.gold > 300) {
+      // Keep a little road ahead of demand.
+      this.lastStreet = g.time;
+      this.extendStreets(6);
+    }
+    // A wall across the approach to the town, with a gate, once in the Feudal Age.
+    if (p.tier >= 2 && !this.wallPlanned && g.time > 400 && p.lumber > 260 && p.gold > 90) this.planFrontWall(hall, peasants);
+  }
+
+  /** Wall line across the side of the town that faces the map center, gate in the middle. */
+  planFrontWall(hall, peasants) {
+    const g = this.g;
+    const p = this.p;
+    this.wallPlanned = true;
+    const [tx, tz] = p.base.toCenter;
+    const cx = hall.x + tx * 26;
+    const cz = hall.z + tz * 26;
+    const px = -tz;
+    const pz = tx;
+    const a = [Math.floor(cx + px * 13), Math.floor(cz + pz * 13)];
+    const b = [Math.floor(cx - px * 13), Math.floor(cz - pz * 13)];
+    const line = Roads.line(a[0], a[1], b[0], b[1]);
+    const workers = peasants.filter((u) => u.harvest?.kind === 'lumber' && !u.carry).slice(0, 2);
+    if (!workers.length) return;
+    // Gate in the middle first; the wall pieces skip its cells.
+    const mid = line[Math.floor(line.length / 2)];
+    const gx = mid[0] + 1;
+    const gz = mid[1] + 1;
+    if (g.canPlace('gate', gx, gz, p) && g.spend(p, UNITS.gate.cost)) {
+      g.issueOrder(workers[0], { type: 'build', building: 'gate', x: gx, z: gz, paid: true });
+    }
+    const gateCells = new Set([`${mid[0]},${mid[1]}`, `${mid[0] + 1},${mid[1]}`, `${mid[0]},${mid[1] + 1}`, `${mid[0] + 1},${mid[1] + 1}`]);
+    const pieces = line.filter(([x, z]) => !gateCells.has(`${x},${z}`) && g.canPlace('wall', x + 0.5, z + 0.5, p));
+    const half = Math.ceil(pieces.length / workers.length);
+    workers.forEach((w, wi) => {
+      pieces.slice(wi * half, (wi + 1) * half).forEach(([x, z]) => {
+        if (!g.canAfford(p, UNITS.wall.cost)) return;
+        g.spend(p, UNITS.wall.cost);
+        g.issueOrder(w, { type: 'build', building: 'wall', x: x + 0.5, z: z + 0.5, paid: true }, true);
+      });
+      if (w.harvest?.tree) w.orderQueue.push({ type: 'harvest', target: w.harvest.tree });
+    });
+  }
+
+  /** Forest-edge trees near `from`, best first (dense stands that are not too far). */
+  woodsCandidates(from, maxR = 45) {
+    const g = this.g;
+    const T = g.terrain;
+    const out = [];
+    const fx = Math.floor(from.x);
+    const fz = Math.floor(from.z);
+    for (let dz = -maxR; dz <= maxR; dz += 2) {
+      for (let dx = -maxR; dx <= maxR; dx += 2) {
+        const tr = T.treeAtCell(fx + dx, fz + dz);
+        if (!tr) continue;
+        const d = Math.hypot(dx, dz);
+        if (d > maxR) continue;
+        // Reachable edge tree with open ground on at least one side.
+        let open = 0;
+        for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (g.grid.walkable(tr.cx + ox * 2, tr.cz + oz * 2) && g.grid.walkable(tr.cx + ox, tr.cz + oz)) open++;
+        if (!open) continue;
+        let n = 0;
+        for (let z = -4; z <= 4; z++) for (let x = -4; x <= 4; x++) if (T.treeAtCell(tr.cx + x, tr.cz + z)) n++;
+        if (n < 12) continue;
+        out.push({ tr, score: Math.min(n, 45) - d * 1.3 });
+      }
+    }
+    out.sort((a, b) => b.score - a.score);
+    return out.map((c) => c.tr);
+  }
+
+  /** Lumber Yard at the edge of good woods, on the side facing the town. */
+  lumberYardSpot(hall) {
+    const g = this.g;
+    for (const tree of this.woodsCandidates(hall).slice(0, 40)) {
+      for (let r = 3; r <= 6; r++) {
+        for (let k = 0; k < 12; k++) {
+          const a = (k / 12) * Math.PI * 2;
+          const x = g.snap(tree.x + Math.cos(a) * r, 3);
+          const z = g.snap(tree.z + Math.sin(a) * r, 3);
+          if (!g.canPlace('lumberyard', x, z, this.p)) continue;
+          if (this.offStreets(x, z, 3)) return { x, z };
+        }
+      }
+    }
+    return null;
+  }
+
+  offStreets(x, z, fp) {
+    if (!this.streets) return true;
+    const cx = Math.round(x - fp / 2) - 1;
+    const cz = Math.round(z - fp / 2) - 1;
+    for (let dz = 0; dz < fp + 2; dz++) for (let dx = 0; dx < fp + 2; dx++) if (this.streets.has((cz + dz) * MAP_SIZE + cx + dx)) return false;
+    return true;
+  }
+
+  /** Send a builder to construct `type` at a chosen spot. */
+  buildAt(type, spot, peasants) {
+    const g = this.g;
+    const p = this.p;
+    const builder =
+      peasants.find((u) => u.harvest?.kind === 'lumber' && !u.carry && u.order.type === 'harvest') ??
+      peasants.find((u) => u.order.type === 'idle') ??
+      peasants.find((u) => !u.harvest?.inside && u.order.type !== 'build' && u.order.type !== 'construct');
+    if (!builder || !g.spend(p, UNITS[type].cost)) return false;
+    const resume = builder.harvest?.kind ? { type: 'harvest', target: builder.harvest.kind === 'gold' ? builder.harvest.mine : builder.harvest.tree } : null;
+    g.issueOrder(builder, { type: 'build', building: type, x: spot.x, z: spot.z, paid: true });
+    if (resume?.target) builder.orderQueue.push(resume);
+    return true;
   }
 
   count(type, includeUnfinished = true) {
@@ -630,48 +863,69 @@ export class GeneralAI {
     const p = this.p;
     if (!peasants.length) return;
     const t = g.time;
-    // Supply
-    g.computeFood(p);
-    const farmsBuilding = p.buildings.some((b) => !b.dead && b.type === 'farm' && b.underConstruction) || this.pendingBuild('farm');
-    if (p.foodCap < 100 && p.foodCap - p.foodUsed <= 5 && !farmsBuilding) {
-      if (this.build('farm', peasants, hall)) return;
-    }
+    this.reserve = null;
     const plan = [
-      { type: 'barracks', n: 1, at: 25 },
-      { type: 'blacksmith', n: 1, at: 150 },
-      { upgrade: 'keep', at: 260 },
-      { type: 'scouttower', n: 1, at: 200 },
-      { type: 'barracks', n: 2, at: 330 },
-      { type: 'sanctum', n: 1, at: 400 },
-      { type: 'scouttower', n: 2, at: 420 },
-      { type: 'workshop', n: 1, at: 600 },
-      { upgrade: 'castle', at: 840 },
-      { type: 'barracks', n: 3, at: 900 },
+      { type: 'lumberyard', n: 1, at: 30 },
+      { type: 'barracks', n: 1, at: 70 },
+      { upgrade: 'keep', at: 220 },
+      { type: 'blacksmith', n: 1, at: 240 },
+      { type: 'stable', n: 1, at: 270 },
+      { type: 'scouttower', n: 1, at: 300 },
+      { type: 'barracks', n: 2, at: 420 },
+      { upgrade: 'castle', at: 540 },
+      { type: 'sanctum', n: 1, at: 580 },
+      { type: 'workshop', n: 1, at: 620 },
+      { type: 'scouttower', n: 2, at: 660 },
+      { upgrade: 'palace', at: 1000 },
+      { type: 'stable', n: 2, at: 1080 },
+      { type: 'barracks', n: 3, at: 1150 },
     ];
     for (const step of plan) {
       if (t < step.at) continue;
       if (step.upgrade) {
         if (!hall) continue;
         const want = step.upgrade;
-        const have = want === 'keep' ? p.tier >= 2 : p.tier >= 3;
-        if (have || hall.upgrading) continue;
-        if (hall.def.upgradesTo === want && g.canAfford(p, UNITS[want].cost) && hall.trainQueue.length === 0) {
+        const tierOf = { keep: 2, castle: 3, palace: 4 }[want];
+        if (p.tier >= tierOf || hall.upgrading) continue;
+        if (hall.def.upgradesTo !== want) continue;
+        if (g.missingRequirements(p, UNITS[want]).length) continue;
+        if (g.canAfford(p, UNITS[want].cost) && hall.trainQueue.length === 0) {
           g.startUpgrade(hall);
           return;
         }
-        if (hall.def.upgradesTo === want) return; // save up for it
-        continue;
+        this.reserve = UNITS[want].cost; // save up for the next age
+        return;
       }
       const have = p.buildings.filter((b) => !b.dead && (b.type === step.type || (step.type === 'scouttower' && b.type === 'guardtower'))).length + (this.pendingBuild(step.type) ? 1 : 0);
       if (have >= step.n) continue;
       if (g.missingRequirements(p, UNITS[step.type]).length) continue;
-      if (!g.canAfford(p, UNITS[step.type].cost)) return; // save up
-      this.build(step.type, peasants, hall);
+      if (!g.canAfford(p, UNITS[step.type].cost)) {
+        this.reserve = UNITS[step.type].cost; // save up
+        return;
+      }
+      if (step.type === 'lumberyard') {
+        const spot = this.lumberYardSpot(hall);
+        if (spot) this.buildAt('lumberyard', spot, peasants);
+        else this.build(step.type, peasants, hall);
+      } else this.build(step.type, peasants, hall);
       return;
     }
-    // Upgrade scout towers.
+    // Another Lumber Yard when the woods have receded from every drop-off.
+    if (t > 300 && !this.pendingBuild('lumberyard') && g.canAfford(p, UNITS.lumberyard.cost) && p.gold > 300) {
+      const drops = p.buildings.filter((b) => !b.dead && b.def.dropOff);
+      const yards = drops.filter((b) => b.def.dropOff === 'lumber').length;
+      const near = drops.some((b) => {
+        const tr = findNearestTree(g, b.x, b.z, 12);
+        return tr && Math.hypot(tr.x - b.x, tr.z - b.z) < 12;
+      });
+      if (!near && yards < 3) {
+        const spot = this.lumberYardSpot(hall);
+        if (spot) this.buildAt('lumberyard', spot, peasants);
+      }
+    }
+    // Upgrade scout towers once allowed.
     for (const b of p.buildings) {
-      if (b.type === 'scouttower' && !b.dead && !b.underConstruction && !b.upgrading && g.canAfford(p, UNITS.guardtower.cost)) {
+      if (b.type === 'scouttower' && !b.dead && !b.underConstruction && !b.upgrading && g.canAfford(p, UNITS.guardtower.cost) && !g.missingRequirements(p, UNITS.guardtower).length) {
         g.startUpgrade(b);
       }
     }
@@ -687,7 +941,7 @@ export class GeneralAI {
     const mine = this.mainMine(hall);
     const [tcx, tcz] = this.p.base.toCenter;
     const tries = [];
-    for (let r = 5; r <= 16; r += 1) {
+    for (let r = 5; r <= 24; r += 1) {
       for (let k = 0; k < 16; k++) {
         const a = (k / 16) * Math.PI * 2 + r * 0.37;
         tries.push({ x: hall.x + Math.cos(a) * r, z: hall.z + Math.sin(a) * r, r });
@@ -709,6 +963,7 @@ export class GeneralAI {
       const cz = Math.round(z - fp / 2) - 1;
       if (!g.grid.rectFree(cx, cz, fp + 2, fp + 2)) continue;
       if (mine && distToSegment(x, z, hall.x, hall.z, mine.x, mine.z) < fp / 2 + 2.5) continue;
+      if (!this.offStreets(x, z, fp)) continue;
       return { x, z };
     }
     return null;
@@ -740,22 +995,41 @@ export class GeneralAI {
     const food = this.armyFood(army);
     const counts = {};
     for (const u of army) counts[u.type] = (counts[u.type] || 0) + 1;
+    const unlocked = (t) => !g.missingRequirements(p, UNITS[t]).length;
+    // Best unlocked units first; pick among the top two for variety.
+    const choose = (list) => {
+      const ok = list.filter(unlocked);
+      if (!ok.length) return null;
+      const top = ok.slice(0, 2);
+      // Prefer whichever we have fewer of.
+      top.sort((a, b) => (counts[a] || 0) - (counts[b] || 0));
+      return top[0];
+    };
     for (const b of p.buildings) {
-      if (b.dead || b.underConstruction || b.trainQueue.length >= 2) continue;
-      if (b.type === 'barracks') {
-        let pick = (counts.footman || 0) <= (counts.archer || 0) ? 'footman' : 'archer';
-        if (!g.missingRequirements(p, UNITS.knight).length && Math.random() < 0.4) pick = 'knight';
-        if (g.canAfford(p, UNITS[pick].cost)) g.trainUnit(b, pick);
-      } else if (b.type === 'sanctum') {
-        const pick = (counts.priest || 0) <= (counts.sorceress || 0) ? 'priest' : 'sorceress';
-        if ((counts[pick] || 0) < 1 + Math.floor(food / 14) && g.canAfford(p, UNITS[pick].cost)) g.trainUnit(b, pick);
+      if (b.dead || b.underConstruction || b.trainQueue.length >= 2 || b.upgrading) continue;
+      let pick = null;
+      if (b.type === 'barracks') pick = choose(['champion', 'crossbowman', 'footman', 'archer', 'spearman', 'militia', 'hunter']);
+      else if (b.type === 'stable') pick = choose(['royal_knight', 'knight', 'scout_rider']);
+      else if (b.type === 'sanctum') {
+        pick = choose(['battlemage', 'priest', 'sorceress']);
+        if (pick && (counts[pick] || 0) >= 1 + Math.floor(food / 14)) pick = null;
       } else if (b.type === 'workshop') {
-        if ((counts.catapult || 0) < 2 && g.canAfford(p, UNITS.catapult.cost)) g.trainUnit(b, 'catapult');
+        pick = choose(['trebuchet', 'catapult']);
+        if (pick && (counts[pick] || 0) >= 2) pick = null;
       } else if (b.type === 'blacksmith' && !b.researching) {
         const upg = p.upgrades.weapons <= p.upgrades.armor ? 'weapons' : 'armor';
         const lvl = p.upgrades[upg];
-        if (lvl < 3 && food >= 10 && g.canAfford(p, UPGRADES[upg].cost[lvl]) && p.lumber > 200) g.startResearch(b, upg);
+        if (lvl < 3 && food >= 10 && p.tier >= UPGRADES[upg].tier[lvl] && g.canAfford(p, UPGRADES[upg].cost[lvl]) && p.lumber > 200) g.startResearch(b, upg);
+      } else if (b.def.dropOff === 'lumber' && !b.researching) {
+        const lvl = p.upgrades.lumber;
+        if (lvl < 2 && p.tier >= UPGRADES.lumber.tier[lvl] && p.gold > UPGRADES.lumber.cost[lvl].gold + 250) g.startResearch(b, 'lumber');
       }
+      if (!pick || !g.canAfford(p, UNITS[pick].cost)) continue;
+      // Keep money aside for the next age or building, unless the army is tiny or we are under attack.
+      const r = this.reserve;
+      const c = UNITS[pick].cost;
+      const keep = r && food >= 8 && g.time > this.defendUntil && (p.gold - (c.gold || 0) < (r.gold || 0) || p.lumber - (c.lumber || 0) < (r.lumber || 0));
+      if (!keep) g.trainUnit(b, pick);
     }
   }
 
