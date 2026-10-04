@@ -291,7 +291,7 @@ export function laser_trooper(tc) {
   rod(h, [0.11, 0.13, -0.03], [0.12, 0.28, -0.08], 0.006, m.dark, 4);
   // off arm (supports the barrel)
   const aL = r.armL;
-  const eL = [-0.09, -0.2, 0.1], hL = [-0.31, -0.165, 0.245];
+  const eL = [-0.1, -0.2, 0.12], hL = [-0.31, -0.18, 0.31];
   beam(aL, [0, 0, 0], eL, 0.082, m.white);
   add(aL, geo.sphere(0.045, 6, 4), m.dark, eL);
   beam(aL, eL, hL, 0.09, m.white);
@@ -304,22 +304,26 @@ export function laser_trooper(tc) {
   add(w, geo.sphere(0.045, 6, 4), m.dark, eR);
   beam(w, eR, hR, 0.09, m.white);
   add(w, geo.box(0.06, 0.07, 0.07), m.dark, hR);
-  const x0 = 0.135, y0 = -0.11;
-  add(w, geo.box(0.045, 0.075, 0.15), m.silver, [x0, y0 - 0.015, -0.07]);
-  add(w, geo.box(0.05, 0.085, 0.02), m.dark, [x0, y0 - 0.015, -0.15]);
-  add(w, geo.box(0.07, 0.095, 0.3), m.white, [x0, y0, 0.15]);
-  add(w, geo.box(0.076, 0.03, 0.2), m.team, [x0, y0 + 0.005, 0.16]);
-  add(w, geo.box(0.028, 0.035, 0.12), m.dark, [x0, y0 + 0.064, 0.1]);
-  add(w, geo.box(0.022, 0.022, 0.01), m.cyan, [x0, y0 + 0.066, 0.162]);
-  add(w, geo.box(0.035, 0.085, 0.045), m.dark, [x0, y0 - 0.08, 0.065], [-0.25, 0, 0]);
-  add(w, geo.box(0.05, 0.06, 0.07), m.dark, [x0, y0 - 0.07, 0.2]);
-  add(w, geo.box(0.052, 0.014, 0.05), m.cyan, [x0, y0 - 0.075, 0.2]);
-  add(w, geo.box(0.035, 0.055, 0.04), m.dark, [x0, y0 - 0.07, 0.26]);
-  add(w, geo.cyl(0.03, 0.036, 0.18, 8), m.silver, [x0, y0, 0.39], [HALF_PI, 0, 0]);
-  glowAdd(glow, w, geo.cyl(0.019, 0.019, 0.17, 8), m.cyan, [x0, y0, 0.545], [HALF_PI, 0, 0]);
-  add(w, mergedCyls('ltCoils', [0.5, 0.54, 0.58].map((z) => [0.033, 0.033, 0.016, 0, 0, z, HALF_PI])), m.dark, [x0, y0, 0]);
-  add(w, geo.cyl(0.03, 0.027, 0.025, 8), m.silver, [x0, y0, 0.625], [HALF_PI, 0, 0]);
-  muzzle(w, x0, y0, 0.645);
+  // rifle in its own frame (axis along +Z through the origin), a little oversized so it reads in play
+  const gun = grp(w, 0.135, -0.11, 0);
+  gun.scale.setScalar(1.2);
+  add(gun, geo.box(0.045, 0.075, 0.15), m.silver, [0, -0.015, -0.07]);
+  add(gun, geo.box(0.05, 0.085, 0.02), m.dark, [0, -0.015, -0.15]);
+  add(gun, geo.box(0.07, 0.095, 0.3), m.white, [0, 0, 0.15]);
+  add(gun, geo.box(0.076, 0.03, 0.2), m.team, [0, 0.005, 0.16]);
+  add(gun, geo.box(0.03, 0.012, 0.22), m.team, [0, 0.052, 0.2]);
+  add(gun, geo.box(0.028, 0.035, 0.12), m.dark, [0, 0.064, 0.08]);
+  add(gun, geo.box(0.022, 0.022, 0.01), m.cyan, [0, 0.066, 0.142]);
+  add(gun, geo.box(0.035, 0.085, 0.045), m.dark, [0, -0.08, 0.065], [-0.25, 0, 0]);
+  add(gun, geo.box(0.05, 0.06, 0.07), m.dark, [0, -0.07, 0.2]);
+  add(gun, geo.box(0.052, 0.014, 0.05), m.cyan, [0, -0.075, 0.2]);
+  add(gun, geo.box(0.035, 0.055, 0.04), m.dark, [0, -0.07, 0.26]);
+  add(gun, geo.cyl(0.03, 0.036, 0.18, 8), m.silver, [0, 0, 0.39], [HALF_PI, 0, 0]);
+  glowAdd(glow, gun, geo.cyl(0.019, 0.019, 0.17, 8), m.cyan, [0, 0, 0.545], [HALF_PI, 0, 0]);
+  add(gun, mergedCyls('ltCoils', [0.5, 0.54, 0.58].map((z) => [0.033, 0.033, 0.016, 0, 0, z, HALF_PI])), m.dark);
+  add(gun, geo.cyl(0.03, 0.027, 0.025, 8), m.silver, [0, 0, 0.625], [HALF_PI, 0, 0]);
+  muzzle(gun, 0, 0, 0.645);
+  scaled(r, 1.04);
   return unitResult(r, 1.2, 0.4, { glow });
 }
 
@@ -657,6 +661,7 @@ export function nexus(tc) {
 export function house_fut(tc) {
   const root = new THREE.Group();
   const m = mats(tc);
+  const glow = [];
   add(root, roundSlab(1.92, 1.92, 0.08, 0.24), m.silver);
   add(root, roundSlab(1.82, 1.82, 0.04, 0.2), m.team, [0, 0.08, 0]);
   add(root, roundSlab(1.72, 1.72, 0.03, 0.18), m.pearl, [0, 0.11, 0]);
@@ -691,7 +696,7 @@ export function house_fut(tc) {
     add(g, geo.box(0.22, 0.03, 0.16), mat(C.solar), [0, 0.006, 0]);
   }
   rod(pod, [0.06, top, 0.02], [0.07, 2.04 - b, 0.03], 0.012, m.steel, 5);
-  add(pod, geo.sphere(0.04, 6, 4), m.cyan, [0.07, 2.08 - b, 0.03]);
+  glowAdd(glow, pod, geo.sphere(0.045, 6, 4), m.cyan, [0.07, 2.08 - b, 0.03]);
   add(pod, geo.box(0.12, 0.02, 0.02), m.steel, [0.07, 1.86 - b, 0.03]);
   // door facing the front, framed in team color with a glowing lintel
   const dg = grp(pod, 0, 0, R - 0.02);
@@ -720,7 +725,7 @@ export function house_fut(tc) {
   add(root, geo.cyl(0.13, 0.13, 0.36, 10), m.silver, [0.74, b + 0.18, -0.74]);
   add(root, geo.cyl(0.135, 0.135, 0.04, 10), m.team, [0.74, b + 0.3, -0.74]);
   add(root, geo.box(0.04, 0.16, 0.02), m.cyan, [0.74, b + 0.16, -0.61]);
-  return { root, parts: {}, height: 2.2, radius: 0.95 };
+  return { root, parts: { glow }, height: 2.2, radius: 0.95 };
 }
 
 // Hydroponic farm (3x3): a glass dome over rows of plants under glowing grow-light bars, a low glass

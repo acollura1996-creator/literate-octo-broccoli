@@ -7,7 +7,7 @@ import { geo, mat } from './assets.js';
 const ghostCache = new Map();
 // Pole weapons thrust instead of swinging: the weapon tilts to this angle (lowering the
 // pike or lance level) while the arm draws back and then lunges forward.
-const THRUST = { spearman: 0.55, royal_knight: 0.05 };
+const THRUST = { spearman: 0.55, royal_knight: 0.05, hoplite: 1.1 };
 // Guns aim (weapon.rotation.x) and kick back when they fire instead of swinging.
 export const AIM = {};
 function ghostMaterial(m, tint) {

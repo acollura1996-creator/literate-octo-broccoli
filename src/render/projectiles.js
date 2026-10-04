@@ -9,6 +9,14 @@ import { geo, mat } from './assets.js';
  * the barrel rather than the unit's chest.
  */
 export const MUZZLE = {
+  grenadier: [-0.204, 0.568, 0.195],
+  musketeer: [0, 0.646, 1.031],
+  cannon: [0, 0.676, 0.789],
+  rifleman: [0, 0.644, 0.988],
+  machine_gunner: [-0.021, 0.543, 0.874],
+  steam_tank: [0, 0.6, 1.425],
+  howitzer: [0, 1.053, 0.803],
+  tower_bunker: [0, 0.92, 0.9],
   infantry: [-0.105, 0.7, 0.7],
   bazooka: [-0.16, 0.81, 0.57],
   tank: [0, 0.82, 1.82],
