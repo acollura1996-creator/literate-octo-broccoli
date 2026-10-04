@@ -2,13 +2,13 @@
 import * as THREE from 'three';
 import { Unit } from './unit.js';
 import { UNITS, ATTACK_TABLE, UPGRADES, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL } from '../data/units.js';
-import { HEROES, HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.js';
-import { ITEMS, DROP_TABLES, SHOP_STOCK } from '../data/items.js';
+import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.js';
+import { ITEMS } from '../data/items.js';
 import { ABILITIES } from './abilities.js';
 import { updateUnit, stopMoving, finishOrder } from './behavior.js';
 import { PathGrid, BLOCK_BUILDING } from '../world/pathgrid.js';
 import { Terrain } from '../world/terrain.js';
-import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, rotate } from '../world/layout.js';
+import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS } from '../world/layout.js';
 import { Fog } from './fog.js';
 import { TEAM_COLORS } from '../render/assets.js';
 import { createModel } from '../render/models.js';
@@ -95,7 +95,10 @@ export class Game {
 
     // Neutral buildings.
     for (const n of this.layout.neutrals) {
-      const u = this.spawnUnit(n.type, this.passive, n.at[0], n.at[1], { facing: Math.atan2(CENTER - n.at[0], CENTER - n.at[1]) });
+      const u = this.spawnUnit(n.type, this.passive, n.at[0], n.at[1], {
+        facing: Math.atan2(CENTER - n.at[0], CENTER - n.at[1]),
+        gold: n.startMine ? 16000 : 22000,
+      });
       if (n.type === 'mercenary_camp') {
         u.stock = {};
         for (const m of u.def.mercenaries) u.stock[m] = 2;

@@ -374,7 +374,7 @@ export function updateUnit(game, u, dt) {
     case 'guardReturn': {
       // Creeps walking home after a chase: ignore enemies, heal up.
       const r = moveToward(game, u, o.point.x, o.point.z, 0.5, dt);
-      u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.08 * dt);
+      if (u.def.creep) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.08 * dt);
       if (r !== 'moving') {
         finishOrder(game, u);
         u.facing = u.guardPos?.facing ?? u.facing;

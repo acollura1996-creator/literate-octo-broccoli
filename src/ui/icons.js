@@ -126,7 +126,7 @@ export class Portrait {
       this.renderer.clear();
       return;
     }
-    this.model = createModel(unit.def.model, unit.owner.color);
+    this.model = createModel(unit.def.model, unit.def.modelColor ?? unit.owner.color);
     this.scene.add(this.model.root);
     this.model.root.rotation.y = 0.35;
     frame(this.cam, this.model.root, unit.isBuilding, true);

@@ -143,7 +143,9 @@ building('guardtower', {
 building('altar', {
   name: 'Altar of Heroes', hp: 1800, armor: 6, footprint: 3, cost: { gold: 180, lumber: 50 }, buildTime: 60,
   foodProvided: 16, revivesHeroes: true, sanctuary: true, hotkey: 'A', sight: 10,
-  description: 'Revives your fallen Hero and slowly heals your units nearby. Provides 16 food for your Hero and mercenaries.',
+  damage: [26, 32], attackType: 'normal', attackCooldown: 1.4, range: 7,
+  projectile: { kind: 'bolt', color: 0xfff0a0, speed: 16 },
+  description: 'Revives your fallen Hero, smites nearby enemies and slowly heals your units. Provides 16 food for your Hero and mercenaries.',
 });
 
 // --------------------------------------------------------------------- Heroes
@@ -284,7 +286,7 @@ building('shop', {
   shop: 'merchant', description: 'Sells items to Heroes within range.',
 });
 building('vault', {
-  name: 'Arcane Vault', model: 'shop', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0,
+  name: 'Arcane Vault', model: 'shop', modelColor: 0x6a3ad0, hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0,
   sight: 0, shop: 'vault', description: 'Sells powerful artifacts to Heroes within range.',
 });
 building('mercenary_camp', {

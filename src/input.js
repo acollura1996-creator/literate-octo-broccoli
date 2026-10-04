@@ -5,7 +5,6 @@ import { UNITS } from './data/units.js';
 import { ABILITIES } from './game/abilities.js';
 import { canCast } from './game/behavior.js';
 import { createModel } from './render/models.js';
-import { MAP_SIZE } from './world/layout.js';
 
 const MAX_SELECTION = 24;
 
@@ -474,6 +473,10 @@ export class Input {
     }, { passive: false });
     c.addEventListener('mouseleave', () => (this.mouse.inside = false));
     c.addEventListener('mouseenter', () => (this.mouse.inside = true));
+    // Edge scrolling works over the HUD too, but stops when the pointer leaves the window.
+    document.addEventListener('mouseout', (e) => {
+      if (!e.relatedTarget) this.mouse.inWindow = false;
+    });
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
@@ -528,6 +531,7 @@ export class Input {
     const { x, y } = this.localXY(e);
     this.mouse.x = x;
     this.mouse.y = y;
+    this.mouse.inWindow = true;
     if (this.panDrag) {
       const k = this.view.cam.distance / 260;
       this.view.cam.setTarget(this.panDrag.tx - (x - this.panDrag.x) * k, this.panDrag.tz - (y - this.panDrag.y) * k * 1.3);
@@ -702,8 +706,8 @@ export class Input {
     if (this.keys.has('ArrowRight')) dx += 1;
     if (this.keys.has('ArrowUp')) dz -= 1;
     if (this.keys.has('ArrowDown')) dz += 1;
-    if (this.mouse.inside && !this.drag && document.hasFocus()) {
-      const m = 6;
+    if (this.mouse.inWindow && this.enabled && !this.drag && document.hasFocus()) {
+      const m = 4;
       if (this.mouse.x <= m) dx -= 1;
       if (this.mouse.x >= this.view.width - m) dx += 1;
       if (this.mouse.y <= m) dz -= 1;

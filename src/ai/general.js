@@ -131,8 +131,9 @@ export class GeneralAI {
       return;
     }
 
-    // Defend home.
+    // Defend home (portal back if far away).
     if (g.time < this.defendUntil && this.defendPos) {
+      if (h.distTo(this.defendPos) > 35 && this.useItemOfType(h, 'townPortal')) return;
       this.go(h, this.defendPos, true);
       this.rallyMercs(mercs, h);
       return;
@@ -174,8 +175,9 @@ export class GeneralAI {
     const power = this.heroPower(h, mercs);
     // Endgame: go for Kalenden.
     const k = g.legionMgr.kalenden;
-    if (!k.dead && (h.level >= 10 || (h.level >= 9 && mercs.length >= 2) || g.time > 45 * 60)) {
-      return { x: CITADEL.kalenden[0], z: CITADEL.kalenden[1] };
+    const ready = h.level >= 10 || (h.level >= 9 && mercs.length >= 2) || (g.allied && h.level >= 8 && g.time > 16 * 60) || g.time > 45 * 60;
+    if (!k.dead && ready && h.hp > h.maxHp * 0.8) {
+      return { x: k.x, z: k.z };
     }
     // Occasionally raid a rival.
     if (!g.allied && h.level >= 6 && Math.random() < 0.18) {
@@ -347,12 +349,29 @@ export class GeneralAI {
     this.g.issueOrder(h, { type: attack ? 'attackMove' : 'move', point: { x: pt.x, z: pt.z } });
   }
 
+  /** Inventory slot to sell to make room for `wish`, or -1 if there is a free slot, or null if nothing fits. */
+  slotFor(h, wish) {
+    if (h.inventoryFreeSlot() >= 0) return -1;
+    const worse = REPLACES[wish];
+    let slot = h.inventory.findIndex((it) => it && it.id === worse);
+    if (slot >= 0) return slot;
+    // Otherwise replace the cheapest passive item if the wish is much better.
+    let cheapest = null;
+    h.inventory.forEach((it, i) => {
+      if (!it || ITEMS[it.id].use) return;
+      if (cheapest === null || ITEMS[it.id].cost < ITEMS[h.inventory[cheapest].id].cost) cheapest = i;
+    });
+    if (cheapest !== null && (ITEMS[h.inventory[cheapest].id].cost ?? 0) < ITEMS[wish].cost * 0.6) return cheapest;
+    return null;
+  }
+
   nextWish(h) {
     const list = WISHLIST[h.heroDef.primary];
     for (const id of list) {
       if (h.inventory.some((it) => it && it.id === id)) continue;
       // Skip items superseded by something we own.
       if (Object.entries(REPLACES).some(([better, worse]) => worse === id && h.inventory.some((it) => it && it.id === better))) continue;
+      if (this.slotFor(h, id) === null) continue;
       return id;
     }
     return null;
@@ -363,9 +382,16 @@ export class GeneralAI {
     const p = this.p;
     const potions = h.inventory.filter((it) => it && ITEMS[it.id].use === 'heal').reduce((s, it) => s + it.charges, 0);
     const wish = this.nextWish(h);
-    const wantPotion = (potions < 1 && p.gold >= 250) || (potions < 2 && p.gold >= 700);
+    const potionRoom = potions > 0 || h.inventoryFreeSlot() >= 0;
+    // Keep a Scroll of Town Portal for emergencies once the core items are in.
+    const hasTp = h.inventory.some((it) => it && ITEMS[it.id].use === 'townPortal');
+    if (!hasTp && !wish && p.gold >= 500 && h.inventoryFreeSlot() >= 0 && h.level >= 4) {
+      const merchant = g.passive.buildings.filter((s) => s.def.shop === 'merchant').sort((a, b) => a.distTo(h) - b.distTo(h))[0];
+      if (merchant && h.distTo(merchant) <= merchant.radius + 6) g.buyItem(p, merchant, 'scroll_tp');
+    }
+    const wantPotion = potionRoom && ((potions < 1 && p.gold >= 250) || (potions < 2 && p.gold >= 700));
     const wishAffordable = wish && p.gold >= ITEMS[wish].cost + 100;
-    if (!wantPotion && !wishAffordable) {
+    if ((!wantPotion && !wishAffordable) || (this.shopCooldown ?? 0) > g.time) {
       this.shopping = null;
       return false;
     }
@@ -393,16 +419,16 @@ export class GeneralAI {
     }
     // Buy.
     if (wishAffordable && shop.def.shop === kind) {
-      const worse = REPLACES[wish];
-      if (h.inventoryFreeSlot() < 0) {
-        const slot = h.inventory.findIndex((it) => it && (it.id === worse || (!ITEMS[it.id].use && !WISHLIST[h.heroDef.primary].slice(4).includes(it.id))));
-        if (slot >= 0) g.sellItem(h, slot);
-      }
+      const slot = this.slotFor(h, wish);
+      if (slot !== null && slot >= 0) g.sellItem(h, slot);
       g.buyItem(p, shop, wish);
     }
-    if (wantPotion && shop.def.shop === 'merchant') g.buyItem(p, shop, 'potion_healing');
-    else if (wantPotion && shop.def.shop === 'vault' && p.gold >= 300) g.buyItem(p, shop, 'greater_healing');
+    const potionSlot = h.inventory.some((it) => it && ITEMS[it.id].use === 'heal') || h.inventoryFreeSlot() >= 0;
+    if (wantPotion && potionSlot && shop.def.shop === 'merchant') g.buyItem(p, shop, 'potion_healing');
+    else if (wantPotion && potionSlot && shop.def.shop === 'vault' && p.gold >= 300) g.buyItem(p, shop, 'greater_healing');
     this.shopping = null;
+    // Don't walk back to a shop immediately if nothing could be bought.
+    this.shopCooldown = g.time + 20;
     return false;
   }
 
@@ -439,7 +465,8 @@ export class GeneralAI {
   thinkEmpire() {
     const g = this.g;
     const p = this.p;
-    const hall = p.buildings.find((b) => !b.dead && b.def.dropOff && !b.underConstruction);
+    const halls = p.buildings.filter((b) => !b.dead && b.def.dropOff && !b.underConstruction);
+    const hall = halls.find((h) => this.mainMine(h)?.goldLeft > 0) ?? halls[0];
     const peasants = p.units.filter((u) => !u.dead && u.type === 'peasant');
     if (!hall && !p.buildings.some((b) => !b.dead && b.def.dropOff)) {
       // Lost the town hall: rebuild if possible.
@@ -448,9 +475,34 @@ export class GeneralAI {
       return;
     }
     if (hall) this.economy(hall, peasants);
+    if (hall) this.expand(hall, peasants);
     this.construction(hall, peasants);
     this.production();
     this.militaryEmpire();
+  }
+
+  /** Take a new gold mine when the current one runs low. */
+  expand(hall, peasants) {
+    const g = this.g;
+    const p = this.p;
+    const mine = this.mainMine(hall);
+    this.expansionGuard = null;
+    if (mine && mine.goldLeft > 4000) return;
+    if (p.buildings.some((b) => !b.dead && b.def.dropOff && b.underConstruction) || this.pendingBuild('townhall')) return;
+    const halls = p.buildings.filter((b) => !b.dead && b.def.dropOff);
+    const candidates = g.passive.buildings
+      .filter((m) => m.type === 'goldmine' && !m.dead && m.goldLeft > 2000)
+      .filter((m) => !halls.some((h) => h.distTo(m) < 14))
+      .filter((m) => !g.generals.some((o) => o !== p && !o.defeated && o.buildings.some((b) => !b.dead && b.distTo(m) < 18)))
+      .sort((a, b) => a.distTo(hall) - b.distTo(hall));
+    const target = candidates[0];
+    if (!target) return;
+    const guards = g.unitsNear(target.x, target.z, 15).filter((u) => u.owner === g.creeps && !u.dead);
+    if (guards.length) {
+      this.expansionGuard = { x: guards[0].x, z: guards[0].z };
+      return;
+    }
+    if (g.canAfford(p, UNITS.townhall.cost)) this.build('townhall', peasants, target);
   }
 
   mainMine(hall) {
@@ -685,7 +737,7 @@ export class GeneralAI {
       if (u.order.type === 'idle' && Math.hypot(u.x - rally.x, u.z - rally.z) > 6) g.issueOrder(u, { type: 'attackMove', point: rally });
     }
     const threshold = Math.min(44, 14 + this.attacks * 6) * [1.15, 1, 0.9][g.difficulty];
-    if (food >= threshold) {
+    if (food >= threshold || (this.expansionGuard && food >= 16)) {
       const obj = this.attackObjective(false);
       if (!obj) return;
       this.state = 'attack';
@@ -699,9 +751,10 @@ export class GeneralAI {
   attackObjective(continuing) {
     const g = this.g;
     const food = this.armyFood();
+    if (this.expansionGuard && food >= 16) return this.expansionGuard;
     const k = g.legionMgr.kalenden;
-    const late = g.time > 28 * 60 || (g.allied && g.time > 18 * 60);
-    if (!k.dead && (late && food >= 40)) return { x: CENTER, z: CENTER + CITADEL.half - 3 };
+    const late = g.time > 26 * 60 || (g.allied && g.time > 16 * 60);
+    if (!k.dead && late && food >= (g.allied ? 30 : 40)) return { x: k.x, z: k.z };
     if (!g.allied) {
       const base = this.nearestEnemyBase();
       if (base && (this.attacks >= 2 || continuing)) {

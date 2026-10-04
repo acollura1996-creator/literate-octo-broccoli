@@ -2,7 +2,6 @@
 // 3D portrait, unit info, inventory and the command card.
 import { UNITS, UPGRADES } from '../data/units.js';
 import { ITEMS } from '../data/items.js';
-import { ABILITIES } from '../game/abilities.js';
 import { getCommands } from './commands.js';
 import { modelIcon, Portrait } from './icons.js';
 import { Minimap } from './minimap.js';
@@ -423,4 +422,3 @@ export class Hud {
   }
 }
 
-export { ABILITIES };

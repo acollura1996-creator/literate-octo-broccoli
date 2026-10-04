@@ -49,7 +49,7 @@ export class UnitView {
   buildModel() {
     const u = this.unit;
     if (this.model) this.group.remove(this.model.root);
-    const m = createModel(u.def.model, u.owner.color);
+    const m = createModel(u.def.model, u.def.modelColor ?? u.owner.color);
     this.model = m;
     this.height = m.height ?? 1.2;
     this.parts = m.parts ?? {};
