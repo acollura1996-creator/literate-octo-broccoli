@@ -191,10 +191,10 @@ export function spearman(tc) {
   // tall pike, carried leaning forward
   const hand = armMesh(r.weapon, { ...armOpt, bend: 0.55 });
   const g = grip(hand, 0.42);
-  add(g, geo.cyl(0.017, 0.02, 1.8, 5), mat(P.woodLight), [0, 0.45, 0]);
-  add(g, geo.box(0.024, 0.13, 0.024), steelD, [0, 1.33, 0]);
-  add(g, geo.cone(0.036, 0.2, 4), mat(P.steelLight), [0, 1.49, 0], [0, Math.PI / 4, 0], [1, 1, 0.45]);
-  add(g, geo.box(0.012, 0.11, 0.07), team, [0, 1.2, -0.04]); // little team streamer
+  add(g, geo.cyl(0.017, 0.02, 1.62, 5), mat(P.woodLight), [0, 0.41, 0]);
+  add(g, geo.box(0.024, 0.13, 0.024), steelD, [0, 1.2, 0]);
+  add(g, geo.cone(0.036, 0.2, 4), mat(P.steelLight), [0, 1.36, 0], [0, Math.PI / 4, 0], [1, 1, 0.45]);
+  add(g, geo.box(0.012, 0.11, 0.07), team, [0, 1.07, -0.04]); // little team streamer
   return unitResult(r, 1.15, 0.32);
 }
 
@@ -935,7 +935,7 @@ export function stable(tc) {
   add(root, mergedBoxes('stableFence', fence), woodL);
   const bales = [[0.4, 0.22, 0.26, -1.0, 0.11, 0.2, 0.1], [0.4, 0.22, 0.26, -1.0, 0.11, 0.48, -0.05], [0.4, 0.22, 0.26, -0.98, 0.33, 0.34, 0.2]];
   add(root, mergedBoxes('stableBales', bales), hay);
-  add(root, mergedBoxes('stableBaleTies', bales.flatMap(([w, h, d, x, y, z, r]) => [[0.03, h + 0.01, d + 0.01, x - 0.1, y, z, r], [0.03, h + 0.01, d + 0.01, x + 0.1, y, z, r]])), hayD);
+  add(root, mergedBoxes('stableBaleTies', bales.flatMap(([, h, d, x, y, z, r]) => [[0.03, h + 0.01, d + 0.01, x - 0.1, y, z, r], [0.03, h + 0.01, d + 0.01, x + 0.1, y, z, r]])), hayD);
   add(root, geo.cone(0.28, 0.32, 7), hay, [-0.5, 0.16, 0.12]);
   add(root, geo.box(0.62, 0.18, 0.22), mat(P.wood), [0.72, 0.09, 0.2]);
   add(root, geo.box(0.54, 0.02, 0.15), mat(0x3a6aa0), [0.72, 0.17, 0.2]);
@@ -1166,6 +1166,10 @@ function archSpandrel(PW, AS, VB, t) {
   });
 }
 
+/** Front/back faces of the masonry gatehouses sit at z = +-GZ, a little inside the footprint so that
+ * banners hung on them stay within it (the side faces, where walls join, are flush with x = +-1). */
+const GZ = 0.975;
+
 /**
  * Masonry gatehouse filling a 2x2 footprint: piers either side, a vault over the passage (|x| < PW,
  * along Z) and arched facades front and back. Returns the vault height VB.
@@ -1173,16 +1177,16 @@ function archSpandrel(PW, AS, VB, t) {
 function gatehouse(root, { PW, H, AS, color, trim }) {
   const m = mat(color), mT = mat(trim);
   const VB = AS + PW + 0.1;
-  for (const s of [1, -1]) add(root, geo.box(1 - PW, H, 2), m, [s * (PW + (1 - PW) / 2), H / 2, 0]);
-  add(root, geo.box(2 * PW, H - VB, 2), m, [0, (VB + H) / 2, 0]);
+  for (const s of [1, -1]) add(root, geo.box(1 - PW, H, 2 * GZ), m, [s * (PW + (1 - PW) / 2), H / 2, 0]);
+  add(root, geo.box(2 * PW, H - VB, 2 * GZ), m, [0, (VB + H) / 2, 0]);
   const sp = archSpandrel(PW, AS, VB, 0.24);
   for (const s of [1, -1]) {
-    add(root, sp, m, [0, 0, s * 0.88]);
-    add(root, geo.torus(PW + 0.035, 0.045, 4, 12, Math.PI), mT, [0, AS, s * 0.955]);
-    for (const sx of [1, -1]) add(root, geo.box(0.08, AS, 0.06), mT, [sx * (PW + 0.035), AS / 2, s * 0.97]);
+    add(root, sp, m, [0, 0, s * (GZ - 0.12)]);
+    add(root, geo.torus(PW + 0.035, 0.045, 4, 12, Math.PI), mT, [0, AS, s * (GZ - 0.045)]);
+    for (const sx of [1, -1]) add(root, geo.box(0.08, AS, 0.06), mT, [sx * (PW + 0.035), AS / 2, s * (GZ - 0.03)]);
   }
   add(root, geo.box(2 * PW, 0.03, 2), mat(0x8e8a80), [0, 0.015, 0]); // paved passage
-  add(root, geo.box(2 * PW, 0.04, 2), mat(0x2a2620), [0, VB - 0.02, 0]); // shadowed vault ceiling
+  add(root, geo.box(2 * PW, 0.04, 2 * GZ), mat(0x2a2620), [0, VB - 0.02, 0]); // shadowed vault ceiling
   return VB;
 }
 
@@ -1242,7 +1246,7 @@ export function gate_wood(tc) {
     add(root, geo.box(0.42, 1.92, 0.56), woodD, [x, 0.96, 0]);
     add(root, mergedCyls('gwPosts', [[-0.17, -0.26], [0.17, -0.26], [-0.17, 0.26], [0.17, 0.26]].map(([px, pz]) => [0.07, 0.075, 2.0, px, 1.0, pz, 0, 0, 7])), wood, [x, 0, 0]);
     add(root, mergedCyls('gwClad', [-0.1, 0, 0.1].flatMap((lx) => [[0.055, 0.055, 1.8, lx, 0.92, 0.27, 0, 0, 6], [0.055, 0.055, 1.8, lx, 0.92, -0.27, 0, 0, 6]])), wood, [x, 0, 0]);
-    add(root, mergedCyls('gwRings', [0.55, 1.3].map((y) => [0.3, 0.3, 0.05, 0, y, 0, 0, 0, 4])), mat(0xcdb98a), [x, 0, 0]);
+    add(root, mergedBoxes('gwLashings', [0.55, 1.3].map((y) => [0.46, 0.05, 0.6, 0, y, 0])), mat(0xcdb98a), [x, 0, 0]);
     // fighting platform with a stake parapet and a little thatched roof
     add(root, geo.box(0.5, 0.08, 0.66), woodL, [x, 1.95, 0]);
     const par = [];
@@ -1259,7 +1263,7 @@ export function gate_wood(tc) {
   }
   const wing = [];
   const hs = [1.4, 1.5, 1.36, 1.46];
-  for (const s of [1, -1]) for (const z of [0.5, 0.82, -0.5, -0.82]) for (const [k, xx] of [0.6, 0.85].entries()) {
+  for (const s of [1, -1]) for (const z of [0.5, 0.82, -0.5, -0.82]) for (const [k, xx] of [0.64, 0.85].entries()) {
     wing.push([s * xx, z, hs[(k + Math.round(z * 10)) & 3]]);
   }
   stakes(root, 'gwWings', wing, { r: 0.14 });
@@ -1285,24 +1289,24 @@ export function gate_stone(tc) {
   const stone = mat(P.stone), stoneD = mat(P.stoneDark);
   const PW = 0.5, H = 2.45, AS = 1.22;
   const VB = gatehouse(root, { PW, H, AS, color: P.stone, trim: P.stoneDark });
-  for (const s of [1, -1]) add(root, geo.box(1 - PW, 0.26, 2.004), stoneD, [s * (PW + (1 - PW) / 2), 0.13, 0]);
+  for (const s of [1, -1]) add(root, geo.box(1 - PW, 0.26, 2 * GZ + 0.004), stoneD, [s * (PW + (1 - PW) / 2), 0.13, 0]);
   const courses = [];
-  for (const y of [0.62, 1.0, 1.38]) for (const s of [1, -1]) courses.push([1 - PW + 0.004, 0.03, 2.004, s * (PW + (1 - PW) / 2), y, 0]);
-  for (const y of [1.84, 2.16]) courses.push([2.004, 0.03, 2.004, 0, y, 0]);
+  for (const y of [0.62, 1.0, 1.38]) for (const s of [1, -1]) courses.push([1 - PW + 0.004, 0.03, 2 * GZ + 0.004, s * (PW + (1 - PW) / 2), y, 0]);
+  for (const y of [1.84, 2.16]) courses.push([2.004, 0.03, 2 * GZ + 0.004, 0, y, 0]);
   add(root, mergedBoxes('gateStoneCourses', courses), stoneD);
   add(root, geo.box(2, 0.1, 2), stoneD, [0, H + 0.05, 0]);
   add(root, crenRectGeo(2, 2, 5, 0.24, 0.32), stone, [0, H + 0.1, 0]);
   for (const s of [1, -1]) {
-    add(root, mergedBoxes('gateStoneSlits', [[0.06, 0.28, 0.03, 0.75, 1.55, 0], [0.06, 0.28, 0.03, -0.75, 1.55, 0]]), mat(0x1c1e24), [0, 0, s * 0.99]);
+    add(root, mergedBoxes('gateStoneSlits', [[0.06, 0.28, 0.03, 0.75, 1.55, 0], [0.06, 0.28, 0.03, -0.75, 1.55, 0]]), mat(0x1c1e24), [0, 0, s * (GZ - 0.01)]);
   }
-  portcullis(root, 'stone', PW, 1.48, VB, 0.745);
-  portcullis(root, 'stoneB', PW, 1.48, VB, -0.745);
-  banner(root, 0, H - 0.1, 0.995, tc, { w: 0.3, h: 0.2 });
-  banner(root, 0, H - 0.1, -0.995, tc, { w: 0.3, h: 0.2, ry: Math.PI });
+  portcullis(root, 'stone', PW, 1.48, VB, GZ - 0.23);
+  portcullis(root, 'stoneB', PW, 1.48, VB, -(GZ - 0.23));
+  banner(root, 0, H - 0.1, GZ + 0.013, tc, { w: 0.3, h: 0.2 });
+  banner(root, 0, H - 0.1, -GZ - 0.013, tc, { w: 0.3, h: 0.2, ry: Math.PI });
   flag(root, -0.78, H + 0.1, -0.78, tc, { pole: 0.4, w: 0.4, h: 0.22, dir: 1 });
   const doors = [
-    gateLeaf(root, 'stone', -PW, 0.7, 1, PW - 0.005, VB - 0.1),
-    gateLeaf(root, 'stone', PW, 0.7, -1, PW - 0.005, VB - 0.1),
+    gateLeaf(root, 'stone', -PW, GZ - 0.275, 1, PW - 0.005, VB - 0.1),
+    gateLeaf(root, 'stone', PW, GZ - 0.275, -1, PW - 0.005, VB - 0.1),
   ];
   return { root, parts: { doors }, height: 3.0, radius: 1.0 };
 }
@@ -1312,7 +1316,7 @@ export function gate_fortified(tc) {
   const ash = mat(ASHLAR), ashD = mat(ASHLAR_DARK), team = mat(tc), gold = mat(P.gold);
   const PW = 0.47, H = 2.34, AS = 1.22;
   const VB = gatehouse(root, { PW, H, AS, color: ASHLAR_MORTAR, trim: ASHLAR_DARK });
-  for (const s of [1, -1]) add(root, geo.box(1 - PW, 0.32, 2.004), ashD, [s * (PW + (1 - PW) / 2), 0.16, 0]);
+  for (const s of [1, -1]) add(root, geo.box(1 - PW, 0.32, 2 * GZ + 0.004), ashD, [s * (PW + (1 - PW) / 2), 0.16, 0]);
   // ashlar courses: front/back faces skip the arch opening, side faces are whole
   const inOpening = (cx, y, hw, hh) => {
     const ax = Math.abs(cx) - hw;
@@ -1324,13 +1328,13 @@ export function gate_fortified(tc) {
   };
   const underBanner = (cx, y, hw) => Math.abs(Math.abs(cx) - 0.735) < hw + 0.17 && y > 0.92;
   const face = ashlarRows(0.34, 2.08, { x0: -1, x1: 1, skip: (cx, y, hw, hh) => inOpening(cx, y, hw, hh) || underBanner(cx, y, hw) });
-  const side = ashlarRows(0.34, 2.08, { x0: -1, x1: 1 });
+  const side = ashlarRows(0.34, 2.08, { x0: -GZ, x1: GZ });
   const blocks = [];
-  for (const [w, h, x, y] of face) blocks.push([w, h, 0.03, x, y, 0.991], [w, h, 0.03, -x, y, -0.991]);
+  for (const [w, h, x, y] of face) blocks.push([w, h, 0.03, x, y, GZ - 0.009], [w, h, 0.03, -x, y, -(GZ - 0.009)]);
   for (const [w, h, x, y] of side) blocks.push([0.03, h, w, 0.991, y, -x], [0.03, h, w, -0.991, y, x]);
   add(root, mergedBoxes('gateFortBlocks', blocks), ash);
-  add(root, geo.box(2.006, 0.12, 2.006), team, [0, 2.16, 0]);
-  add(root, geo.box(2.008, 0.025, 2.008), gold, [0, 2.1, 0]);
+  add(root, geo.box(2.006, 0.12, 2 * GZ + 0.006), team, [0, 2.16, 0]);
+  add(root, geo.box(2.008, 0.025, 2 * GZ + 0.008), gold, [0, 2.1, 0]);
   add(root, geo.box(2, 0.12, 2), ashD, [0, 2.28, 0]);
   add(root, crenRectGeo(2, 2, 6, 0.26, 0.4), ash, [0, H, 0]);
   // two small towers over the piers with team roofs
@@ -1340,16 +1344,16 @@ export function gate_fortified(tc) {
     add(root, geo.box(0.535, 0.1, 0.625), ashD, [x, H + 0.05, 0]);
     add(root, geo.box(0.535, 0.08, 0.625), ashD, [x, H + 0.72, 0]);
     add(root, geo.box(0.536, 0.05, 0.626), team, [x, H + 0.62, 0]);
-    add(root, mergedBoxes(`gfTowerSlits${s}`, [[0.06, 0.24, 0.03, 0, 0, 0.315], [0.06, 0.24, 0.03, 0, 0, -0.315], [0.03, 0.24, 0.06, s * 0.27, 0, 0]]), mat(0x1c1e24), [x, H + 0.34, 0]);
+    add(root, mergedBoxes(`gfTowerSlits${s}`, [[0.06, 0.24, 0.03, 0, 0, 0.315], [0.06, 0.24, 0.03, 0, 0, -0.315], [0.03, 0.24, 0.06, s * 0.255, 0, 0]]), mat(0x1c1e24), [x, H + 0.34, 0]);
     add(root, CG.pyramid(), team, [x, H + 0.76, 0], null, [0.53, 0.46, 0.62]);
     add(root, geo.sphere(0.045, 6, 4), gold, [x, H + 1.23, 0]);
-    for (const sz of [1, -1]) banner(root, x, 2.02, sz * 0.998, tc, { w: 0.3, h: 0.86, ry: sz > 0 ? 0 : Math.PI });
+    for (const sz of [1, -1]) banner(root, x, 2.02, sz * (GZ + 0.013), tc, { w: 0.3, h: 0.86, ry: sz > 0 ? 0 : Math.PI });
   }
-  portcullis(root, 'fort', PW, 1.42, VB, 0.745);
-  portcullis(root, 'fortB', PW, 1.42, VB, -0.745);
+  portcullis(root, 'fort', PW, 1.42, VB, GZ - 0.23);
+  portcullis(root, 'fortB', PW, 1.42, VB, -(GZ - 0.23));
   const doors = [
-    gateLeaf(root, 'fort', -PW, 0.7, 1, PW - 0.005, VB - 0.1, { studs: true }),
-    gateLeaf(root, 'fort', PW, 0.7, -1, PW - 0.005, VB - 0.1, { studs: true }),
+    gateLeaf(root, 'fort', -PW, GZ - 0.275, 1, PW - 0.005, VB - 0.1, { studs: true }),
+    gateLeaf(root, 'fort', PW, GZ - 0.275, -1, PW - 0.005, VB - 0.1, { studs: true }),
   ];
   return { root, parts: { doors }, height: 3.6, radius: 1.0 };
 }
