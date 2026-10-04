@@ -101,7 +101,7 @@ export class Hud {
       $('r-mood-ico').textContent = mood.icon;
       $('r-mood').textContent = mood.name;
       $('r-mood').style.color = mood.color;
-      $('res-mood').title = `Mood ${Math.round(p.happiness)}/100 (heading to ${Math.round(p.happinessTarget)}). Tax ${p.tax}, rations ${p.rations}${p.starving ? ', STARVING' : ''}. Income ${Math.round(p.taxRate * 60)} gold/min from taxes.`;
+      $('res-mood').title = `Mood ${Math.round(p.happiness)}/100 (heading to ${Math.round(p.happinessTarget)}). Tax ${p.tax}, rations ${p.rations}, roads ${p.roadBonus >= 0 ? '+' : ''}${Math.round(p.roadBonus ?? 0)}${p.crowding >= 1 ? `, crowding -${Math.round(p.crowding)}` : ''}${p.starving ? ', STARVING' : ''}. Income ${Math.round(p.taxRate * 60)} gold/min from taxes.`;
     }
     document.body.classList.toggle('mode-empire', p.mode === 'empire');
     $('r-food').classList.toggle('warn', p.foodUsed >= p.foodCap && p.mode === 'empire');

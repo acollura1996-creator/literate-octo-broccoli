@@ -638,7 +638,7 @@ export class GeneralAI {
       const u = onWood.find((x) => !x.carry);
       if (u) g.issueOrder(u, { type: 'harvest', target: mine });
     }
-    const wanted = Math.min(20, 9 + p.tier * 2);
+    const wanted = Math.min(26, 9 + p.tier * 2 + (p.gold > 2500 ? 4 : 0));
     // Don't tie up the town center with Peasants when the next age is affordable.
     if (peasants.length < wanted && hall.trainQueue.length === 0 && !hall.upgrading && !this.ageReady) g.trainUnit(hall, 'peasant');
   }
@@ -758,7 +758,7 @@ export class GeneralAI {
     g.computeFood(p);
     // Houses whenever population runs short.
     const building = p.buildings.filter((b) => !b.dead && b.def.needsRoad && b.underConstruction).length + (this.pendingBuild('house') ? 1 : 0);
-    const fed = p.foodRate > 0.05 && p.food > 100;
+    const fed = p.foodRate > 0.05 && p.food > 100 && p.lumber > 120 && p.citizens < 80 + 40 * p.tier;
     const short = (p.foodCap < 200 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5)) || (fed && p.citizens >= p.housing - 2 && p.happiness >= 40);
     const supplyShort = p.foodCap < 200 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5);
     const r = this.reserve;
@@ -959,7 +959,6 @@ export class GeneralAI {
   construction(hall, peasants) {
     const g = this.g;
     const p = this.p;
-    if (!peasants.length) return;
     const t = g.time;
     this.reserve = null;
     this.ageReady = false;
@@ -1003,6 +1002,7 @@ export class GeneralAI {
         this.reserve = cost; // save up for the next age
         return;
       }
+      if (!peasants.length) continue; // ages can still be researched without workers
       const have = p.buildings.filter((b) => !b.dead && (b.type === step.type || (step.type === 'scouttower' && b.type === 'guardtower'))).length + (this.pendingBuild(step.type) ? 1 : 0);
       if (have >= step.n) continue;
       if (g.missingRequirements(p, UNITS[step.type]).length) continue;
@@ -1010,12 +1010,13 @@ export class GeneralAI {
         this.reserve = UNITS[step.type].cost; // save up
         return;
       }
+      let started;
       if (step.type === 'lumberyard') {
         const spot = this.lumberYardSpot(hall);
-        if (spot) this.buildAt('lumberyard', spot, peasants);
-        else this.build(step.type, peasants, hall);
-      } else this.build(step.type, peasants, hall);
-      return;
+        started = spot ? this.buildAt('lumberyard', spot, peasants) : this.build(step.type, peasants, hall);
+      } else started = this.build(step.type, peasants, hall);
+      if (started) return;
+      // No room or no free worker: move on rather than stall the whole plan.
     }
     // Another Lumber Yard when the woods have receded from every drop-off.
     if (t > 300 && !this.pendingBuild('lumberyard') && g.canAfford(p, UNITS.lumberyard.cost) && p.gold > 300) {
@@ -1048,7 +1049,7 @@ export class GeneralAI {
     const mine = this.mainMine(hall);
     const [tcx, tcz] = this.p.base.toCenter;
     const tries = [];
-    for (let r = 5; r <= 24; r += 1) {
+    for (let r = 5; r <= 34; r += 1) {
       for (let k = 0; k < 16; k++) {
         const a = (k / 16) * Math.PI * 2 + r * 0.37;
         tries.push({ x: hall.x + Math.cos(a) * r, z: hall.z + Math.sin(a) * r, r });
@@ -1061,7 +1062,7 @@ export class GeneralAI {
         { x: hall.x + tcx * 8 - tcz * 3, z: hall.z + tcz * 8 + tcx * 3 },
       );
     }
-    for (const s of tries) {
+    for (const relaxed of [false, true]) for (const s of tries) {
       const x = g.snap(s.x, fp);
       const z = g.snap(s.z, fp);
       if (!g.canPlace(type, x, z)) continue;
@@ -1070,7 +1071,7 @@ export class GeneralAI {
       const cz = Math.round(z - fp / 2) - 1;
       if (!g.grid.rectFree(cx, cz, fp + 2, fp + 2)) continue;
       if (mine && distToSegment(x, z, hall.x, hall.z, mine.x, mine.z) < fp / 2 + 2.5) continue;
-      if (!this.offStreets(x, z, fp)) continue;
+      if (!relaxed && !this.offStreets(x, z, fp)) continue;
       return { x, z };
     }
     return null;

@@ -90,6 +90,9 @@ export class Empires {
     let target = 55 + (p.rations - 10) * 3 - (p.tax - 3) * 7 + roadBonus - p.unrest;
     if (p.starving) target -= 35;
     if (p.citizens > p.housing + 0.5) target -= 10;
+    // Big cities are harder to keep content (roads help).
+    p.crowding = Math.min(15, Math.max(0, (p.citizens - 80) / 25));
+    target -= p.crowding;
     p.roadBonus = roadBonus;
     p.happinessTarget = clamp(target, 0, 100);
     const rate = p.starving ? 4 : 2;

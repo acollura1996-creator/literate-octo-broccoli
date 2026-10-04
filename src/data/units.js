@@ -207,13 +207,13 @@ def('machine_gunner', {
 def('steam_tank', {
   name: 'Landship', age: 6, hp: 1800, armor: 6, armorType: 'heavy', damage: [55, 65], attackType: 'siege',
   attackCooldown: 2.2, range: 6, projectile: { kind: 'shell', speed: 30 }, firearm: true, vehicle: true,
-  speed: 2.3, radius: 0.95, turnRate: 3, cost: { gold: 380, lumber: 180 }, food: 5, buildTime: 45, hotkey: 'L',
+  speed: 2.3, radius: 0.95, turnRate: 3, cost: { gold: 380, lumber: 110 }, food: 5, buildTime: 45, hotkey: 'L',
   level: 7, description: 'Lumbering armored landship. Shrugs off rifle fire.',
 });
 def('howitzer', {
   name: 'Howitzer', age: 6, hp: 700, armor: 3, armorType: 'heavy', damage: [160, 190], attackType: 'siege',
   attackCooldown: 5, range: 16, minRange: 4, projectile: { kind: 'shell', speed: 22, arc: true }, firearm: true,
-  splash: 2, speed: 2.0, radius: 0.8, turnRate: 3, cost: { gold: 380, lumber: 160 }, food: 4, buildTime: 45,
+  splash: 2, speed: 2.0, radius: 0.8, turnRate: 3, cost: { gold: 380, lumber: 100 }, food: 4, buildTime: 45,
   hotkey: 'H', level: 6, attackGround: true, description: 'Long-range artillery.',
 });
 // 7. Modern Age
@@ -232,13 +232,13 @@ def('bazooka', {
 def('tank', {
   name: 'Battle Tank', age: 7, hp: 2600, armor: 8, armorType: 'heavy', damage: [90, 105], attackType: 'siege',
   attackCooldown: 2.5, range: 8, projectile: { kind: 'shell', speed: 40 }, firearm: true, vehicle: true, splash: 0.8,
-  speed: 3.0, radius: 0.95, turnRate: 4, cost: { gold: 480, lumber: 200 }, food: 6, buildTime: 50, hotkey: 'T',
+  speed: 3.0, radius: 0.95, turnRate: 4, cost: { gold: 500, lumber: 120 }, food: 6, buildTime: 50, hotkey: 'T',
   level: 8, description: 'Main battle tank.',
 });
 def('rocket_artillery', {
   name: 'Rocket Artillery', age: 7, hp: 1200, armor: 3, armorType: 'heavy', damage: [70, 85], attackType: 'siege',
   attackCooldown: 6, range: 18, minRange: 4, projectile: { kind: 'rocket', speed: 18, arc: true }, salvo: 4,
-  firearm: true, vehicle: true, splash: 2.2, speed: 2.6, radius: 0.9, turnRate: 4, cost: { gold: 450, lumber: 220 },
+  firearm: true, vehicle: true, splash: 2.2, speed: 2.6, radius: 0.9, turnRate: 4, cost: { gold: 470, lumber: 130 },
   food: 5, buildTime: 50, hotkey: 'A', level: 7, attackGround: true, description: 'Fires salvos of rockets from long range.',
 });
 // 8. Future Age
@@ -256,13 +256,13 @@ def('exo_trooper', {
 def('hover_tank', {
   name: 'Hover Tank', age: 8, hp: 3000, armor: 10, armorType: 'heavy', damage: [110, 130], attackType: 'magic',
   attackCooldown: 2.2, range: 8.5, projectile: { kind: 'plasma', color: 0x6af7ff, speed: 30 }, firearm: true,
-  vehicle: true, splash: 1.2, speed: 4.0, radius: 0.9, turnRate: 6, cost: { gold: 560, lumber: 260 }, food: 6,
+  vehicle: true, splash: 1.2, speed: 4.0, radius: 0.9, turnRate: 6, cost: { gold: 600, lumber: 150 }, food: 6,
   buildTime: 50, hotkey: 'H', level: 9, description: 'Anti-gravity tank with twin plasma cannons.',
 });
 def('mech_walker', {
   name: 'Mech Walker', age: 8, hp: 4500, armor: 12, armorType: 'heavy', damage: [140, 170], attackType: 'siege',
   attackCooldown: 2.6, range: 9, projectile: { kind: 'plasma', color: 0xff8a3a, speed: 26 }, firearm: true,
-  vehicle: true, splash: 1.5, speed: 2.7, radius: 0.85, turnRate: 4, cost: { gold: 750, lumber: 350 }, food: 8,
+  vehicle: true, splash: 1.5, speed: 2.7, radius: 0.85, turnRate: 4, cost: { gold: 800, lumber: 200 }, food: 8,
   buildTime: 60, hotkey: 'M', level: 10, description: 'Towering bipedal war machine.',
 });
 
@@ -336,12 +336,12 @@ building('sanctum', {
   description: 'Trains Priests, Sorceresses and Battle Mages. Requires the Dark Age.',
 });
 building('factory', {
-  name: 'Factory', hp: 2000, armor: 7, footprint: 3, cost: { gold: 400, lumber: 300 }, buildTime: 60, age: 6,
+  name: 'Factory', hp: 2000, armor: 7, footprint: 3, cost: { gold: 450, lumber: 180 }, buildTime: 60, age: 6,
   trains: ['steam_tank', 'tank', 'rocket_artillery', 'hover_tank', 'mech_walker'], hotkey: 'Y',
   description: 'Builds armored vehicles. Requires the Industrial Age.',
 });
 building('missile_silo', {
-  name: 'Missile Silo', hp: 2500, armor: 9, footprint: 3, cost: { gold: 600, lumber: 400 }, buildTime: 80, age: 7,
+  name: 'Missile Silo', hp: 2500, armor: 9, footprint: 3, cost: { gold: 700, lumber: 250 }, buildTime: 80, age: 7,
   nukes: true, hotkey: 'M', sight: 10,
   description: 'Builds and launches nuclear missiles. Requires the Modern Age.',
 });
@@ -409,7 +409,7 @@ export const ROAD = {
 export const ECONOMY = {
   taxMax: 10,
   rationsMax: 20,
-  taxPerCitizen: 0.03, // gold per second per citizen per point of tax
+  taxPerCitizen: 0.02, // gold per second per citizen per point of tax
   foodPerRation: 0.0033, // food per second per citizen per ration point
   moods: [
     { min: 80, name: 'Love', icon: '😍', color: '#7dff8a', income: 1.25, growth: 1.5 },
@@ -420,7 +420,7 @@ export const ECONOMY = {
   ],
   hireFee: (level) => 120 + 45 * level,
   hireTime: 180,
-  nuke: { cost: { gold: 600, lumber: 300 }, time: 90, radius: 9, damage: 1800, flight: 7 },
+  nuke: { cost: { gold: 800, lumber: 150 }, time: 90, radius: 9, damage: 1800, flight: 7 },
 };
 
 // --------------------------------------------------------------------- Heroes

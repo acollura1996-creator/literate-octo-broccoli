@@ -61,7 +61,7 @@ The original map's empires are run like a little nation, and so are they here:
   happier and help them shrug off plague, but cost more food.
 - **Mood** runs from 😍 Love through Happy, Normal and Unhappy to 😡 Hate. Low taxes, generous
   rations and plenty of **roads** ("build roads and make your people love you") make people
-  happier; heavy taxes, hunger and plague make them angry.
+  happier; heavy taxes, hunger, plague and very crowded cities make them angry.
   - Loving and happy people pay up to 25% more and move in faster.
   - Nobody pays taxes while they **starve** or **hate** you.
   - Unhappy citizens **riot**: armed rebels spill out of their houses and march on your town
