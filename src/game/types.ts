@@ -4,6 +4,7 @@ import type { Unit } from './unit.ts';
 import type { Point } from './hooks.ts';
 import type { Base } from '../world/layout.ts';
 import type { Tree } from '../world/terrain.ts';
+import type { GeneralAI } from '../ai/general.ts';
 
 export type { Point };
 
@@ -21,17 +22,6 @@ export interface PlayerStats {
   creepsKilled: number;
   /** Empires only. */
   taxCollected?: number;
-}
-
-/** What a computer general's brain is told about (src/ai/general.ts). */
-export interface GeneralBrain {
-  update(dt: number): void;
-  onAttacked?(u: Unit, by: Unit): void;
-  onLevelUp?(hero: Unit): void;
-  onBuilt?(b: Unit): void;
-  onTrained?(u: Unit): void;
-  onHeroRevived?(hero: Unit): void;
-  onAgeAdvanced?(): void;
 }
 
 /** Citizens, food, taxes and mood (empire generals; set up by Empires.init). */
@@ -94,7 +84,8 @@ export interface Player extends Partial<EmpireEconomy> {
   stats: PlayerStats;
   /** Fractional gold from tribute (hero generals). */
   incomeAcc: number;
-  ai?: GeneralBrain;
+  /** A computer general's brain. */
+  ai?: GeneralAI;
   lastFight?: { time: number; x: number; z: number; vs: Player };
   underAttack?: { time: number; x: number; z: number; by: Player };
   lastCitadelNotice?: number;

@@ -4,26 +4,33 @@ import { DROP_TABLES } from '../data/items.ts';
 import { UNITS } from '../data/units.ts';
 import { ABILITIES } from '../game/abilities.ts';
 import { CENTER } from '../world/layout.ts';
+import type { Game } from '../game/game.ts';
+import type { Unit } from '../game/unit.ts';
+import type { CampState } from '../game/types.ts';
 
-const DROP_CHANCE = { 1: 0.55, 2: 0.75, 3: 0.9, 4: 1 };
+const DROP_CHANCE: Record<number, number> = { 1: 0.55, 2: 0.75, 3: 0.9, 4: 1 };
 
 export class CreepManager {
-  constructor(game) {
+  readonly game: Game;
+  camps: CampState[];
+  castTimer: number;
+
+  constructor(game: Game) {
     this.game = game;
     this.camps = [];
     this.castTimer = 0;
   }
 
-  setup() {
+  setup(): void {
     for (const c of this.game.layout.camps) {
-      const camp = { at: { x: c.at[0], z: c.at[1] }, tier: c.tier, types: c.units, units: [], cleared: false, respawn: 0 };
-      camp.power = c.units.reduce((s, t) => s + UNITS[t].level, 0);
+      const camp: CampState = { at: { x: c.at[0], z: c.at[1] }, tier: c.tier, types: c.units, units: [], cleared: false, respawn: 0, power: 0 };
+      camp.power = c.units.reduce((s, t) => s + UNITS[t]!.level, 0);
       this.spawnCamp(camp);
       this.camps.push(camp);
     }
   }
 
-  spawnCamp(camp) {
+  spawnCamp(camp: CampState): void {
     const g = this.game;
     camp.units = [];
     const n = camp.types.length;
@@ -44,7 +51,7 @@ export class CreepManager {
   }
 
   /** Creeps grow stronger as the game goes on (+15% health and damage every 10 minutes). */
-  empower(u) {
+  empower(u: Unit): void {
     const k = Math.min(2, (this.game.time / 600) * 0.15);
     if (k < 0.01) return;
     const [d0, d1] = u.def.damage ?? [0, 0];
@@ -52,28 +59,28 @@ export class CreepManager {
     u.hp = u.maxHp;
   }
 
-  aggro(camp, target) {
+  aggro(camp: CampState, target: Unit): void {
     for (const u of camp.units) {
       if (u.dead || u.order.type === 'guardReturn') continue;
       if (u.order.type === 'attack' && u.order.target && !u.order.target.dead) continue;
-      u.order = { type: 'attack', target, auto: true, anchor: u.guardPos, leash: 12 };
+      u.order = { type: 'attack', target, auto: true, anchor: u.guardPos!, leash: 12 };
       u.path = null;
     }
   }
 
-  onCreepDied(u) {
-    const camp = u.camp;
+  onCreepDied(u: Unit): void {
+    const camp = u.camp!;
     if (camp.units.some((c) => !c.dead)) return;
     camp.cleared = true;
     camp.respawn = 150 + camp.tier * 40;
-    if (Math.random() < DROP_CHANCE[camp.tier]) {
-      const table = DROP_TABLES[camp.tier];
-      const id = table[Math.floor(Math.random() * table.length)];
+    if (Math.random() < DROP_CHANCE[camp.tier]!) {
+      const table = DROP_TABLES[camp.tier]!;
+      const id = table[Math.floor(Math.random() * table.length)]!;
       this.game.dropItem(u.x, u.z, id);
     }
   }
 
-  update(dt) {
+  update(dt: number): void {
     const g = this.game;
     for (const camp of this.camps) {
       if (!camp.cleared) continue;
@@ -94,13 +101,13 @@ export class CreepManager {
         for (const u of camp.units) {
           if (u.dead || !u.def.abilities.length || u.order.type !== 'attack') continue;
           for (const id of u.def.abilities) {
-            const ab = ABILITIES[id];
+            const ab = ABILITIES[id]!;
             if ((u.cooldowns[id] || 0) > 0) continue;
             if (g.enemiesInRadius(u.owner, u.x, u.z, ab.radius ?? 3).length >= 1) {
-              u.cooldowns[id] = ab.cooldown[0];
+              u.cooldowns[id] = ab.cooldown![0]!;
               u.anim = 'cast';
               u.animTime = 0;
-              ab.cast(g, u, 1);
+              ab.cast!(g, u, 1);
             }
           }
         }
@@ -109,7 +116,7 @@ export class CreepManager {
   }
 
   /** Camps that are currently alive (for the AI). */
-  aliveCamps() {
+  aliveCamps(): CampState[] {
     return this.camps.filter((c) => !c.cleared);
   }
 }

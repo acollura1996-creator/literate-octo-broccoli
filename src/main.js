@@ -12,7 +12,7 @@ import { UNITS } from './data/units.ts';
 import { ABILITIES } from './game/abilities.ts';
 import { TEAM_COLORS } from './render/assets.js';
 import { initAudio, playSfx, playBark, barkVoice, startMusic, stopMusic, setMuted, isMuted } from './audio.js';
-import { GeneralAI } from './ai/general.js';
+import { GeneralAI } from './ai/general.ts';
 import { Roads } from './game/roads.ts';
 
 const $ = (id) => document.getElementById(id);

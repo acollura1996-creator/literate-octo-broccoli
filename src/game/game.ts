@@ -14,9 +14,9 @@ import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, CITY_RADIUS } fro
 import { Fog } from './fog.ts';
 import { Projectiles } from './projectiles.ts';
 import { TEAM_COLORS, lightenHex } from '../data/colors.ts';
-import { CreepManager } from '../ai/creeps.js';
-import { LegionManager } from '../ai/legion.js';
-import { GeneralAI } from '../ai/general.js';
+import { CreepManager } from '../ai/creeps.ts';
+import { LegionManager } from '../ai/legion.ts';
+import { GeneralAI } from '../ai/general.ts';
 import type { Layout } from '../world/layout.ts';
 import type { Cell } from './roads.ts';
 import type { AttackType, Cost, ItemDef } from '../data/types.ts';

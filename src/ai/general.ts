@@ -8,19 +8,80 @@ import { ABILITIES } from '../game/abilities.ts';
 import { canCast, findNearestTree } from '../game/behavior.ts';
 import { CENTER, CITADEL, MAP_SIZE } from '../world/layout.ts';
 import { distToSegment } from '../world/noise.ts';
+import type { Attribute, Cost } from '../data/types.ts';
+import type { Game } from '../game/game.ts';
+import type { Unit } from '../game/unit.ts';
+import type { Cell } from '../game/roads.ts';
+import type { Tree } from '../world/terrain.ts';
+import type { EmpirePlayer, Order, Player, Point } from '../game/types.ts';
 
-const WISHLIST = {
+/** Where an army or hero is headed, and what the Generals board says about it. */
+export interface Objective extends Point {
+  label: string;
+  player?: Player;
+  kalenden?: boolean;
+}
+/** An ally who needs help. */
+export interface AllyCall extends Point {
+  kind: 'defend' | 'assault' | 'skirmish';
+  ally: Player;
+  vs?: Player;
+}
+export type AiState = 'start' | 'idle' | 'retreat' | 'attack' | 'gather' | 'defend' | 'assist';
+/** A build-order step: `n` buildings of `type`, or research `age`, from game time `at`. */
+type PlanStep = { at: number; type?: string; n?: number; age?: number };
+
+const WISHLIST: Record<Attribute, string[]> = {
   str: ['claws6', 'ring2', 'gauntlets', 'boots', 'periapt', 'claws12', 'belt', 'ring5', 'crown', 'mask_death'],
   agi: ['claws6', 'slippers', 'ring2', 'boots', 'periapt', 'claws12', 'boots_agi', 'ring5', 'mask_death', 'crown'],
   int: ['mantle', 'ring2', 'sobi_mask', 'boots', 'periapt', 'robe', 'claws12', 'ring5', 'crown', 'mask_death'],
 };
-const REPLACES = {
+const REPLACES: Record<string, string> = {
   claws12: 'claws6', ring5: 'ring2', belt: 'gauntlets', boots_agi: 'slippers', robe: 'mantle', crown: 'sobi_mask',
   mask_death: 'periapt',
 };
 
 export class GeneralAI {
-  constructor(game, p) {
+  readonly g: Game;
+  readonly p: Player;
+  timer: number;
+  state: AiState;
+  /** Attacks launched so far. */
+  attacks: number;
+  defendUntil: number;
+  defendPos: Point | null;
+  target: Objective | null;
+  /** Army food when the current attack began. */
+  armyStart: number;
+  lastObjective: number;
+  buildRetry: Record<string, number>;
+  /** What the Generals board shows. */
+  status: string;
+  shopping?: Unit | null;
+  shopCooldown?: number;
+  hireCooldown?: number;
+  /** Creeps guarding the gold mine we want to expand to. */
+  expansionGuard?: Point | null;
+  /** Planned street cells (cz * MAP_SIZE + cx). */
+  streets?: Set<number>;
+  streetsHall?: number;
+  /** Gold and lumber kept for the next age or building. */
+  reserve?: Cost | null;
+  ageReady?: boolean;
+  lastStreet?: number;
+  wallPlanned?: boolean;
+  lastCivic?: number;
+  hungry?: boolean;
+  lastHire?: number;
+
+  // Callbacks the game makes when present (not used by this brain).
+  onLevelUp?(hero: Unit): void;
+  onBuilt?(b: Unit): void;
+  onTrained?(u: Unit): void;
+  onHeroRevived?(hero: Unit): void;
+  onAgeAdvanced?(): void;
+
+  constructor(game: Game, p: Player) {
     this.g = game;
     this.p = p;
     this.timer = Math.random();
@@ -35,7 +96,7 @@ export class GeneralAI {
     this.status = p.mode === 'hero' ? 'Setting out' : 'Founding its empire';
   }
 
-  update(dt) {
+  update(dt: number): void {
     this.timer -= dt;
     if (this.timer > 0) return;
     if (this.p.mode === 'hero') {
@@ -48,7 +109,7 @@ export class GeneralAI {
   }
 
   // ----------------------------------------------------------- callbacks
-  onAttacked(unit, attacker) {
+  onAttacked(unit: Unit, attacker: Unit): void {
     if (!unit.isBuilding && !unit.def.worker) return;
     if (attacker.owner === this.g.creeps) return;
     if (this.g.time < this.defendUntil - 10) return;
@@ -57,21 +118,21 @@ export class GeneralAI {
   }
 
   // ---------------------------------------------------------------- shared
-  army() {
+  army(): Unit[] {
     return this.p.units.filter((u) => !u.dead && !u.def.worker && !u.isHero && u.canAttack);
   }
 
-  armyFood(list = this.army()) {
+  armyFood(list: Unit[] = this.army()): number {
     return list.reduce((s, u) => s + (u.def.food || 1), 0);
   }
 
-  home() {
-    const [x, z] = this.p.base.hall;
+  home(): Point {
+    const [x, z] = this.p.base!.hall;
     return { x, z };
   }
 
-  nearestEnemyBase() {
-    let best = null;
+  nearestEnemyBase(): (Point & { player: Player }) | null {
+    let best: (Point & { player: Player }) | null = null;
     let bd = Infinity;
     const h = this.home();
     for (const o of this.g.generals) {
@@ -89,12 +150,12 @@ export class GeneralAI {
     return best;
   }
 
-  enemiesNear(x, z, r) {
+  enemiesNear(x: number, z: number, r: number): Unit[] {
     return this.g.enemiesInRadius(this.p, x, z, r).filter((u) => !u.def.invulnerable);
   }
 
   // ================================================================= HERO
-  thinkHero() {
+  thinkHero(): void {
     const g = this.g;
     const p = this.p;
     const h = p.hero;
@@ -152,7 +213,7 @@ export class GeneralAI {
 
     // Help allies that are under attack or storming the citadel.
     const call = this.allyCall();
-    const answer = call && (call.kind === 'defend' ? h.distTo(call) < 75 : call.kind === 'skirmish' ? hpR > 0.5 : h.level >= 6 && hpR > 0.6);
+    const answer = call && (call.kind === 'defend' ? h.distTo(call) < 75 : call.kind === 'skirmish' ? hpR > 0.5 : h.level! >= 6 && hpR > 0.6);
     if (answer) {
       this.status = this.callLabel(call);
       this.go(h, call, true);
@@ -206,7 +267,7 @@ export class GeneralAI {
   }
 
   /** An ally who needs help: their base under attack, or an assault on Kalenden in progress. */
-  allyCall() {
+  allyCall(): AllyCall | null {
     const g = this.g;
     for (const o of g.generals) {
       if (o === this.p || o.defeated || o.team !== this.p.team) continue;
@@ -224,51 +285,52 @@ export class GeneralAI {
     return null;
   }
 
-  callLabel(call) {
+  callLabel(call: AllyCall): string {
     const who = call.ally.isHuman ? 'you' : call.ally.name;
     if (call.kind === 'defend') return `Defending ${call.ally.isHuman ? 'your' : `${call.ally.name}'s`} base`;
-    if (call.kind === 'skirmish') return `Helping ${who} fight ${call.vs.isHuman ? 'you' : call.vs.name}`;
+    if (call.kind === 'skirmish') return `Helping ${who} fight ${call.vs!.isHuman ? 'you' : call.vs!.name}`;
     return `Assaulting Kalenden with ${who}`;
   }
 
-  rallyMercs(mercs, h) {
+  rallyMercs(mercs: Unit[], h: Unit): void {
     for (const m of mercs) {
       if (m.distTo(h) > 7 && m.order.type !== 'attack') this.g.issueOrder(m, { type: 'attackMove', point: { x: h.x, z: h.z } });
     }
   }
 
-  heroPower(h, mercs) {
-    let pw = h.level * 4.2 + (h.damageRange[0] / 6) + h.armor * 0.5;
+  heroPower(h: Unit, mercs: Unit[]): number {
+    let pw = h.level! * 4.2 + (h.damageRange![0] / 6) + h.armor * 0.5;
     pw += mercs.reduce((s, m) => s + m.def.level * 0.9, 0);
     return pw;
   }
 
-  hasAllies() {
+  hasAllies(): boolean {
     return this.g.generals.some((o) => o !== this.p && !o.defeated && o.team === this.p.team);
   }
 
-  raidsAllowed() {
-    return this.g.time > [16, 12, 8][this.g.difficulty] * 60;
+  raidsAllowed(): boolean {
+    return this.g.time > [16, 12, 8][this.g.difficulty]! * 60;
   }
 
-  heroObjective(h, mercs) {
+  heroObjective(h: Unit, mercs: Unit[]): Objective | null {
     const g = this.g;
     const power = this.heroPower(h, mercs);
     // Endgame: go for Kalenden.
     const k = g.legionMgr.kalenden;
-    const ready = h.level >= 10 || (h.level >= 9 && mercs.length >= 2) || (this.hasAllies() && h.level >= 8 && g.time > 16 * 60) || g.time > 45 * 60;
+    const lvl = h.level!;
+    const ready = lvl >= 10 || (lvl >= 9 && mercs.length >= 2) || (this.hasAllies() && lvl >= 8 && g.time > 16 * 60) || g.time > 45 * 60;
     if (!k.dead && ready && h.hp > h.maxHp * 0.8) {
       return { x: k.x, z: k.z, label: 'Marching on Kalenden' };
     }
     // Occasionally raid a rival.
-    if (h.level >= 6 && this.raidsAllowed() && Math.random() < 0.18) {
+    if (lvl >= 6 && this.raidsAllowed() && Math.random() < 0.18) {
       const base = this.nearestEnemyBase();
       if (base) return { ...base, label: `Raiding ${base.player.isHuman ? 'you' : base.player.name}` };
     }
     // Creep the best camp we can handle (carefully while low level).
-    let best = null;
+    let best: { at: Point; power: number } | null = null;
     let bestScore = Infinity;
-    const margin = h.level <= 2 ? 0.85 : h.level <= 4 ? 1.0 : 1.15;
+    const margin = lvl <= 2 ? 0.85 : lvl <= 4 ? 1.0 : 1.15;
     for (const c of g.creepMgr.aliveCamps()) {
       if (c.power > power * margin) continue;
       const d = Math.hypot(c.at.x - h.x, c.at.z - h.z);
@@ -281,14 +343,14 @@ export class GeneralAI {
     if (best) return { ...best.at, label: `Hunting creeps (level ${h.level})` };
     // Nothing to do: raid a rival, or guard home.
     const base = this.raidsAllowed() ? this.nearestEnemyBase() : null;
-    if (base && h.level >= 5) return { ...base, label: `Raiding ${base.player.isHuman ? 'you' : base.player.name}` };
+    if (base && lvl >= 5) return { ...base, label: `Raiding ${base.player.isHuman ? 'you' : base.player.name}` };
     return { ...this.home(), label: 'Guarding its base' };
   }
 
-  heroCombat(h, foes) {
+  heroCombat(h: Unit, foes: Unit[]): void {
     const g = this.g;
     // Prefer heroes, then the weakest unit.
-    let target = null;
+    let target: Unit | null = null;
     let best = Infinity;
     for (const f of foes) {
       if (!f.targetableBy(h)) continue;
@@ -307,20 +369,20 @@ export class GeneralAI {
     }
   }
 
-  castHeroSpells(h, foes, target) {
+  castHeroSpells(h: Unit, foes: Unit[], target: Unit | null): boolean {
     const g = this.g;
     if (h.order.type === 'cast' || h.order.type === 'channel' || h.castTimer > 0) return true;
-    for (const id of h.heroDef.abilities) {
+    for (const id of h.heroDef!.abilities) {
       if (!canCast(g, h, id)) continue;
-      const ab = ABILITIES[id];
+      const ab = ABILITIES[id]!;
       const close = foes.filter((f) => h.distTo(f) < 6);
       switch (ab.ai) {
         case 'heal': {
           const ally = this.p.units
-            .filter((u) => !u.dead && u.distTo(h) < ab.range + 2 && u.hp / u.maxHp < 0.6)
+            .filter((u) => !u.dead && u.distTo(h) < ab.range! + 2 && u.hp / u.maxHp < 0.6)
             .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
           if (ally) return this.cast(h, id, { target: ally });
-          const undead = foes.find((f) => f.def.undead && h.distTo(f) < ab.range);
+          const undead = foes.find((f) => f.def.undead && h.distTo(f) < ab.range!);
           if (undead && h.mana > 150) return this.cast(h, id, { target: undead });
           break;
         }
@@ -335,7 +397,7 @@ export class GeneralAI {
           }
           break;
         case 'nuke':
-          if (target && (target.isHero || target.hp > 300 || target.def.level >= 4) && h.distTo(target) < ab.range + 3) {
+          if (target && (target.isHero || target.hp > 300 || target.def.level >= 4) && h.distTo(target) < ab.range! + 3) {
             return this.cast(h, id, { target });
           }
           break;
@@ -367,8 +429,8 @@ export class GeneralAI {
     return false;
   }
 
-  bestCluster(foes, r) {
-    let best = null;
+  bestCluster(foes: Unit[], r: number): { count: number; point: Point } | null {
+    let best: { count: number; point: Point } | null = null;
     for (const f of foes) {
       const count = foes.filter((o) => Math.hypot(o.x - f.x, o.z - f.z) < r).length;
       if (!best || count > best.count) best = { count, point: { x: f.x, z: f.z } };
@@ -376,19 +438,20 @@ export class GeneralAI {
     return best;
   }
 
-  cast(h, ability, { target = null, point = null }) {
+  cast(h: Unit, ability: string, { target = null, point = null }: { target?: Unit | null; point?: Point | null }): boolean {
     this.g.issueOrder(h, { type: 'cast', ability, target, point });
     return true;
   }
 
-  learnSkills(h) {
+  learnSkills(h: Unit): void {
     let guard = 0;
-    while (h.skillPoints > 0 && guard++ < 6) {
-      const abs = h.heroDef.abilities;
-      const ult = abs[3];
+    while (h.skillPoints! > 0 && guard++ < 6) {
+      const abs = h.heroDef!.abilities;
+      const ult = abs[3]!;
       if (this.g.learnAbility(h, ult)) continue;
       // Level the first two abilities first, then the passive/aura.
-      const order = [abs[0], abs[1], abs[2]].sort((a, b) => (h.abilityLevels[a] - h.abilityLevels[b]) || abs.indexOf(a) - abs.indexOf(b));
+      const levels = h.abilityLevels!;
+      const order = [abs[0]!, abs[1]!, abs[2]!].sort((a, b) => (levels[a]! - levels[b]!) || abs.indexOf(a) - abs.indexOf(b));
       let learned = false;
       for (const a of order) {
         if (this.g.learnAbility(h, a)) {
@@ -400,16 +463,16 @@ export class GeneralAI {
     }
   }
 
-  useItemOfType(h, use) {
-    const slot = h.inventory.findIndex((it) => it && ITEMS[it.id].use === use);
+  useItemOfType(h: Unit, use: string): boolean {
+    const slot = h.inventory!.findIndex((it) => it && ITEMS[it.id]!.use === use);
     if (slot < 0) return false;
     return this.g.useItem(h, slot);
   }
 
-  retreat(h) {
+  retreat(h: Unit): void {
     const g = this.g;
     // Nearest of home altar or fountains.
-    const spots = [];
+    const spots: Point[] = [];
     const altar = this.p.buildings.find((b) => !b.dead && b.def.revivesHeroes);
     if (altar) spots.push({ x: altar.x, z: altar.z });
     for (const f of g.passive.buildings) if (f.type === 'fountain') spots.push({ x: f.x, z: f.z });
@@ -425,60 +488,65 @@ export class GeneralAI {
     } else if (h.order.type !== 'hold') g.issueOrder(h, { type: 'hold' });
   }
 
-  go(h, pt, attack) {
+  go(h: Unit, pt: Point, attack: boolean): void {
     const o = h.order;
-    if (o.point && Math.hypot(o.point.x - pt.x, o.point.z - pt.z) < 2 && (o.type === 'attackMove' || o.type === 'move')) return;
+    const point = 'point' in o ? o.point : undefined;
+    if (point && Math.hypot(point.x - pt.x, point.z - pt.z) < 2 && (o.type === 'attackMove' || o.type === 'move')) return;
     this.g.issueOrder(h, { type: attack ? 'attackMove' : 'move', point: { x: pt.x, z: pt.z } });
   }
 
   /** Inventory slot to sell to make room for `wish`, or -1 if there is a free slot, or null if nothing fits. */
-  slotFor(h, wish) {
+  slotFor(h: Unit, wish: string): number | null {
     if (h.inventoryFreeSlot() >= 0) return -1;
+    const inv = h.inventory!;
     const worse = REPLACES[wish];
-    let slot = h.inventory.findIndex((it) => it && it.id === worse);
+    const slot = inv.findIndex((it) => it && it.id === worse);
     if (slot >= 0) return slot;
     // Otherwise replace the cheapest passive item if the wish is much better.
-    let cheapest = null;
-    h.inventory.forEach((it, i) => {
-      if (!it || ITEMS[it.id].use) return;
-      if (cheapest === null || ITEMS[it.id].cost < ITEMS[h.inventory[cheapest].id].cost) cheapest = i;
+    let cheapest: number | null = null;
+    const costOf = (i: number): number => ITEMS[inv[i]!.id]!.cost!;
+    inv.forEach((it, i) => {
+      if (!it || ITEMS[it.id]!.use) return;
+      if (cheapest === null || ITEMS[it.id]!.cost! < costOf(cheapest)) cheapest = i;
     });
-    if (cheapest !== null && (ITEMS[h.inventory[cheapest].id].cost ?? 0) < ITEMS[wish].cost * 0.6) return cheapest;
+    if (cheapest !== null && (ITEMS[inv[cheapest]!.id]!.cost ?? 0) < ITEMS[wish]!.cost! * 0.6) return cheapest;
     return null;
   }
 
-  nextWish(h) {
-    const list = WISHLIST[h.heroDef.primary];
+  nextWish(h: Unit): string | null {
+    const list = WISHLIST[h.heroDef!.primary];
+    const inv = h.inventory!;
     for (const id of list) {
-      if (h.inventory.some((it) => it && it.id === id)) continue;
+      if (inv.some((it) => it && it.id === id)) continue;
       // Skip items superseded by something we own.
-      if (Object.entries(REPLACES).some(([better, worse]) => worse === id && h.inventory.some((it) => it && it.id === better))) continue;
+      if (Object.entries(REPLACES).some(([better, worse]) => worse === id && inv.some((it) => it && it.id === better))) continue;
       if (this.slotFor(h, id) === null) continue;
       return id;
     }
     return null;
   }
 
-  shop(h, passing = false) {
+  shop(h: Unit, passing = false): boolean {
     const g = this.g;
     const p = this.p;
-    const potions = h.inventory.filter((it) => it && ITEMS[it.id].use === 'heal').reduce((s, it) => s + it.charges, 0);
+    const inv = h.inventory!;
+    const potions = inv.filter((it) => it && ITEMS[it.id]!.use === 'heal').reduce((s, it) => s + it!.charges, 0);
     const wish = this.nextWish(h);
     const potionRoom = potions > 0 || h.inventoryFreeSlot() >= 0;
     // Keep a Scroll of Town Portal for emergencies once the core items are in.
-    const hasTp = h.inventory.some((it) => it && ITEMS[it.id].use === 'townPortal');
-    if (!hasTp && !wish && p.gold >= 500 && h.inventoryFreeSlot() >= 0 && h.level >= 4) {
+    const hasTp = inv.some((it) => it && ITEMS[it.id]!.use === 'townPortal');
+    if (!hasTp && !wish && p.gold >= 500 && h.inventoryFreeSlot() >= 0 && h.level! >= 4) {
       const merchant = g.passive.buildings.filter((s) => s.def.shop === 'merchant').sort((a, b) => a.distTo(h) - b.distTo(h))[0];
       if (merchant && h.distTo(merchant) <= merchant.radius + 6) g.buyItem(p, merchant, 'scroll_tp');
     }
     const wantPotion = potionRoom && ((potions < 1 && p.gold >= 250) || (potions < 2 && p.gold >= 700));
-    const wishAffordable = wish && p.gold >= ITEMS[wish].cost + 100;
+    const wishAffordable = wish && p.gold >= ITEMS[wish]!.cost! + 100;
     if ((!wantPotion && !wishAffordable) || (this.shopCooldown ?? 0) > g.time) {
       this.shopping = null;
       return false;
     }
     // Which shop sells what we want?
-    const kind = wishAffordable && !['claws6', 'ring2', 'gauntlets', 'slippers', 'mantle', 'boots', 'periapt', 'sobi_mask', 'ring_regen'].includes(wish) ? 'vault' : 'merchant';
+    const kind = wishAffordable && !['claws6', 'ring2', 'gauntlets', 'slippers', 'mantle', 'boots', 'periapt', 'sobi_mask', 'ring_regen'].includes(wish!) ? 'vault' : 'merchant';
     let shop = this.shopping;
     if (!shop || shop.def.shop !== kind) {
       shop = null;
@@ -494,6 +562,7 @@ export class GeneralAI {
       if (!shop) return false;
       this.shopping = shop;
     }
+    shop = shop!;
     if (h.distTo(shop) > shop.radius + 5) {
       if (passing) return false;
       this.go(h, shop, false);
@@ -501,11 +570,11 @@ export class GeneralAI {
     }
     // Buy.
     if (wishAffordable && shop.def.shop === kind) {
-      const slot = this.slotFor(h, wish);
+      const slot = this.slotFor(h, wish!);
       if (slot !== null && slot >= 0) g.sellItem(h, slot);
-      g.buyItem(p, shop, wish);
+      g.buyItem(p, shop, wish!);
     }
-    const potionSlot = h.inventory.some((it) => it && ITEMS[it.id].use === 'heal') || h.inventoryFreeSlot() >= 0;
+    const potionSlot = inv.some((it) => it && ITEMS[it.id]!.use === 'heal') || h.inventoryFreeSlot() >= 0;
     if (wantPotion && potionSlot && shop.def.shop === 'merchant') g.buyItem(p, shop, 'potion_healing');
     else if (wantPotion && potionSlot && shop.def.shop === 'vault' && p.gold >= 300) g.buyItem(p, shop, 'greater_healing');
     this.shopping = null;
@@ -515,14 +584,14 @@ export class GeneralAI {
   }
 
   /** Returns true while on the way to (or at) a mercenary camp. */
-  hireMercs(h) {
+  hireMercs(h: Unit): boolean {
     const g = this.g;
     const p = this.p;
-    if (p.gold < 450 || h.level < 3 || (this.hireCooldown ?? 0) > g.time) return false;
+    if (p.gold < 450 || h.level! < 3 || (this.hireCooldown ?? 0) > g.time) return false;
     g.computeFood(p);
     const free = p.foodCap - p.foodUsed;
     if (free < 2) return false;
-    let camp = null;
+    let camp: Unit | null = null;
     let bd = Infinity;
     for (const s of g.passive.buildings) {
       if (s.type !== 'mercenary_camp') continue;
@@ -533,8 +602,9 @@ export class GeneralAI {
       }
     }
     if (!camp) return false;
+    const stock = camp.stock!;
     const pick = ['rock_golem', 'ogre', 'forest_troll', 'gnoll'].find(
-      (t) => UNITS[t].food <= free && camp.stock[t] > 0 && p.gold >= UNITS[t].cost.gold + 200,
+      (t) => UNITS[t]!.food <= free && stock[t]! > 0 && p.gold >= UNITS[t]!.cost.gold + 200,
     );
     if (!pick) return false;
     // Only make a long trip when well funded.
@@ -549,15 +619,15 @@ export class GeneralAI {
   }
 
   // =============================================================== EMPIRE
-  thinkEmpire() {
+  thinkEmpire(): void {
     const g = this.g;
     const p = this.p;
     const halls = p.buildings.filter((b) => !b.dead && b.def.dropOff === true && !b.underConstruction);
-    const hall = halls.find((h) => this.mainMine(h)?.goldLeft > 0) ?? halls[0];
+    const hall = halls.find((h) => (this.mainMine(h)?.goldLeft ?? 0) > 0) ?? halls[0];
     const peasants = p.units.filter((u) => !u.dead && u.type === 'peasant');
     if (!hall && !p.buildings.some((b) => !b.dead && b.def.dropOff === true)) {
       // Lost the town hall: rebuild if possible.
-      if (peasants.length && g.canAfford(p, UNITS.townhall.cost)) this.build('townhall', peasants);
+      if (peasants.length && g.canAfford(p, UNITS['townhall']!.cost)) this.build('townhall', peasants);
       this.militaryEmpire();
       return;
     }
@@ -571,7 +641,7 @@ export class GeneralAI {
   }
 
   /** Take a new gold mine when the current one runs low. */
-  expand(hall, peasants) {
+  expand(hall: Unit, peasants: Unit[]): void {
     const g = this.g;
     const p = this.p;
     const mine = this.mainMine(hall);
@@ -588,14 +658,14 @@ export class GeneralAI {
     if (!target) return;
     const guards = g.unitsNear(target.x, target.z, 15).filter((u) => u.owner === g.creeps && !u.dead);
     if (guards.length) {
-      this.expansionGuard = { x: guards[0].x, z: guards[0].z };
+      this.expansionGuard = { x: guards[0]!.x, z: guards[0]!.z };
       return;
     }
-    if (g.canAfford(p, UNITS.townhall.cost)) this.build('townhall', peasants, target);
+    if (g.canAfford(p, UNITS['townhall']!.cost)) this.build('townhall', peasants, target);
   }
 
-  mainMine(hall) {
-    let best = null;
+  mainMine(hall: Point): Unit | null {
+    let best: Unit | null = null;
     let bd = Infinity;
     for (const m of this.g.passive.buildings) {
       if (m.type !== 'goldmine' || m.dead || m.goldLeft <= 0) continue;
@@ -608,9 +678,9 @@ export class GeneralAI {
     return bd < 20 ? best : null;
   }
 
-  economy(hall, peasants) {
+  economy(hall: Unit, peasants: Unit[]): void {
     const g = this.g;
-    const p = this.p;
+    const p = this.p as EmpirePlayer;
     const mine = this.mainMine(hall);
     const onGold = peasants.filter((u) => u.harvest?.kind === 'gold' && u.order.type !== 'build' && u.order.type !== 'construct');
     const onWood = peasants.filter((u) => u.harvest?.kind === 'lumber' && u.order.type !== 'build' && u.order.type !== 'construct');
@@ -645,7 +715,7 @@ export class GeneralAI {
   }
 
   /** Trees near the Lumber Yard if there is one, otherwise near the hall. */
-  woodTree(hall) {
+  woodTree(hall: Unit): Tree | null {
     const yard = this.p.buildings.find((b) => !b.dead && !b.underConstruction && b.def.dropOff === 'lumber');
     const from = yard ?? hall;
     return findNearestTree(this.g, from.x, from.z, 30);
@@ -657,14 +727,14 @@ export class GeneralAI {
    * city radius, avoiding the lane to the gold mine), then lay it out as
    * houses are needed.
    */
-  planStreets(hall) {
+  planStreets(hall: Unit): void {
     const g = this.g;
     const mine = this.mainMine(hall);
     const hx = Math.round(hall.x);
     const hz = Math.round(hall.z);
     const R = 23;
-    const plan = new Set();
-    const ok = (x, z) => {
+    const plan = new Set<number>();
+    const ok = (x: number, z: number): boolean => {
       if (x < 2 || z < 2 || x >= MAP_SIZE - 2 || z >= MAP_SIZE - 2) return false;
       if (Math.hypot(x + 0.5 - hall.x, z + 0.5 - hall.z) > R) return false;
       if (mine && distToSegment(x + 0.5, z + 0.5, hall.x, hall.z, mine.x, mine.z) < 3.5) return false;
@@ -682,33 +752,34 @@ export class GeneralAI {
   }
 
   /** Lay the next stretch of planned street that joins the existing network. */
-  extendStreets(n = 10) {
+  extendStreets(n = 10): number {
     const g = this.g;
     const p = this.p;
     const S = MAP_SIZE;
     const R = g.roads;
-    const cells = [];
+    const streets = this.streets!;
+    const cells: Cell[] = [];
     // Grow out from the current network over planned cells.
-    const seen = new Set();
-    const queue = [];
-    for (const k of this.streets) {
+    const seen = new Set<number>();
+    const queue: number[] = [];
+    for (const k of streets) {
       const x = k % S;
       const z = (k - x) / S;
       if (R.isRoad(x, z)) continue;
-      const touching = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => R.isRoad(x + dx, z + dz) && R.ownerAt(x + dx, z + dz) === p);
+      const touching = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as Cell[]).some(([dx, dz]) => R.isRoad(x + dx, z + dz) && R.ownerAt(x + dx, z + dz) === p);
       if (touching) queue.push(k);
     }
     while (queue.length && cells.length < n) {
-      const k = queue.shift();
+      const k = queue.shift()!;
       if (seen.has(k)) continue;
       seen.add(k);
       const x = k % S;
       const z = (k - x) / S;
       if (!R.canPlace(x, z, p, true)) continue;
       cells.push([x, z]);
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as Cell[]) {
         const nk = (z + dz) * S + x + dx;
-        if (this.streets.has(nk) && !seen.has(nk)) queue.push(nk);
+        if (streets.has(nk) && !seen.has(nk)) queue.push(nk);
       }
     }
     if (!cells.length || p.gold < cells.length * ROAD.cost.gold + 60) return 0;
@@ -716,13 +787,13 @@ export class GeneralAI {
   }
 
   /** A free 2x2 spot touching one of our connected roads, off the planned streets. */
-  findHouseSpot(hall) {
+  findHouseSpot(hall: Unit): Point | null {
     const g = this.g;
     const p = this.p;
     const S = MAP_SIZE;
     const R = g.roads;
     const mine = this.mainMine(hall);
-    const cands = [];
+    const cands: [number, number, number][] = [];
     for (let k = 0; k < R.owner.length; k++) {
       if (R.owner[k] !== p.index || !R.connected[k]) continue;
       const x = k % S;
@@ -732,7 +803,7 @@ export class GeneralAI {
     cands.sort((a, b) => a[2] - b[2]);
     for (const [x, z] of cands) {
       // House cell origins that put the 2x2 footprint edge-adjacent to (x, z).
-      for (const [ox, oz] of [[1, 0], [1, -1], [-2, 0], [-2, -1], [0, 1], [-1, 1], [0, -2], [-1, -2]]) {
+      for (const [ox, oz] of [[1, 0], [1, -1], [-2, 0], [-2, -1], [0, 1], [-1, 1], [0, -2], [-1, -2]] as Cell[]) {
         const cx = x + ox;
         const cz = z + oz;
         let clash = false;
@@ -749,9 +820,9 @@ export class GeneralAI {
     return null;
   }
 
-  city(hall, peasants) {
+  city(hall: Unit, peasants: Unit[]): void {
     const g = this.g;
-    const p = this.p;
+    const p = this.p as EmpirePlayer;
     if (!this.streets || this.streetsHall !== hall.id) {
       this.planStreets(hall);
       this.streetsHall = hall.id;
@@ -760,11 +831,12 @@ export class GeneralAI {
     // Houses whenever population runs short.
     const building = p.buildings.filter((b) => !b.dead && b.def.needsRoad && b.underConstruction).length + (this.pendingBuild('house') ? 1 : 0);
     const fed = p.foodRate > 0.05 && p.food > 100 && p.lumber > 120 && p.citizens < 80 + 40 * p.tier;
-    const short = (p.foodCap < 200 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5)) || (fed && p.citizens >= p.housing - 2 && p.happiness >= 40);
+    const short = (p.foodCap < 200 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5)) || (fed && p.citizens >= p.housing! - 2 && p.happiness >= 40);
     const supplyShort = p.foodCap < 200 && p.foodCap - p.foodUsed <= (p.foodUsed > 40 ? 9 : 5);
     const r = this.reserve;
-    const saving = !supplyShort && r && (p.gold - UNITS.house.cost.gold < (r.gold ?? 0) || p.lumber - UNITS.house.cost.lumber < (r.lumber ?? 0));
-    if (short && !saving && building < (p.foodUsed > 40 ? 2 : 1) && g.canAfford(p, UNITS.house.cost)) {
+    const house = UNITS['house']!;
+    const saving = !supplyShort && r && (p.gold - house.cost.gold < (r.gold ?? 0) || p.lumber - house.cost.lumber < (r.lumber ?? 0));
+    if (short && !saving && building < (p.foodUsed > 40 ? 2 : 1) && g.canAfford(p, house.cost)) {
       const spot = this.findHouseSpot(hall);
       if (spot) this.buildAt('house', spot, peasants);
       else this.extendStreets(12);
@@ -781,20 +853,20 @@ export class GeneralAI {
    * Run the people: farms to feed them, taxes and rations to keep them happy, nuclear missiles,
    * and Heroes for hire.
    */
-  civic(hall, peasants) {
+  civic(hall: Unit, peasants: Unit[]): void {
     const g = this.g;
-    const p = this.p;
+    const p = this.p as EmpirePlayer;
     if (g.time - (this.lastCivic ?? 0) < 4) return;
     this.lastCivic = g.time;
     const E = g.empires;
     // Food: enough farms for the citizens we will soon have.
     const farmsBuilding = p.buildings.filter((b) => !b.dead && b.type === 'farm' && b.underConstruction).length + (this.pendingBuild('farm') ? 1 : 0);
-    const need = Math.max(p.citizens, p.housing * 0.9) * Math.max(p.rations, 8) * ECONOMY.foodPerRation;
-    const perFarm = UNITS.farm.foodRateByAge[Math.max(1, p.tier) - 1];
+    const need = Math.max(p.citizens, p.housing! * 0.9) * Math.max(p.rations, 8) * ECONOMY.foodPerRation;
+    const perFarm = UNITS['farm']!.foodRateByAge![Math.max(1, p.tier) - 1]!;
     const farmsWanted = Math.ceil((need * 1.1 - p.foodProduced) / perFarm);
     this.hungry = p.starving || (p.foodRate < 0 && p.food < -p.foodRate * 90);
     if (farmsWanted > 0 && farmsBuilding < Math.min(3, farmsWanted)) {
-      if (g.canAfford(p, UNITS.farm.cost)) this.build('farm', peasants, hall);
+      if (g.canAfford(p, UNITS['farm']!.cost)) this.build('farm', peasants, hall);
     }
     // Rations: tighten them while hungry, be generous with a full granary.
     if ((p.starving || (p.food < 60 && p.foodRate < 0)) && p.rations > 4) E.setRations(p, p.rations - 1);
@@ -817,18 +889,18 @@ export class GeneralAI {
     if (g.time - (this.lastHire ?? 0) > 60 && p.tier >= 2) {
       this.lastHire = g.time;
       const troubled = p.underAttack && g.time - p.underAttack.time < 20;
-      const options = E.heroesForHire(p).sort((a, b) => b.hero.level - a.hero.level);
+      const options = E.heroesForHire(p).sort((a, b) => b.hero!.level! - a.hero!.level!);
       const hg = options.find((o) => p.gold > E.hireFee(o) + (troubled ? 150 : 700));
       if (hg && (troubled || Math.random() < 0.35)) E.hire(p, hg);
     }
   }
 
   /** Where to drop a nuke: the most valuable enemy town, never near our own buildings. */
-  nukeTarget() {
+  nukeTarget(): Point | null {
     const g = this.g;
     const p = this.p;
     const R = ECONOMY.nuke.radius + 4;
-    let best = null;
+    let best: Point | null = null;
     let bestScore = 0;
     for (const o of g.generals) {
       if (o.defeated || !g.isEnemy(p, o)) continue;
@@ -848,26 +920,26 @@ export class GeneralAI {
   }
 
   /** Wall line across the side of the town that faces the map center, gate in the middle. */
-  planFrontWall(hall, peasants) {
+  planFrontWall(hall: Unit, peasants: Unit[]): void {
     const g = this.g;
     const p = this.p;
     this.wallPlanned = true;
-    const [tx, tz] = p.base.toCenter;
+    const [tx, tz] = p.base!.toCenter;
     const cx = hall.x + tx * 26;
     const cz = hall.z + tz * 26;
     const px = -tz;
     const pz = tx;
-    const a = [Math.floor(cx + px * 13), Math.floor(cz + pz * 13)];
-    const b = [Math.floor(cx - px * 13), Math.floor(cz - pz * 13)];
+    const a: Cell = [Math.floor(cx + px * 13), Math.floor(cz + pz * 13)];
+    const b: Cell = [Math.floor(cx - px * 13), Math.floor(cz - pz * 13)];
     const line = Roads.line(a[0], a[1], b[0], b[1]);
     const workers = peasants.filter((u) => u.harvest?.kind === 'lumber' && !u.carry).slice(0, 2);
     if (!workers.length) return;
     // Gate in the middle first; the wall pieces skip its cells.
-    const mid = line[Math.floor(line.length / 2)];
+    const mid = line[Math.floor(line.length / 2)]!;
     const gx = mid[0] + 1;
     const gz = mid[1] + 1;
-    if (g.canPlace('gate', gx, gz, p) && g.spend(p, UNITS.gate.cost)) {
-      g.issueOrder(workers[0], { type: 'build', building: 'gate', x: gx, z: gz, paid: true });
+    if (g.canPlace('gate', gx, gz, p) && g.spend(p, UNITS['gate']!.cost)) {
+      g.issueOrder(workers[0]!, { type: 'build', building: 'gate', x: gx, z: gz, paid: true });
     }
     const gateCells = new Set([`${mid[0]},${mid[1]}`, `${mid[0] + 1},${mid[1]}`, `${mid[0]},${mid[1] + 1}`, `${mid[0] + 1},${mid[1] + 1}`]);
     const pieces = line.filter(([x, z]) => !gateCells.has(`${x},${z}`) && g.canPlace('wall', x + 0.5, z + 0.5, p));
@@ -877,8 +949,8 @@ export class GeneralAI {
       // The gate builder queues its wall after the gate; the others start right away.
       let first = !(wi === 0 && w.order.type === 'build');
       pieces.slice(wi * half, (wi + 1) * half).forEach(([x, z]) => {
-        if (!g.canAfford(p, UNITS.wall.cost)) return;
-        g.spend(p, UNITS.wall.cost);
+        if (!g.canAfford(p, UNITS['wall']!.cost)) return;
+        g.spend(p, UNITS['wall']!.cost);
         g.issueOrder(w, { type: 'build', building: 'wall', x: x + 0.5, z: z + 0.5, paid: true }, !first);
         first = false;
       });
@@ -887,10 +959,10 @@ export class GeneralAI {
   }
 
   /** Forest-edge trees near `from`, best first (dense stands that are not too far). */
-  woodsCandidates(from, maxR = 45) {
+  woodsCandidates(from: Point, maxR = 45): Tree[] {
     const g = this.g;
     const T = g.terrain;
-    const out = [];
+    const out: { tr: Tree; score: number }[] = [];
     const fx = Math.floor(from.x);
     const fz = Math.floor(from.z);
     for (let dz = -maxR; dz <= maxR; dz += 2) {
@@ -901,7 +973,7 @@ export class GeneralAI {
         if (d > maxR) continue;
         // Reachable edge tree with open ground on at least one side.
         let open = 0;
-        for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (g.grid.walkable(tr.cx + ox * 2, tr.cz + oz * 2) && g.grid.walkable(tr.cx + ox, tr.cz + oz)) open++;
+        for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as Cell[]) if (g.grid.walkable(tr.cx + ox * 2, tr.cz + oz * 2) && g.grid.walkable(tr.cx + ox, tr.cz + oz)) open++;
         if (!open) continue;
         let n = 0;
         for (let z = -4; z <= 4; z++) for (let x = -4; x <= 4; x++) if (T.treeAtCell(tr.cx + x, tr.cz + z)) n++;
@@ -914,7 +986,7 @@ export class GeneralAI {
   }
 
   /** Lumber Yard at the edge of good woods, on the side facing the town. */
-  lumberYardSpot(hall) {
+  lumberYardSpot(hall: Unit): Point | null {
     const g = this.g;
     for (const tree of this.woodsCandidates(hall).slice(0, 40)) {
       for (let r = 3; r <= 6; r++) {
@@ -930,7 +1002,7 @@ export class GeneralAI {
     return null;
   }
 
-  offStreets(x, z, fp) {
+  offStreets(x: number, z: number, fp: number): boolean {
     if (!this.streets) return true;
     const cx = Math.round(x - fp / 2) - 1;
     const cz = Math.round(z - fp / 2) - 1;
@@ -939,31 +1011,31 @@ export class GeneralAI {
   }
 
   /** Send a builder to construct `type` at a chosen spot. */
-  buildAt(type, spot, peasants) {
+  buildAt(type: string, spot: Point, peasants: Unit[]): boolean {
     const g = this.g;
     const p = this.p;
     const builder =
       peasants.find((u) => u.harvest?.kind === 'lumber' && !u.carry && u.order.type === 'harvest') ??
       peasants.find((u) => u.order.type === 'idle') ??
       peasants.find((u) => !u.harvest?.inside && u.order.type !== 'build' && u.order.type !== 'construct');
-    if (!builder || !g.spend(p, UNITS[type].cost)) return false;
-    const resume = builder.harvest?.kind ? { type: 'harvest', target: builder.harvest.kind === 'gold' ? builder.harvest.mine : builder.harvest.tree } : null;
+    if (!builder || !g.spend(p, UNITS[type]!.cost)) return false;
+    const resume: Order | null = builder.harvest?.kind ? { type: 'harvest', target: builder.harvest.kind === 'gold' ? builder.harvest.mine : builder.harvest.tree } : null;
     g.issueOrder(builder, { type: 'build', building: type, x: spot.x, z: spot.z, paid: true });
-    if (resume?.target) builder.orderQueue.push(resume);
+    if (resume && 'target' in resume && resume.target) builder.orderQueue.push(resume);
     return true;
   }
 
-  count(type, includeUnfinished = true) {
+  count(type: string, includeUnfinished = true): number {
     return this.p.buildings.filter((b) => !b.dead && (b.type === type || (type === 'townhall' && b.def.tier)) && (includeUnfinished || !b.underConstruction)).length;
   }
 
-  construction(hall, peasants) {
+  construction(hall: Unit | undefined, peasants: Unit[]): void {
     const g = this.g;
     const p = this.p;
     const t = g.time;
     this.reserve = null;
     this.ageReady = false;
-    const plan = [
+    const plan: PlanStep[] = [
       { type: 'lumberyard', n: 1, at: 25 },
       { type: 'farm', n: 1, at: 35 },
       { type: 'barracks', n: 1, at: 60 },
@@ -998,7 +1070,7 @@ export class GeneralAI {
         if (p.buildings.some((b) => !b.dead && b.upgrading?.age)) return;
         if (step.age > p.tier + 1) continue;
         if (g.empires.ageMissing(p).length) continue;
-        const cost = AGES[step.age].cost;
+        const cost = AGES[step.age]!.cost!;
         this.ageReady = g.canAfford(p, cost);
         if (this.ageReady && hall.trainQueue.length === 0 && !hall.upgrading) {
           g.empires.startAgeUp(hall);
@@ -1009,23 +1081,25 @@ export class GeneralAI {
         return;
       }
       if (!peasants.length) continue; // ages can still be researched without workers
-      const have = p.buildings.filter((b) => !b.dead && (b.type === step.type || (step.type === 'scouttower' && b.type === 'guardtower'))).length + (this.pendingBuild(step.type) ? 1 : 0);
-      if (have >= step.n) continue;
-      if (g.missingRequirements(p, UNITS[step.type]).length) continue;
-      if (!g.canAfford(p, UNITS[step.type].cost)) {
-        this.reserve = UNITS[step.type].cost; // save up
+      const type = step.type!;
+      const stepDef = UNITS[type]!;
+      const have = p.buildings.filter((b) => !b.dead && (b.type === type || (type === 'scouttower' && b.type === 'guardtower'))).length + (this.pendingBuild(type) ? 1 : 0);
+      if (have >= step.n!) continue;
+      if (g.missingRequirements(p, stepDef).length) continue;
+      if (!g.canAfford(p, stepDef.cost)) {
+        this.reserve = stepDef.cost; // save up
         return;
       }
-      let started;
-      if (step.type === 'lumberyard') {
-        const spot = this.lumberYardSpot(hall);
-        started = spot ? this.buildAt('lumberyard', spot, peasants) : this.build(step.type, peasants, hall);
-      } else started = this.build(step.type, peasants, hall);
+      let started: boolean;
+      if (type === 'lumberyard') {
+        const spot = this.lumberYardSpot(hall!);
+        started = spot ? this.buildAt('lumberyard', spot, peasants) : this.build(type, peasants, hall);
+      } else started = this.build(type, peasants, hall);
       if (started) return;
       // No room or no free worker: move on rather than stall the whole plan.
     }
     // Another Lumber Yard when the woods have receded from every drop-off.
-    if (t > 300 && !this.pendingBuild('lumberyard') && g.canAfford(p, UNITS.lumberyard.cost) && p.gold > 300) {
+    if (t > 300 && !this.pendingBuild('lumberyard') && g.canAfford(p, UNITS['lumberyard']!.cost) && p.gold > 300) {
       const drops = p.buildings.filter((b) => !b.dead && b.def.dropOff);
       const yards = drops.filter((b) => b.def.dropOff === 'lumber').length;
       const near = drops.some((b) => {
@@ -1033,28 +1107,28 @@ export class GeneralAI {
         return tr && Math.hypot(tr.x - b.x, tr.z - b.z) < 12;
       });
       if (!near && yards < 3) {
-        const spot = this.lumberYardSpot(hall);
+        const spot = this.lumberYardSpot(hall!);
         if (spot) this.buildAt('lumberyard', spot, peasants);
       }
     }
     // Upgrade scout towers once allowed.
     for (const b of p.buildings) {
-      if (b.type === 'scouttower' && !b.dead && !b.underConstruction && !b.upgrading && g.canAfford(p, UNITS.guardtower.cost) && !g.missingRequirements(p, UNITS.guardtower).length) {
+      if (b.type === 'scouttower' && !b.dead && !b.underConstruction && !b.upgrading && g.canAfford(p, UNITS['guardtower']!.cost) && !g.missingRequirements(p, UNITS['guardtower']!).length) {
         g.startUpgrade(b);
       }
     }
   }
 
-  pendingBuild(type) {
+  pendingBuild(type: string): boolean {
     return this.p.units.some((u) => !u.dead && u.order.type === 'build' && u.order.building === type);
   }
 
-  findSpot(type, hall) {
+  findSpot(type: string, hall: Unit): Point | null {
     const g = this.g;
-    const fp = UNITS[type].footprint;
+    const fp = UNITS[type]!.footprint!;
     const mine = this.mainMine(hall);
-    const [tcx, tcz] = this.p.base.toCenter;
-    const tries = [];
+    const [tcx, tcz] = this.p.base!.toCenter;
+    const tries: (Point & { r?: number })[] = [];
     for (let r = 5; r <= 34; r += 1) {
       for (let k = 0; k < 16; k++) {
         const a = (k / 16) * Math.PI * 2 + r * 0.37;
@@ -1083,11 +1157,11 @@ export class GeneralAI {
     return null;
   }
 
-  build(type, peasants, hall = null) {
+  build(type: string, peasants: Unit[], hall: Unit | null | undefined = null): boolean {
     const g = this.g;
     const p = this.p;
-    if (!g.canAfford(p, UNITS[type].cost)) return false;
-    const center = hall ?? peasants[0];
+    if (!g.canAfford(p, UNITS[type]!.cost)) return false;
+    const center = hall ?? peasants[0]!;
     const spot = this.findSpot(type, center);
     if (!spot) return false;
     const builder =
@@ -1095,37 +1169,37 @@ export class GeneralAI {
       peasants.find((u) => u.order.type === 'idle') ??
       peasants.find((u) => !u.harvest?.inside && u.order.type !== 'build' && u.order.type !== 'construct');
     if (!builder) return false;
-    if (!g.spend(p, UNITS[type].cost)) return false;
+    if (!g.spend(p, UNITS[type]!.cost)) return false;
     g.issueOrder(builder, { type: 'build', building: type, x: spot.x, z: spot.z, paid: true });
     // Go back to work afterwards.
     if (builder.harvest?.kind) builder.orderQueue.push({ type: 'harvest', target: builder.harvest.kind === 'gold' ? builder.harvest.mine : builder.harvest.tree });
     return true;
   }
 
-  production() {
+  production(): void {
     const g = this.g;
     const p = this.p;
     const army = this.army();
     const food = this.armyFood(army);
-    const counts = {};
+    const counts: Record<string, number> = {};
     for (const u of army) counts[u.type] = (counts[u.type] || 0) + 1;
-    const unlocked = (t) => !g.missingRequirements(p, UNITS[t]).length;
+    const unlocked = (t: string): boolean => !g.missingRequirements(p, UNITS[t]!).length;
     // The newest units this building offers (current and previous age), best first;
     // pick among the top two for variety, preferring whichever we have fewer of.
-    const choose = (b) => {
+    const choose = (b: Unit): string | null => {
       const ok = (b.def.trains ?? [])
-        .filter((t) => t !== 'peasant' && unlocked(t) && (UNITS[t].age ?? 1) >= p.tier - 1)
-        .sort((a, c) => (UNITS[c].age ?? 1) - (UNITS[a].age ?? 1) || UNITS[c].cost.gold - UNITS[a].cost.gold);
+        .filter((t) => t !== 'peasant' && unlocked(t) && (UNITS[t]!.age ?? 1) >= p.tier - 1)
+        .sort((a, c) => (UNITS[c]!.age ?? 1) - (UNITS[a]!.age ?? 1) || UNITS[c]!.cost.gold - UNITS[a]!.cost.gold);
       if (!ok.length) return null;
       const top = ok.slice(0, 2);
       top.sort((a, c) => (counts[a] || 0) - (counts[c] || 0));
-      return top[0];
+      return top[0]!;
     };
     // Feed the people before the army (unless the town is under attack).
     const holdTroops = this.hungry && g.time > this.defendUntil && food >= 8;
     for (const b of p.buildings) {
       if (b.dead || b.underConstruction || b.trainQueue.length >= 2 || b.upgrading) continue;
-      let pick = null;
+      let pick: string | null = null;
       if (holdTroops && b.def.trains) continue;
       if (b.type === 'barracks' || b.type === 'stable' || b.type === 'factory') pick = choose(b);
       else if (b.type === 'sanctum') {
@@ -1138,40 +1212,41 @@ export class GeneralAI {
         // Research Center: keep every line moving, economy first.
         const order = ['forestry', 'commerce', 'housing', 'agriculture', 'weaponry', 'vitality', 'armor', 'mining', 'civics', 'masonry', 'mobility', 'medicine'];
         const cap = researchCap(p);
-        let best = null;
+        let best: string | null = null;
         for (const id of order) {
-          if (p.upgrades[id] >= cap || p.researchingUpg?.[id]) continue;
-          if (!best || p.upgrades[id] < p.upgrades[best]) best = id;
+          if (p.upgrades[id]! >= cap || p.researchingUpg?.[id]) continue;
+          if (!best || p.upgrades[id]! < p.upgrades[best]!) best = id;
         }
         if (best) {
-          const c = researchCost(best, p.upgrades[best]);
+          const c = researchCost(best, p.upgrades[best]!);
           const r = this.reserve;
           const spare = !r || (p.gold - c.gold >= (r.gold ?? 0) && p.lumber - c.lumber >= (r.lumber ?? 0));
           if (spare && g.canAfford(p, c) && p.lumber > c.lumber + 60) g.startResearch(b, best);
         }
       }
-      if (!pick || !g.canAfford(p, UNITS[pick].cost)) continue;
+      if (!pick || !g.canAfford(p, UNITS[pick]!.cost)) continue;
       // Keep money aside for the next age or building, unless the army is tiny or we are under attack.
       const r = this.reserve;
-      const c = UNITS[pick].cost;
+      const c = UNITS[pick]!.cost;
       const keep = r && food >= 8 && g.time > this.defendUntil && (p.gold - (c.gold || 0) < (r.gold || 0) || p.lumber - (c.lumber || 0) < (r.lumber || 0));
       if (!keep) g.trainUnit(b, pick);
     }
   }
 
-  militaryEmpire() {
+  militaryEmpire(): void {
     const g = this.g;
     const army = this.army();
     const food = this.armyFood(army);
     const h = this.home();
-    const [tcx, tcz] = this.p.base.toCenter;
+    const [tcx, tcz] = this.p.base!.toCenter;
     const rally = { x: h.x + tcx * 9, z: h.z + tcz * 9 };
 
     // Defense takes priority.
-    if (g.time < this.defendUntil && this.defendPos) {
+    const defendPos = this.defendPos;
+    if (g.time < this.defendUntil && defendPos) {
       for (const u of army) {
-        if (u.order.type !== 'attackMove' || Math.hypot(u.order.point.x - this.defendPos.x, u.order.point.z - this.defendPos.z) > 3) {
-          if (u.order.type !== 'attack') g.issueOrder(u, { type: 'attackMove', point: this.defendPos });
+        if (u.order.type !== 'attackMove' || Math.hypot(u.order.point.x - defendPos.x, u.order.point.z - defendPos.z) > 3) {
+          if (u.order.type !== 'attack') g.issueOrder(u, { type: 'attackMove', point: defendPos });
         }
       }
       this.state = 'defend';
@@ -1200,7 +1275,7 @@ export class GeneralAI {
         if (u.order.type === 'idle') {
           const next = this.attackObjective(true);
           if (next) {
-            if (next.label !== this.target.label) this.announceAttack(next, army.length);
+            if (next.label !== this.target!.label) this.announceAttack(next, army.length);
             this.target = next;
             g.issueOrder(u, { type: 'attackMove', point: next });
           }
@@ -1226,7 +1301,7 @@ export class GeneralAI {
     for (const u of army) {
       if (u.order.type === 'idle' && Math.hypot(u.x - rally.x, u.z - rally.z) > 6) g.issueOrder(u, { type: 'attackMove', point: rally });
     }
-    const threshold = Math.round(Math.min(44, 14 + this.attacks * 6) * [1.15, 1, 0.9][g.difficulty]);
+    const threshold = Math.round(Math.min(44, 14 + this.attacks * 6) * [1.15, 1, 0.9][g.difficulty]!);
     this.status = `Building an army (${food}/${threshold} food)`;
     if (food >= threshold || (this.expansionGuard && food >= 16)) {
       const obj = this.attackObjective(false);
@@ -1241,7 +1316,7 @@ export class GeneralAI {
     }
   }
 
-  announceAttack(obj, count) {
+  announceAttack(obj: Objective, count: number): void {
     const g = this.g;
     const p = this.p;
     if (obj.player?.isHuman) {
@@ -1255,7 +1330,7 @@ export class GeneralAI {
     }
   }
 
-  attackObjective(continuing) {
+  attackObjective(continuing: boolean): Objective | null {
     const g = this.g;
     const food = this.armyFood();
     if (this.expansionGuard && food >= 16) return { ...this.expansionGuard, label: 'Clearing a gold mine to expand' };
