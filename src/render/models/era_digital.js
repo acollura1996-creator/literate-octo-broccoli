@@ -21,7 +21,7 @@ const TAU = Math.PI * 2;
 /** Rest muzzle positions in model space (origin at ground center, facing +Z), measured from the built models. */
 export const MUZZLE = {
   railgunner: [-0.116, 0.761, 1.071],
-  combat_drone: [0, 0.865, 0.56],
+  combat_drone: [0, 0.86, 0.56],
   stealth_tank: [0, 0.74, 1.88],
 };
 
@@ -509,13 +509,13 @@ export function stealth_tank(tc) {
   }
   // --- hull: lower hull between the tracks, faceted upper hull with a chine over the tracks
   add(root, profileX('dgStealthLower', [[-1.1, 0.12], [0.86, 0.12], [1.1, 0.36], [-1.16, 0.36]], 0.84), m.compD);
-  const H = [[-0.48, 1.3], [0.48, 1.3], [0.8, 0.96], [0.8, -1.06], [0.6, -1.28], [-0.6, -1.28], [-0.8, -1.06], [-0.8, 0.96]];
+  const H = [[-0.42, 1.3], [0.42, 1.3], [0.8, 0.86], [0.8, -0.98], [0.55, -1.28], [-0.55, -1.28], [-0.8, -0.98], [-0.8, 0.86]];
   const hr = (y, sx, zf, zb) => [y, H.map(([x, z]) => [x * sx, z > 0 ? z * zf : z * zb])];
   const HR = [hr(0.25, 0.97, 0.88, 0.95), hr(0.42, 1, 1, 1), hr(0.56, 0.86, 0.74, 0.94), hr(0.62, 0.74, 0.62, 0.9)];
   const deck = mat(0x3d444d);
   add(root, loftGeo('dgStealthHull', HR.slice(0, 3)), m.comp);
   add(root, loftGeo('dgStealthDeck', HR.slice(2)), deck);
-  add(root, loftGeo('dgStealthStripe', [ringAt(HR[1], HR[2], 0.1, 0.007), ringAt(HR[1], HR[2], 0.3, 0.007)]), m.team);
+  add(root, loftGeo('dgStealthStripe', [ringAt(HR[1], HR[2], 0.08, 0.007), ringAt(HR[1], HR[2], 0.36, 0.007)]), m.team);
   add(root, loftGeo('dgStealthChine', [ringAt(HR[0], HR[1], 0.86, 0.006), ringAt(HR[0], HR[1], 1, 0.006)]), m.compM);
   // glacis: LED running lights, driver's sensor slit
   for (const u of [0.1, 0.9]) add(onFace(root, HR, 1, 0, u, 0.55), geo.box(0.14, 0.022, 0.01), m.ledS);
@@ -561,7 +561,7 @@ export function stealth_tank(tc) {
   glowAdd(glow, weapon, geo.box(0.04, 0.04, 0.8), m.led, [0, 0.005, 1.02]);
   glowAdd(glow, weapon, mergedCyls('dgTankCoils', [-0.27, -0.09, 0.09, 0.27].map((z) => [0.1, 0.1, 0.04, 0, 0, z, HALF_PI, 0, 8])), m.led, [0, 0, 0.98]);
   add(weapon, profileX('dgTankMuzzle', [[0, -0.07], [0.07, -0.06], [0.09, 0], [0.07, 0.06], [0, 0.07]], 0.2), m.compM, [0, 0, 1.4]);
-  add(weapon, geo.box(0.204, 0.03, 0.05), m.team, [0, 0.04, 1.44]);
+  add(weapon, geo.box(0.17, 0.012, 0.05), m.team, [0, 0.066, 1.43]);
   muzzle(weapon, 0, 0, 1.5);
   return { root, parts: { weapon, wheels, glow }, height: 1.15, radius: 0.95 };
 }
@@ -570,84 +570,107 @@ export function stealth_tank(tc) {
 // Buildings
 // ===========================================================================
 
-// Digital Hub (Digital town center, 4x4): a rounded glass podium with a white slab, a glowing ribbon and a
-// green roof, a twisting tower of rotated glass floors with blue LED ledges (glow) between them, a crown
-// with a team band, a drone pad (LED ring) and antenna masts, and a giant team-colored holographic screen
-// tilted toward the camera over the entrance. Plaza with LED paths, light pylons and planters.
+// Digital Hub (Digital town center, 4x4): a rounded glass podium with a white slab, a glowing ribbon floor
+// and a green roof; a twisting tower of rotated glass floors with blue LED ledges (glow) between them, a
+// crown with a team band, a drone pad (LED ring, parked drone) and antenna masts with beacons; a shorter
+// stacked glass tower beside it for a skyline; a giant team-colored holographic screen tilted toward the
+// camera over the entrance; plaza with LED paths, team light pylons and planters.
 export function digital_hub(tc) {
   const root = new THREE.Group();
   const m = mats(tc);
   const glow = [];
   const pave = mat(C.pave), glassD = mat(C.glassD), green = mat(C.green), greenD = mat(C.greenD);
+  const glassA = mat(C.glass), glassB = mat(C.glassB);
   // --- plaza: rounded plinth, team rim, light paving with LED paths
   add(root, roundSlab(3.86, 3.86, 0.08, 0.34), m.compM);
   add(root, roundSlab(3.78, 3.78, 0.03, 0.3), m.team, [0, 0.08, 0]);
   add(root, roundSlab(3.68, 3.68, 0.04, 0.26), pave, [0, 0.1, 0]);
   const b = 0.14;
-  add(root, mergedBoxes('dgHubPaths', [[0.04, 0.008, 1.0, -0.62, 0, 1.3], [0.04, 0.008, 1.0, 0.62, 0, 1.3], [3.3, 0.008, 0.04, 0, 0, 1.78]]), m.ledS, [0, b, 0]);
-  // --- podium (z -1.7 .. 0.8): lobby glass, white slab, glowing ribbon floor, parapet, green roof
-  const PZ = -0.45, PW = 3.3, PD = 2.5;
-  add(root, roundSlab(PW - 0.12, PD - 0.12, 0.44, 0.3), glassD, [0, b, PZ]);
+  add(root, mergedBoxes('dgHubPaths', [[0.04, 0.008, 0.95, -0.62, 0, 1.35], [0.04, 0.008, 0.95, 0.62, 0, 1.35], [3.3, 0.008, 0.04, 0, 0, 1.8]]), m.ledS, [0, b, 0]);
+  // --- podium (z -1.73 .. 0.83): lobby glass + fins, white slab, composite floor with a glowing ribbon
+  const PZ = -0.45, PW = 3.4, PD = 2.56;
+  add(root, roundSlab(PW - 0.12, PD - 0.12, 0.5, 0.3, 2), glassD, [0, b, PZ]);
   const fins = [];
-  for (let i = 0; i < 11; i++) if (i < 4 || i > 6) fins.push([0.04, 0.44, 0.04, -1.45 + i * 0.29, 0.22, PZ + PD / 2 - 0.05]);
-  for (let i = 0; i < 6; i++) fins.push([0.04, 0.44, 0.04, PW / 2 - 0.05, 0.22, PZ - 0.75 + i * 0.3], [0.04, 0.44, 0.04, -PW / 2 + 0.05, 0.22, PZ - 0.75 + i * 0.3]);
+  for (let i = 0; i < 11; i++) if (i < 4 || i > 6) fins.push([0.04, 0.5, 0.04, -1.5 + i * 0.3, 0.25, PZ + PD / 2 - 0.05]);
+  for (let i = 0; i < 6; i++) fins.push([0.04, 0.5, 0.04, PW / 2 - 0.05, 0.25, PZ - 0.75 + i * 0.3], [0.04, 0.5, 0.04, -PW / 2 + 0.05, 0.25, PZ - 0.75 + i * 0.3]);
   add(root, mergedBoxes('dgHubLobbyFins', fins), m.white, [0, b, 0]);
-  add(root, roundSlab(PW, PD, 0.07, 0.36), m.white, [0, b + 0.44, PZ]);
-  add(root, roundSlab(PW - 0.08, PD - 0.08, 0.26, 0.32), m.comp, [0, b + 0.51, PZ]);
-  add(root, roundSlab(PW - 0.05, PD - 0.05, 0.08, 0.33), mat(C.ledL, { emissive: C.led, emissiveIntensity: 0.55 }), [0, b + 0.6, PZ]);
-  add(root, roundSlab(PW + 0.04, PD + 0.04, 0.07, 0.38), m.white, [0, b + 0.77, PZ]);
-  const top = b + 0.84;
-  add(root, roundSlab(PW - 0.12, PD - 0.12, 0.012, 0.3), mat(0x7d858f), [0, top - 0.008, PZ]);
-  add(root, mergedBoxes('dgHubGreen', [[0.75, 0.05, 2.0, -1.12, 0.025, PZ - 0.05], [0.75, 0.05, 2.0, 1.12, 0.025, PZ - 0.05], [1.4, 0.05, 0.4, 0, 0.025, PZ - 0.98]]), green, [0, top, 0]);
-  add(root, mergedBoxes('dgHubShrubs', [[0.16, 0.1, 0.16, -1.2, 0.1, -1.2], [0.14, 0.09, 0.14, -1.0, 0.09, -0.3], [0.16, 0.1, 0.16, 1.2, 0.1, -1.0], [0.14, 0.09, 0.14, 1.05, 0.09, 0.15], [0.15, 0.1, 0.15, 0.5, 0.1, -1.4]]), greenD, [0, top, 0]);
+  add(root, roundSlab(PW, PD, 0.07, 0.36, 2), m.white, [0, b + 0.5, PZ]);
+  add(root, roundSlab(PW - 0.08, PD - 0.08, 0.3, 0.32, 2), m.comp, [0, b + 0.57, PZ]);
+  add(root, roundSlab(PW - 0.05, PD - 0.05, 0.08, 0.33, 2), mat(C.ledL, { emissive: C.led, emissiveIntensity: 0.55 }), [0, b + 0.68, PZ]);
+  add(root, roundSlab(PW + 0.04, PD + 0.04, 0.07, 0.38, 2), m.white, [0, b + 0.87, PZ]);
+  const top = b + 0.94;
+  add(root, roundSlab(PW - 0.12, PD - 0.12, 0.012, 0.3, 2), mat(0x7d858f), [0, top - 0.008, PZ]);
+  add(root, mergedBoxes('dgHubGreen', [[0.5, 0.05, 2.2, -1.38, 0.025, PZ], [0.62, 0.05, 0.86, 1.3, 0.025, 0.28], [0.9, 0.05, 0.36, -0.55, 0.025, -1.5]]), green, [0, top, 0]);
+  add(root, mergedBoxes('dgHubShrubs', [[0.16, 0.1, 0.16, -1.4, 0.1, -1.2], [0.14, 0.09, 0.14, -1.35, 0.09, -0.2], [0.14, 0.09, 0.14, 1.32, 0.09, 0.45], [0.15, 0.1, 0.15, -0.8, 0.1, -1.52], [0.13, 0.08, 0.13, 1.25, 0.08, 0.05]]), greenD, [0, top, 0]);
   // entrance: glass doors, white canopy with a team edge
-  add(root, geo.box(0.7, 0.36, 0.03), mat(C.visor), [0, b + 0.18, PZ + PD / 2 - 0.02]);
-  add(root, geo.box(0.04, 0.36, 0.04), m.white, [0, b + 0.18, PZ + PD / 2]);
-  add(root, geo.box(1.1, 0.05, 0.4), m.white, [0, b + 0.42, PZ + PD / 2 + 0.18]);
-  add(root, geo.box(1.12, 0.04, 0.03), m.team, [0, b + 0.42, PZ + PD / 2 + 0.38]);
-  add(root, geo.box(0.7, 0.012, 0.3), m.ledS, [0, b + 0.39, PZ + PD / 2 + 0.17]);
-  // --- twisting tower: rotated glass floors, white slabs, LED ledges (glow)
-  const N = 8, LH = 0.44, TZ = -0.62;
-  const glassA = mat(C.glass), glassB = mat(C.glassB);
+  const fz = PZ + PD / 2;
+  add(root, geo.box(0.7, 0.4, 0.03), mat(C.visor), [0, b + 0.2, fz - 0.02]);
+  add(root, geo.box(0.04, 0.4, 0.04), m.white, [0, b + 0.2, fz]);
+  add(root, geo.box(1.1, 0.05, 0.4), m.white, [0, b + 0.47, fz + 0.18]);
+  add(root, geo.box(1.12, 0.04, 0.03), m.team, [0, b + 0.47, fz + 0.38]);
+  add(root, geo.box(0.7, 0.012, 0.3), m.ledS, [0, b + 0.44, fz + 0.17]);
+  // --- twisting tower: rotated glass floors with mullions, white slabs, LED ledges (glow)
+  const N = 8, LH = 0.44, TX = -0.28, TZ = -0.58, W0 = 1.66, TAPER = 0.045, TWIST = 0.11;
   for (let i = 0; i < N; i++) {
-    const w = 1.5 - i * 0.045, a = i * 0.11;
-    const lv = grp(root, 0, top + i * LH, TZ, a);
-    add(lv, geo.box(w, LH - 0.06, w), i % 2 ? glassB : glassA, [0, (LH - 0.06) / 2, 0]);
+    const w = W0 - i * TAPER, gh = LH - 0.06;
+    const lv = grp(root, TX, top + i * LH, TZ, i * TWIST);
+    add(lv, geo.box(w, gh, w), i % 2 ? glassB : glassA, [0, gh / 2, 0]);
     const mull = [];
     for (const u of [-w / 4, 0, w / 4]) {
-      mull.push([0.03, LH - 0.06, 0.03, u, (LH - 0.06) / 2, w / 2]);
-      mull.push([0.03, LH - 0.06, 0.03, w / 2, (LH - 0.06) / 2, u], [0.03, LH - 0.06, 0.03, -w / 2, (LH - 0.06) / 2, u]);
+      mull.push([0.03, gh, 0.03, u, gh / 2, w / 2]);
+      mull.push([0.03, gh, 0.03, w / 2, gh / 2, u], [0.03, gh, 0.03, -w / 2, gh / 2, u]);
     }
     add(lv, mergedBoxes(`dgHubMull${w.toFixed(3)}`, mull), m.white);
     add(lv, geo.box(w + 0.08, 0.04, w + 0.08), m.white, [0, LH - 0.04, 0]);
-    glowAdd(glow, lv, geo.box(w + 0.15, 0.02, w + 0.15), m.led, [0, LH - 0.01, 0]);
+    add(lv, geo.box(w + 0.13, 0.016, w + 0.13), m.ledS, [0, LH - 0.008, 0]);
+    // LED facade bands on the three faces the camera sees (each centered on its face so the pulse stays put)
+    if (i % 2) {
+      const bw = w * 0.9, bz = w / 2 + 0.024;
+      glowAdd(glow, lv, geo.box(bw, 0.04, 0.02), m.led, [0, gh * 0.42, bz]);
+      glowAdd(glow, lv, geo.box(0.02, 0.04, bw), m.led, [bz, gh * 0.42, 0]);
+      glowAdd(glow, lv, geo.box(0.02, 0.04, bw), m.led, [-bz, gh * 0.42, 0]);
+    }
   }
   // --- crown: white cap, team band, drone pad with an LED ring and a parked drone, antenna masts
-  const ty = top + N * LH, wt = 1.5 - N * 0.045;
-  const crown = grp(root, 0, ty, TZ, N * 0.11);
+  const ty = top + N * LH, wt = W0 - N * TAPER;
+  const crown = grp(root, TX, ty, TZ, N * TWIST);
   add(crown, geo.box(wt, 0.14, wt), m.white, [0, 0.07, 0]);
   add(crown, geo.box(wt + 0.03, 0.05, wt + 0.03), m.team, [0, 0.09, 0]);
-  add(crown, geo.cyl(0.46, 0.48, 0.05, 20), m.compD, [0, 0.165, 0]);
-  glowAdd(glow, crown, geo.ring(0.37, 0.43, 20), m.led, [0, 0.192, 0], [-HALF_PI, 0, 0]);
-  add(crown, mergedBoxes('dgHubPadMark', [[0.42, 0.008, 0.05, 0, 0, 0, Math.PI / 4], [0.42, 0.008, 0.05, 0, 0, 0, -Math.PI / 4]]), m.white, [0, 0.192, 0]);
+  add(crown, geo.cyl(0.48, 0.5, 0.05, 20), m.compD, [0, 0.165, 0]);
+  glowAdd(glow, crown, geo.ring(0.39, 0.45, 20), m.led, [0, 0.192, 0], [-HALF_PI, 0, 0]);
+  add(crown, mergedBoxes('dgHubPadMark', [[0.44, 0.008, 0.05, 0, 0, 0, Math.PI / 4], [0.44, 0.008, 0.05, 0, 0, 0, -Math.PI / 4]]), m.white, [0, 0.192, 0]);
   miniDrone(crown, 0.0, 0.196, 0.0, 0.4, m);
-  const mastBase = [[0.44, 0.44, 1.04], [-0.44, -0.44, 0.72]];
-  for (const [x, z, h] of mastBase) {
+  const mh = 5.8 - ty - 0.26;
+  for (const [x, z, h] of [[0.5, 0.5, mh], [-0.5, -0.5, mh * 0.66]]) {
     add(crown, geo.box(0.12, 0.06, 0.12), m.comp, [x, 0.17, z]);
     add(crown, geo.cyl(0.018, 0.035, h, 6), m.pearl, [x, 0.2 + h / 2, z]);
-    add(crown, mergedBoxes(`dgHubMastBars${h}`, [[0.2, 0.014, 0.014, 0, h * 0.45, 0], [0.014, 0.014, 0.16, 0, h * 0.62, 0], [0.12, 0.014, 0.014, 0, h * 0.8, 0]]), m.pearl, [x, 0.2, z]);
+    add(crown, mergedBoxes(`dgHubMastBars${h.toFixed(3)}`, [[0.2, 0.014, 0.014, 0, h * 0.45, 0], [0.014, 0.014, 0.16, 0, h * 0.62, 0], [0.12, 0.014, 0.014, 0, h * 0.8, 0]]), m.pearl, [x, 0.2, z]);
     glowAdd(glow, crown, geo.sphere(0.04, 6, 4), glowMat(C.red, 1.3), [x, 0.2 + h + 0.02, z]);
   }
+  // --- secondary stacked tower (back right): offset glass blocks, static LED ledges, team crown
+  const SX = 1.12, SZ = -1.0, SH = 0.42;
+  for (let i = 0; i < 4; i++) {
+    const o = (i % 2 ? 1 : -1) * 0.05, w = 0.8 - i * 0.03;
+    const g = grp(root, SX + o, top + i * SH, SZ - o);
+    add(g, geo.box(w, SH - 0.05, w), i % 2 ? glassA : glassB, [0, (SH - 0.05) / 2, 0]);
+    add(g, geo.box(w + 0.06, 0.035, w + 0.06), m.white, [0, SH - 0.035, 0]);
+    add(g, geo.box(w + 0.1, 0.015, w + 0.1), m.ledS, [0, SH - 0.008, 0]);
+  }
+  const sty = top + 4 * SH;
+  add(root, geo.box(0.74, 0.1, 0.74), m.white, [SX - 0.05, sty + 0.05, SZ + 0.05]);
+  add(root, geo.box(0.76, 0.04, 0.76), m.team, [SX - 0.05, sty + 0.06, SZ + 0.05]);
+  add(root, geo.box(0.3, 0.12, 0.24), m.compM, [SX - 0.1, sty + 0.16, SZ + 0.05]);
+  add(root, geo.cyl(0.012, 0.018, 0.4, 5), m.pearl, [SX + 0.18, sty + 0.3, SZ - 0.12]);
   // --- giant holographic team screen over the entrance, tilted back toward the camera
-  const scr = grp(root, 0, top + 0.01, 0.6);
-  scr.rotation.x = -0.45;
-  add(scr, geo.box(2.1, 0.96, 0.06), m.white, [0, 0.5, 0]);
-  add(scr, geo.box(1.98, 0.84, 0.02), mat(tc, { emissive: tc, emissiveIntensity: 0.6 }), [0, 0.5, 0.035]);
+  const scr = grp(root, 0, top + 0.01, 0.7);
+  scr.rotation.x = -0.42;
+  add(scr, geo.box(2.2, 0.92, 0.06), m.white, [0, 0.48, 0]);
+  add(scr, geo.box(2.08, 0.8, 0.02), mat(tc, { emissive: tc, emissiveIntensity: 0.6 }), [0, 0.48, 0.035]);
   const bright = mat(new THREE.Color(tc).lerp(new THREE.Color(0xffffff), 0.55).getHex(), { emissive: tc, emissiveIntensity: 0.5 });
   add(scr, mergedBoxes('dgHubScreenData', [
-    [0.5, 0.035, 0.01, -0.62, 0.78, 0], [0.38, 0.035, 0.01, -0.68, 0.7, 0], [0.44, 0.035, 0.01, -0.65, 0.62, 0],
-    [0.06, 0.2, 0.01, 0.55, 0.3, 0], [0.06, 0.32, 0.01, 0.64, 0.36, 0], [0.06, 0.26, 0.01, 0.73, 0.33, 0], [0.06, 0.4, 0.01, 0.82, 0.4, 0],
-    [0.5, 0.02, 0.01, -0.62, 0.24, 0], [0.32, 0.02, 0.01, -0.71, 0.2, 0],
+    [0.5, 0.035, 0.01, -0.66, 0.74, 0], [0.38, 0.035, 0.01, -0.72, 0.66, 0], [0.44, 0.035, 0.01, -0.69, 0.58, 0],
+    [0.06, 0.2, 0.01, 0.6, 0.28, 0], [0.06, 0.32, 0.01, 0.69, 0.34, 0], [0.06, 0.26, 0.01, 0.78, 0.31, 0], [0.06, 0.4, 0.01, 0.87, 0.38, 0],
+    [0.5, 0.02, 0.01, -0.66, 0.24, 0], [0.32, 0.02, 0.01, -0.75, 0.2, 0],
   ]), bright, [0, 0, 0.047]);
   glowAdd(glow, scr, geo.custom('dig:hubEmblem', () => {
     const ring = new THREE.TorusGeometry(0.24, 0.035, 4, 6).toNonIndexed();
@@ -664,11 +687,11 @@ export function digital_hub(tc) {
       list.push(nd);
     }
     const g = mergeGeometries(list, false);
-    for (const p of list) p.dispose();
+    for (const q of list) q.dispose();
     return g;
-  }), glowMat(0xf2f8ff, 0.9), [0, 0.5, 0.05]);
-  add(scr, mergedBoxes('dgHubScreenLegs', [[0.08, 0.5, 0.08, -0.8, 0.2, -0.06], [0.08, 0.5, 0.08, 0.8, 0.2, -0.06]]), m.comp, [0, 0, 0]);
-  add(scr, geo.box(1.9, 0.03, 0.03), m.ledS, [0, 0.03, 0.04]);
+  }), glowMat(0xf2f8ff, 0.9), [0, 0.48, 0.05]);
+  add(scr, mergedBoxes('dgHubScreenLegs', [[0.08, 0.5, 0.08, -0.85, 0.2, -0.06], [0.08, 0.5, 0.08, 0.85, 0.2, -0.06]]), m.comp);
+  add(scr, geo.box(2.0, 0.03, 0.03), m.ledS, [0, 0.03, 0.04]);
   // --- plaza: front light pylons with team caps, planters with trees
   for (const s of [1, -1]) {
     const x = s * 1.5;
@@ -708,19 +731,22 @@ export function house_digital(tc) {
   add(root, geo.box(0.22, 0.52, 0.04), glass, [A.x + 0.38, b + 0.28, fa + 0.012]);
   add(root, geo.box(0.36, 0.03, 0.2), pave, [A.x + 0.38, b + 0.015, fa + 0.1]);
   add(root, mergedBoxes('dgHomeSideWinA', [[0.03, 0.3, 0.5, A.w / 2, 0, -0.1], [0.03, 0.3, 0.4, -A.w / 2, 0, 0.1], [0.6, 0.3, 0.03, 0.1, 0, -A.d / 2]]), glass, [A.x, b + 0.45, A.z]);
-  add(root, geo.box(0.03, 0.28, 0.24, ), m.lit, [A.x - A.w / 2 - 0.004, b + 0.45, A.z + 0.24]);
-  // --- module B (upper floor): dark composite, cantilevered toward +X over the charging bay
+  add(root, geo.box(0.03, 0.28, 0.24), m.lit, [A.x - A.w / 2 - 0.004, b + 0.45, A.z + 0.24]);
+  // --- module B (upper floor): framed glass box cantilevered toward +X over the charging bay
   const B = { x: 0.24, z: -0.12, w: 1.3, d: 1.1, h: 0.74 };
   const by = b + A.h;
-  add(root, geo.box(B.w, B.h, B.d), m.comp, [B.x, by + B.h / 2, B.z]);
-  add(root, geo.box(B.w + 0.02, 0.07, B.d + 0.02), m.team, [B.x, by + 0.06, B.z]); // team band
+  add(root, geo.box(B.w - 0.04, B.h - 0.1, B.d - 0.04), mat(0x3f6d96), [B.x, by + 0.05 + (B.h - 0.1) / 2, B.z]);
+  add(root, geo.box(B.w, 0.1, B.d), m.comp, [B.x, by + 0.05, B.z]); // floor slab
+  add(root, geo.box(B.w + 0.02, 0.05, B.d + 0.02), m.team, [B.x, by + 0.06, B.z]); // team band
+  add(root, geo.box(B.w, 0.06, B.d), m.comp, [B.x, by + B.h - 0.03, B.z]); // roof slab
+  const frame = [];
+  for (const sx of [1, -1]) for (const sz of [1, -1]) frame.push([0.06, B.h - 0.1, 0.06, sx * (B.w / 2 - 0.03), 0, sz * (B.d / 2 - 0.03)]);
+  frame.push([0.04, B.h - 0.1, 0.04, -0.15, 0, B.d / 2 - 0.01], [0.04, B.h - 0.1, 0.04, 0.3, 0, B.d / 2 - 0.01], [0.04, B.h - 0.1, 0.04, B.w / 2 - 0.01, 0, 0.0]);
+  add(root, mergedBoxes('dgHomeFrameB', frame), m.comp, [B.x, by + 0.05 + (B.h - 0.1) / 2, B.z]);
   const fb = B.z + B.d / 2;
-  add(root, geo.box(1.0, 0.3, 0.03), glass, [B.x + 0.05, by + 0.42, fb + 0.005]);
-  add(root, mergedBoxes('dgHomeLitB', [[0.3, 0.26, 0.01, -0.28, 0, 0], [0.3, 0.26, 0.01, 0.34, 0, 0]]), m.lit, [B.x + 0.05, by + 0.42, fb + 0.022]);
-  add(root, mergedBoxes('dgHomeFinsB', [-0.4, -0.1, 0.2, 0.5].map((x) => [0.03, 0.36, 0.06, x, 0, 0])), m.white, [B.x + 0.05, by + 0.42, fb + 0.02]);
-  add(root, mergedBoxes('dgHomeSideB', [[0.03, 0.26, 0.8, B.w / 2, 0, 0], [0.8, 0.26, 0.03, 0, 0, -B.d / 2]]), glass, [B.x, by + 0.42, B.z]);
-  add(root, geo.box(0.012, 0.22, 0.3), m.lit, [B.x + B.w / 2 + 0.012, by + 0.42, B.z + 0.15]);
-  add(root, geo.box(0.012, 0.03, 1.0), m.ledS, [B.x + B.w / 2 + 0.008, by + 0.12, B.z]); // LED soffit line
+  add(root, mergedBoxes('dgHomeLitB', [[0.36, 0.4, 0.01, -0.36, 0, 0], [0.32, 0.4, 0.01, 0.52, 0, 0]]), m.lit, [B.x, by + 0.37, fb - 0.012]);
+  add(root, geo.box(0.012, 0.4, 0.34), m.lit, [B.x + B.w / 2 - 0.016, by + 0.37, B.z + 0.25]);
+  add(root, geo.box(0.012, 0.03, 1.0), m.ledS, [B.x + B.w / 2 + 0.004, by + 0.105, B.z]); // LED soffit line
   // charging bay under the cantilever: column, charger post with an LED, parking pad
   add(root, geo.box(0.07, A.h, 0.07), m.white, [0.85, b + A.h / 2, -0.62]);
   add(root, geo.box(0.4, 0.012, 0.86), mat(0x8b939c), [0.66, b + 0.006, -0.12]);
@@ -747,7 +773,6 @@ export function house_digital(tc) {
   // --- exposed roof of B: solar glass (right strip) and a glass-railed terrace (front strip)
   const sy = by + B.h;
   const sol = grp(root, 0.6, sy, -0.12);
-  sol.rotation.x = 0.0;
   add(sol, geo.box(0.5, 0.03, 0.98), m.pearl, [0, 0.03, 0], [0.12, 0, 0]);
   add(sol, geo.box(0.46, 0.03, 0.94), mat(C.solar), [0, 0.04, 0], [0.12, 0, 0]);
   const sg = [];
@@ -828,14 +853,14 @@ export function research_3(tc) {
   const gyro = grp(root, 0, dy + 0.42, cz);
   const gt = grp(gyro, 0, 0, 0);
   gt.rotation.z = 0.45;
-  add(gt, geo.torus(0.3, 0.02, 4, 20), m.team, [0, 0, 0], [HALF_PI, 0, 0]);
-  add(gt, geo.torus(0.24, 0.015, 4, 18), m.pearl, [0, 0, 0], [0.3, 0, 0]);
+  add(gt, geo.torus(0.3, 0.02, 4, 14), m.team, [0, 0, 0], [HALF_PI, 0, 0]);
+  add(gt, geo.torus(0.24, 0.015, 4, 12), m.pearl, [0, 0, 0], [0.3, 0, 0]);
   add(gt, mergedBoxes('dgGyroNodes', [[0.06, 0.06, 0.06, 0.3, 0, 0], [0.06, 0.06, 0.06, -0.3, 0, 0]]), m.white);
   spin.push(gyro);
-  const dome = add(root, hemi(20, 6), mat(0xbfe6ff, { transparent: true, opacity: 0.28, depthWrite: false }), [0, dy + 0.02, cz], null, [0.6, 0.66, 0.6]);
+  const dome = add(root, hemi(16, 5), mat(0xbfe6ff, { transparent: true, opacity: 0.28, depthWrite: false }), [0, dy + 0.02, cz], null, [0.6, 0.66, 0.6]);
   dome.castShadow = false;
   add(root, geo.custom('dig:coreDomeRibs', () => {
-    const list = [0, 1, 2].map((k) => new THREE.TorusGeometry(1, 0.02, 3, 10, Math.PI).rotateY((k * Math.PI) / 3).toNonIndexed());
+    const list = [0, 1, 2].map((k) => new THREE.TorusGeometry(1, 0.02, 3, 8, Math.PI).rotateY((k * Math.PI) / 3).toNonIndexed());
     const g = mergeGeometries(list, false);
     for (const q of list) q.dispose();
     return g;
@@ -884,5 +909,29 @@ export function research_3(tc) {
     add(root, geo.cyl(0.08, 0.08, 0.025, 6), m.white, [x, b + 0.9, z]);
   }
   add(root, mergedBoxes('dgLabPaths', [[0.04, 0.008, 0.9, 0, 0, 0.95]]), m.ledS, [0, b, 0]);
+  // --- front court: drone pad with a parked drone (left), holographic team sign with an atom glyph (right)
+  add(root, geo.cyl(0.24, 0.26, 0.03, 12), m.compD, [-0.62, b + 0.015, 1.0]);
+  add(root, geo.ring(0.17, 0.21, 12), m.ledS, [-0.62, b + 0.032, 1.0], [-HALF_PI, 0, 0]);
+  miniDrone(root, -0.62, b + 0.03, 1.0, -0.5, m);
+  const sign = grp(root, 0.6, b, 1.05, -0.25);
+  add(sign, mergedBoxes('dgLabSignPosts', [[0.04, 0.3, 0.04, -0.2, 0.15, 0], [0.04, 0.3, 0.04, 0.2, 0.15, 0]]), m.pearl);
+  const sp = grp(sign, 0, 0.42, 0);
+  sp.rotation.x = -0.5;
+  add(sp, geo.box(0.56, 0.32, 0.04), m.white);
+  add(sp, geo.box(0.5, 0.26, 0.02), mat(tc, { emissive: tc, emissiveIntensity: 0.6 }), [0, 0, 0.022]);
+  add(sp, geo.custom('dig:atomGlyph', () => {
+    const list = [0, 1, 2].map((k) => {
+      const t = new THREE.TorusGeometry(0.1, 0.009, 3, 12).toNonIndexed();
+      t.scale(1, 0.38, 1);
+      t.rotateZ((k * Math.PI) / 3);
+      return t;
+    });
+    const nb = new THREE.BoxGeometry(0.035, 0.035, 0.01).toNonIndexed();
+    nb.rotateZ(Math.PI / 4);
+    list.push(nb);
+    const g = mergeGeometries(list, false);
+    for (const q of list) q.dispose();
+    return g;
+  }), mat(0xf2f8ff, { emissive: 0xdfeeff, emissiveIntensity: 0.6 }), [0, 0, 0.036]);
   return { root, parts: { spin, glow }, height: 3.0, radius: 1.45 };
 }

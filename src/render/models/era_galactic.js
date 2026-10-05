@@ -379,7 +379,7 @@ export function void_trooper(tc) {
   add(b, mergedBoxes('galVtAbs', [[0.18, 0.04, 0.13, 0, 0.06, 0], [0.19, 0.04, 0.14, 0, 0.105, 0]]), m.void);
   // cuirass: narrow waist widening to the chest, team chevron, glowing core
   add(b, CG.frustum(1.45), m.pearl, [0, 0.27, 0], null, [0.25, 0.28, 0.19]);
-  add(b, CG.pennant(), m.team, [0, 0.4, 0.136], [0.15, 0, -HALF_PI], [0.17, 0.24, 0.02]);
+  add(b, CG.pennant(), m.teamGlow, [0, 0.4, 0.136], [0.15, 0, -HALF_PI], [0.17, 0.24, 0.02]);
   add(b, geo.box(0.03, 0.15, 0.024), m.pearl, [0, 0.33, 0.14], [0.15, 0, 0]);
   add(b, mergedBoxes('galVtRibs', [[0.04, 0.02, 0.15, 0.115, 0.2, 0, 0, 0], [0.04, 0.02, 0.15, -0.115, 0.2, 0, 0, 0]]), m.rose);
   glowAdd(glow, b, geo.cyl(0.03, 0.03, 0.02, 6), m.magenta, [0, 0.19, 0.112], [HALF_PI + 0.15, 0, 0]);
@@ -401,8 +401,8 @@ export function void_trooper(tc) {
   // helmet: pearl shell, dark faceplate, glowing visor, team crest and a halo crown fin
   const h = r.head;
   add(h, geo.sphere(0.1, 8, 6), m.pearl, [0, 0.105, -0.01], null, [0.95, 1.04, 1.16]);
-  add(h, geo.box(0.16, 0.072, 0.07), m.glass, [0, 0.1, 0.07]);
-  glowAdd(glow, h, geo.box(0.15, 0.026, 0.02), m.violet, [0, 0.105, 0.106]);
+  add(h, geo.box(0.15, 0.068, 0.07), m.glass, [0, 0.1, 0.066]);
+  glowAdd(glow, h, geo.box(0.135, 0.024, 0.02), m.violet, [0, 0.105, 0.1]);
   add(h, geo.box(0.1, 0.045, 0.05), m.lilac, [0, 0.045, 0.075]);
   add(h, geo.box(0.026, 0.05, 0.2), m.team, [0, 0.2, -0.02], [0.12, 0, 0]);
   const halo = grp(h, 0, 0.2, -0.1);
@@ -473,15 +473,16 @@ export function starfighter(tc) {
     [0.75, -0.06, 0.06, 0.03, 0.05],
   ]), m.gun);
   // canopy + spine
-  add(hull, geo.sphere(0.13, 10, 6), m.glass, [0, 0.15, 0.3], null, [0.95, 0.72, 2.2]);
+  add(hull, geo.sphere(0.13, 10, 6), mat(0x6a4ccc, { emissive: 0x3c1c9a, emissiveIntensity: 0.55 }), [0, 0.15, 0.3], null, [0.95, 0.72, 2.2]);
   add(hull, geo.box(0.03, 0.02, 0.52), m.pearl, [0, 0.245, 0.28], [-0.05, 0, 0]);
+  add(hull, geo.box(0.07, 0.012, 0.14), m.white, [0.05, 0.235, 0.36], [-0.05, 0.2, 0]);
   add(hull, geo.box(0.16, 0.025, 0.5), m.team, [0, 0.18, -0.32], [0.04, 0, 0]);
   add(hull, geo.box(0.04, 0.03, 0.56), m.lilac, [0, 0.195, -0.32], [0.04, 0, 0]);
   // swept wings with team stripes, iridescent tip bands and canted team wingtip fins
   const wing = sym([[0, 0.45], [0.26, 0.25], [0.86, -0.38], [1.0, -0.5], [1.0, -0.68], [0.82, -0.66], [0.5, -0.72], [0.28, -0.9], [0, -0.86]]);
   add(hull, plateXZ('sfWing', [wing], 0.045), m.pearl, [0, -0.03, 0]);
   const stripe = [[0.3, 0.14], [0.84, -0.43], [0.84, -0.53], [0.3, 0.03]];
-  add(hull, plateXZ('sfStripe', [stripe, flipX(stripe)], 0.012), m.team, [0, -0.003, 0]);
+  add(hull, plateXZ('sfStripe', [stripe, flipX(stripe)], 0.012), m.teamGlow, [0, -0.003, 0]);
   const band = [[0.5, -0.32], [0.58, -0.4], [0.58, -0.66], [0.5, -0.69]];
   add(hull, plateXZ('sfBand', [band, flipX(band)], 0.012), m.rose, [0, -0.003, 0]);
   const canard = [[0.06, 0.78], [0.38, 0.5], [0.38, 0.43], [0.06, 0.5]];
@@ -503,15 +504,14 @@ export function starfighter(tc) {
     add(hull, geo.cyl(0.11, 0.13, 0.62, 8), m.gun, [x, 0.0, -0.76], [HALF_PI, 0, 0]);
     add(hull, geo.cyl(0.115, 0.115, 0.05, 8), m.team, [x, 0.0, -0.62], [HALF_PI, 0, 0]);
     add(hull, geo.cyl(0.135, 0.135, 0.06, 8), m.pearl, [x, 0.0, -0.46], [HALF_PI, 0, 0]);
+    add(hull, geo.box(0.035, 0.03, 0.42), m.violet, [x, 0.12, -0.78], [-0.03, 0, 0]);
     add(hull, geo.cyl(0.125, 0.11, 0.06, 8), m.chrome, [x, 0.0, -1.06], [HALF_PI, 0, 0]);
     glowAdd(glow, hull, geo.cyl(0.09, 0.09, 0.04, 8), m.violet, [x, 0.0, -1.085], [HALF_PI, 0, 0]);
     add(hull, geo.cone(0.075, 0.2, 8), m.magenta, [x, 0.0, -1.18], [-HALF_PI, 0, 0]).castShadow = false;
   }
-  // antigrav emitter under the belly + a faint lift beam toward the ground
+  // antigrav emitter under the belly
   add(hull, geo.cyl(0.24, 0.2, 0.05, 12), m.chrome, [0, -0.15, -0.1]);
   glowAdd(glow, hull, geo.cyl(0.18, 0.18, 0.03, 12), m.violet, [0, -0.18, -0.1]);
-  const beamM = mat(C.violet, { emissive: C.violet, emissiveIntensity: 0.7, transparent: true, opacity: 0.16, depthWrite: false });
-  add(hull, geo.cone(0.55, 1.12, 12, ), beamM, [0, -0.75, -0.1]).castShadow = false;
   // twin nose cannons (parts.weapon), slung under the canards
   const weapon = grp(hull, 0, -0.05, 0.4);
   for (const s of [1, -1]) {
@@ -580,6 +580,8 @@ export function titan(tc) {
     add(body, geo.box(0.34, 0.42, 0.05), m.team, [s * 0.36, 0.94, 0.51], [-0.05, s * 0.42, 0]);
     add(body, geo.box(0.06, 0.42, 0.06), m.lilac, [s * 0.18, 0.94, 0.56], [-0.05, s * 0.42, 0]);
   }
+  add(body, CG.pennant(), m.teamGlow, [0, 1.36, 0.5], [-0.42, 0, -HALF_PI], [0.24, 0.62, 0.05]);
+  for (const s of [1, -1]) add(body, geo.box(0.05, 0.5, 0.5), s > 0 ? m.frost : m.rose, [s * 0.6, 0.95, -0.02]);
   // reactor core: pearl ring, magenta inner ring, white-violet core (glow)
   add(body, geo.torus(0.2, 0.06, 4, 10), m.pearl, [0, 0.9, 0.56], [-0.05, 0, 0]);
   add(body, geo.torus(0.15, 0.025, 3, 10), m.magenta, [0, 0.9, 0.58], [-0.05, 0, 0]);
@@ -587,7 +589,8 @@ export function titan(tc) {
   add(body, geo.cyl(0.16, 0.16, 0.06, 8), m.void, [0, 0.9, 0.5], [HALF_PI, 0, 0]);
   // collar + sunken head with a glowing visor and a halo crown
   add(body, geo.box(0.6, 0.1, 0.5), m.gun, [0, 1.46, 0.08]);
-  const head = grp(body, 0, 1.5, 0.22);
+  const head = grp(body, 0, 1.48, 0.2);
+  head.scale.setScalar(1.25);
   add(head, profileX('titanHead', [[-0.2, 0], [0.16, 0], [0.26, 0.1], [0.18, 0.24], [-0.18, 0.26]], 0.34, 0.03), m.pearl);
   add(head, geo.box(0.3, 0.07, 0.04), m.glass, [0, 0.13, 0.215], [0, 0, 0]);
   glowAdd(glow, head, geo.box(0.26, 0.035, 0.02), m.violet, [0, 0.135, 0.235]);
@@ -611,8 +614,10 @@ export function titan(tc) {
   }
   // back: reactor spine with vents, halo ring
   add(body, geo.box(0.56, 0.6, 0.2), m.gun, [0, 0.98, -0.52]);
+  add(body, geo.box(0.6, 0.06, 0.24), m.team, [0, 1.3, -0.52]);
   add(body, mergedBoxes('titanVents', [-0.16, 0, 0.16].map((x) => [0.08, 0.36, 0.02, x, 0, 0])), m.violet, [0, 0.98, -0.625]);
   add(body, geo.torus(0.5, 0.04, 3, 16), m.lilac, [0, 1.2, -0.66], [0.2, 0, 0]);
+  add(body, geo.torus(0.5, 0.018, 3, 16), m.violet, [0, 1.2, -0.62], [0.2, 0, 0]);
   add(body, mergedBoxes('titanHaloStruts', [[0.06, 0.06, 0.2, 0.5, 0, 0.06], [0.06, 0.06, 0.2, -0.5, 0, 0.06]]), m.gun, [0, 1.2, -0.66]);
   // twin arm cannons (one group = parts.weapon), pivoted on the shoulder line
   const weapon = grp(body, 0, 1.18, 0);
@@ -652,8 +657,11 @@ export function graviton(tc) {
   add(base, geo.cyl(0.78, 0.6, 0.2, 6), m.gun, [0, 0.1, 0], null, hs);
   add(base, geo.cyl(0.86, 0.8, 0.14, 6), m.pearl, [0, 0.27, 0], null, hs);
   add(base, geo.cyl(0.875, 0.875, 0.05, 6), m.team, [0, 0.365, 0], null, hs);
-  add(base, geo.cyl(0.76, 0.84, 0.07, 6), m.lilac, [0, 0.425, 0], null, hs);
-  add(base, mergedBoxes('gvDeckLines', [[0.04, 0.012, 0.9, 0.3, 0, -0.05], [0.04, 0.012, 0.9, -0.3, 0, -0.05]]), m.violet, [0, 0.462, 0]);
+  add(base, geo.cyl(0.76, 0.84, 0.07, 6), m.pearl, [0, 0.425, 0], null, hs);
+  add(base, geo.cyl(0.6, 0.6, 0.02, 6), m.lilac, [0, 0.465, 0], null, hs);
+  add(base, mergedBoxes('gvDeckLines', [[0.035, 0.012, 0.5, 0.11, 0, -0.16], [0.035, 0.012, 0.5, -0.11, 0, -0.16]]), m.violet, [0, 0.48, 0]);
+  add(base, plateXZ('gvChevron', [[[0, 0.84], [0.42, 0.6], [0.42, 0.48], [0, 0.72]], [[0, 0.84], [0, 0.72], [-0.42, 0.48], [-0.42, 0.6]]], 0.03), m.teamGlow, [0, 0.47, 0]);
+  add(base, plateXZ('gvRearPlates', [[[0.36, -0.5], [0.62, -0.36], [0.62, -0.22], [0.36, -0.36]], [[-0.36, -0.36], [-0.62, -0.22], [-0.62, -0.36], [-0.36, -0.5]]], 0.03), m.frost, [0, 0.47, 0]);
   // antigrav pads
   for (const [x, z] of [[0, 0.5], [0.42, -0.3], [-0.42, -0.3]]) {
     add(base, geo.cyl(0.21, 0.21, 0.04, 10), m.chrome, [x, 0.0, z]);
@@ -671,12 +679,12 @@ export function graviton(tc) {
   }
   // front team armour plate with a glowing chevron
   add(base, geo.box(0.5, 0.12, 0.04), m.team, [0, 0.3, 0.86], [-0.3, 0, 0]);
-  // gravity core + containment rings (spin)
-  const cz = -0.42, cy = 0.82;
+  // gravity core: a void singularity in a glowing accretion disk, held by containment rings (spin)
+  const cz = -0.42, cy = 0.84;
   add(base, geo.cyl(0.26, 0.32, 0.1, 6), m.gun, [0, 0.5, cz]);
-  add(base, geo.cyl(0.1, 0.18, 0.14, 6), m.chrome, [0, 0.6, cz]);
-  glowAdd(glow, base, geo.sphere(0.17, 10, 8), m.magenta, [0, cy, cz]);
-  add(base, geo.sphere(0.115, 8, 6), m.white, [0, cy, cz + 0.09]);
+  add(base, geo.cyl(0.08, 0.18, 0.16, 6), m.chrome, [0, 0.6, cz]);
+  add(base, geo.sphere(0.13, 10, 8), mat(0x241040, { emissive: 0x4a12a0, emissiveIntensity: 0.6 }), [0, cy, cz]);
+  glowAdd(glow, base, lathe('gvDisk', [[0.15, -0.012], [0.25, -0.004], [0.25, 0.004], [0.15, 0.012]], 16), m.magenta, [0, cy, cz], [0.25, 0, 0]);
   const spin = grp(base, 0, cy, cz);
   const ringA = grp(spin, 0, 0, 0);
   ringA.rotation.set(HALF_PI + 0.55, 0, 0.25);
@@ -689,7 +697,7 @@ export function graviton(tc) {
   // lance mount: hex turret with trunnion cheeks
   add(base, geo.cyl(0.3, 0.36, 0.12, 6), m.pearl, [0, 0.52, 0.14]);
   add(base, geo.cyl(0.31, 0.31, 0.04, 6), m.team, [0, 0.6, 0.14]);
-  for (const s of [1, -1]) add(base, geo.box(0.07, 0.26, 0.3), m.gun, [s * 0.19, 0.74, 0.12]);
+  for (const s of [1, -1]) add(base, profileX('gvCheek', [[-0.14, 0], [0.16, 0], [0.08, 0.24], [-0.1, 0.24]], 0.06), m.lilac, [s * 0.2, 0.6, 0.12]);
   // gravity lance (parts.weapon): pivot on the trunnions, elevated in an inner group
   const weapon = grp(base, 0, 0.8, 0.12);
   const lance = grp(weapon, 0, 0, 0);
@@ -814,11 +822,11 @@ export function galactic_citadel(tc) {
   // floating crystal spire with satellite shards (bob)
   const fl = grp(root, 0, cy + 0.98, 0);
   bob.push(fl);
-  glowAdd(glow, fl, crystalGeo('citSpire', 0.4, 1.95, 0.5, 0.74, 6), mat(0xe4c8ff, { emissive: 0x9c4dff, emissiveIntensity: 0.65 }));
+  glowAdd(glow, fl, crystalGeo('citSpire', 0.4, 1.95, 0.5, 0.74, 6), mat(0xf0e0ff, { emissive: 0xa860ff, emissiveIntensity: 0.8 }));
   add(fl, mergedBoxes('citSpireBands', [[0.06, 0.5, 0.02, 0, 0.25, 0.41]]), m.white);
   for (let k = 0; k < 3; k++) {
     const a = (k * TAU) / 3 + 0.4;
-    add(fl, crystalGeo('citShard', 0.1, 0.3, 0.1, 0.2, 5), m.violet, [Math.sin(a) * 0.82, 0.3 + k * 0.32, Math.cos(a) * 0.82]);
+    add(fl, crystalGeo('citShard', 0.1, 0.3, 0.1, 0.2, 5), m.violet, [Math.sin(a) * 0.64, 0.3 + k * 0.32, Math.cos(a) * 0.64]);
   }
   // orbiting rings (spin): two tilted rings with nodes
   const orbit = grp(root, 0, cy + 1.5, 0);
@@ -876,32 +884,38 @@ export function house_galactic(tc) {
   add(root, geo.cyl(0.19, 0.2, 0.05, 6), m.team, [0, b + 0.26, 0]);
   add(root, geo.cyl(0.2, 0.1, 0.1, 8), m.chrome, [0, b + 0.73, 0]);
   glowAdd(glow, root, geo.sphere(0.085, 8, 6), m.violet, [0, b + 0.84, 0]);
-  // pod (bob)
+  // pod (bob): saucer hull with a flared team rim, glowing window band, iridescent dome bands
   const pod = grp(root, 0, 1.2, 0);
-  const R = 0.74;
-  add(pod, hemi(20, 4), m.pearl, [0, 0.2, 0], [Math.PI, 0, 0], [R, 0.2, R]);
-  add(pod, geo.torus(0.3, 0.03, 4, 16), m.violet, [0, 0.05, 0], [HALF_PI, 0, 0]);
-  add(pod, geo.cyl(R + 0.05, R + 0.05, 0.06, 24), m.team, [0, 0.23, 0]);
-  add(pod, geo.cyl(R - 0.02, R + 0.01, 0.24, 24), m.pearl, [0, 0.38, 0]);
+  const R = 0.64;
+  add(pod, hemi(18, 4), m.pearl, [0, 0.18, 0], [Math.PI, 0, 0], [R - 0.04, 0.18, R - 0.04]);
+  add(pod, geo.torus(0.26, 0.028, 3, 14), m.violet, [0, 0.04, 0], [HALF_PI, 0, 0]);
+  add(pod, lathe('habGalRim', [[R - 0.06, 0.15], [R + 0.08, 0.2], [R + 0.08, 0.25], [R - 0.06, 0.27]], 20), m.team);
+  add(pod, geo.cyl(R - 0.04, R - 0.02, 0.22, 20), m.pearl, [0, 0.37, 0]);
   const winArcs = [];
-  for (let k = 0; k < 7; k++) winArcs.push([k * (TAU / 7) + 0.6, TAU / 7 - 0.3]);
-  add(pod, latheArcs('habGalWin', [[R + 0.005, 0.31], [R + 0.025, 0.31], [R + 0.02, 0.44], [R + 0.0, 0.44]], winArcs, 3), m.white);
-  add(pod, geo.cyl(R + 0.01, R + 0.01, 0.04, 24), m.lilac, [0, 0.5, 0]);
-  add(pod, hemi(20, 6), m.pearl, [0, 0.5, 0], null, [R - 0.02, 0.52, R - 0.02]);
-  // iridescent dome bands (frost / rose arcs) and a team crown ring
-  add(pod, latheArcs('habGalBandA', [[0.6, 0.78], [0.64, 0.74], [0.54, 0.86], [0.5, 0.88]], [[0.2, 2.6], [3.4, 2.6]], 6), m.frost);
-  add(pod, annulus(0.2, 0.32, 0.04, 16), m.team, [0, 0.98, 0]);
-  add(pod, hemi(10, 3), m.glass, [0, 1.0, 0], null, [0.2, 0.09, 0.2]);
+  for (let k = 0; k < 6; k++) winArcs.push([k * (TAU / 6) + 0.75, TAU / 6 - 0.32]);
+  add(pod, latheArcs('habGalWin', [[R - 0.035, 0.3], [R - 0.012, 0.3], [R - 0.016, 0.43], [R - 0.039, 0.43]], winArcs, 3), m.white);
+  add(pod, geo.cyl(R - 0.03, R - 0.03, 0.03, 20), m.lilac, [0, 0.495, 0]);
+  // dome in iridescent bands (pearl, rose, lilac, frost), a team crown and a glowing skylight
+  const DR = R - 0.05, DH = 0.46, el = (t) => [DR * Math.cos(t), 0.51 + DH * Math.sin(t)];
+  const band = (t0, t1) => {
+    const [r0, y0] = el(t0), [r1, y1] = el((t0 + t1) / 2), [r2, y2] = el(t1);
+    return [[0, y0], [r0, y0], [r1 + 0.012, y1], [r2, y2], [0, y2]];
+  };
+  const bands = [[0, 0.42, m.pearl], [0.42, 0.78, m.rose], [0.78, 1.08, m.lilac], [1.08, 1.32, m.frost]];
+  bands.forEach(([t0, t1, mm], i) => add(pod, lathe(`habGalDome${i}`, band(t0, t1), 18), mm));
+  const [rc, yc] = el(1.32);
+  add(pod, annulus(rc - 0.04, rc + 0.03, 0.05, 16), m.team, [0, yc - 0.01, 0]);
+  add(pod, hemi(10, 3), m.white, [0, yc + 0.02, 0], null, [rc - 0.03, 0.07, rc - 0.03]);
   // halo above the dome
-  const halo = grp(pod, 0, 1.17, 0);
-  add(halo, geo.torus(0.22, 0.022, 4, 16), m.pearl, [0, 0, 0], [HALF_PI, 0, 0]);
-  add(halo, geo.torus(0.22, 0.012, 4, 16), m.violet, [0, -0.02, 0], [HALF_PI, 0, 0]);
-  add(halo, mergedBoxes('habGalHaloStruts', [[0.025, 0.12, 0.025, 0.2, -0.08, 0], [0.025, 0.12, 0.025, -0.2, -0.08, 0]]), m.pearl);
+  const halo = grp(pod, 0, yc + 0.2, 0);
+  add(halo, geo.torus(0.24, 0.022, 3, 16), m.pearl, [0, 0, 0], [HALF_PI, 0, 0]);
+  add(halo, geo.torus(0.24, 0.012, 3, 16), m.violet, [0, -0.02, 0], [HALF_PI, 0, 0]);
+  add(halo, mergedBoxes('habGalHaloStruts', [[0.025, 0.14, 0.025, 0.22, -0.09, 0], [0.025, 0.14, 0.025, -0.22, -0.09, 0]]), m.pearl);
   // door on the pod front
-  const dg = grp(pod, 0, 0.27, R - 0.03);
-  add(dg, geo.box(0.3, 0.26, 0.08), m.team, [0, 0.13, 0.02]);
-  add(dg, geo.box(0.22, 0.2, 0.06), m.gun, [0, 0.11, 0.05]);
-  add(dg, geo.box(0.24, 0.025, 0.03), m.violet, [0, 0.235, 0.065]);
+  const dg = grp(pod, 0, 0.27, R - 0.05);
+  add(dg, geo.box(0.3, 0.24, 0.08), m.team, [0, 0.12, 0.02]);
+  add(dg, geo.box(0.22, 0.19, 0.06), m.gun, [0, 0.105, 0.05]);
+  add(dg, geo.box(0.24, 0.025, 0.03), m.violet, [0, 0.22, 0.065]);
   // crystal planters + light posts on the pad
   for (const [x, z] of [[0.62, 0.62], [-0.62, -0.62]]) {
     add(root, geo.cyl(0.16, 0.13, 0.12, 6), m.lilac, [x, b + 0.06, z]);
@@ -921,24 +935,24 @@ export function house_galactic(tc) {
 // ===========================================================================
 // Fortifications
 // The force wall fills its whole 1x1 cell: a hex-paneled emitter plinth, then a full-cell energy block
-// whose four sides and top carry a honeycomb pattern with period 1/2 along X/Z (1/3 across the top), so
-// neighbours in any of the 8 directions join into one seamless hex shield. The bright lattice block is
-// static; the hex cells over it pulse (parts.glow). A hexagonal emitter pylon crowned with a floating
-// crystal rises through the middle of every cell.
+// whose four sides carry a honeycomb pattern with period 1/2 along the wall, so neighbours in any of the 8
+// directions join into one continuous hex shield. The bright lattice block and the side cells are static;
+// the hex cells on the top pulse in-plane (parts.glow, origin on the top plane). A hexagonal emitter
+// pylon crowned with a floating crystal rises through the middle of every cell.
 // Gate: 2x2, wall line along X, passage along Z; pylon towers flush at x = +-1. parts.doors = [{ obj, side }]
 // with obj a Group on the hinge; the game sets obj.rotation.y = side * open * 1.4 (both swing to -Z).
 // ===========================================================================
 
 const WALL_TOP = 0.46; // plinth top = field base
 const FIELD_H = 1.04; // energy field height
-const LATTICE = () => mat(0xead6ff, { emissive: 0xb36bff, emissiveIntensity: 0.7 });
-const CELLS = () => mat(0x8c45ff, { emissive: 0x6a22e8, emissiveIntensity: 0.85 });
+const LATTICE = () => mat(0xf7efff, { emissive: 0xd2a6ff, emissiveIntensity: 0.8 });
+const CELLS = () => mat(0xa47cff, { emissive: 0x7444ee, emissiveIntensity: 0.7 });
 
 /** Wall plinth (fills [-w/2, w/2] x [-d/2, d/2]) with team band and pearl cap course. */
 function forcePlinth(parent, m, w = 1, d = 1, x = 0, z = 0) {
   add(parent, geo.box(w, 0.1, d), m.void, [x, 0.05, z]);
   add(parent, geo.box(w - 0.01, 0.25, d - 0.01), m.gun, [x, 0.225, z]);
-  add(parent, geo.box(w, 0.05, d), m.team, [x, 0.375, z]);
+  add(parent, geo.box(w, 0.05, d), m.teamGlow, [x, 0.375, z]);
   add(parent, geo.box(w, 0.06, d), m.pearl, [x, 0.43, z]);
 }
 
@@ -948,19 +962,26 @@ const plinthHexes = () => mergedCyls('forceHexes', [
   [0.12, 0.12, 0.03, 0.488, 0.22, 0, 0, HALF_PI, 6], [0.12, 0.12, 0.03, -0.488, 0.22, 0, 0, HALF_PI, 6],
 ]);
 
-/** Honeycomb cells on the four sides + top of the 1 x FIELD_H x 1 field block, origin at its center. */
-const fieldCells = () => honeyGeo(`forceField${FIELD_H}`, () => {
+/** Honeycomb cells on the four sides of the 1 x FIELD_H x 1 field block (origin at its center); period 1/2 along the wall. */
+const fieldSideCells = () => honeyGeo(`forceSides${FIELD_H}`, () => {
   const hh = FIELD_H / 2, e = 0.5 + 0.004;
-  const side = honeyTris(-0.5, 0.5, -hh, hh, 0.25, 1 / 3, 0.8, 0, -hh + 1 / 6);
-  const top = honeyTris(-0.5, 0.5, -0.5, 0.5, 0.25, 1 / 3, 0.8, 0, 1 / 6);
+  const tris = honeyTris(-0.5, 0.5, -hh, hh, 0.25, 1 / 3, 0.8, 0, -hh + 1 / 6);
   const faces = [];
   for (let k = 0; k < 4; k++) {
     const a = (k * Math.PI) / 2, c = Math.cos(a), s = Math.sin(a);
-    faces.push({ tris: side, map: (x, y) => [x * c + e * s, y, -x * s + e * c] });
+    faces.push({ tris, map: (x, y) => [x * c + e * s, y, -x * s + e * c] });
   }
-  faces.push({ tris: top, map: (x, y) => [x, hh + 0.004, -y] });
   return faces;
 });
+
+/**
+ * Honeycomb cells on the field top, origin on the top plane, so the glow pulse only breathes them
+ * in-plane (they can never sink into the block); kept 0.04 inside the cell edges so the +8% pulse
+ * stays inside the cell (no overlap with a neighbour's top).
+ */
+const fieldTopCells = () => honeyGeo('forceTop', () => [
+  { tris: honeyTris(-0.46, 0.46, -0.46, 0.46, 0.25, 1 / 3, 0.8, 0, 1 / 6), map: (x, y) => [x, 0, -y] },
+]);
 
 export function wall_force(tc) {
   const root = new THREE.Group();
@@ -971,13 +992,13 @@ export function wall_force(tc) {
   // energy field: static bright lattice block + pulsing hex cells
   const fy = WALL_TOP + FIELD_H / 2;
   add(root, geo.box(1, FIELD_H, 1), LATTICE(), [0, fy, 0]).castShadow = false;
-  const cells = glowAdd(glow, root, fieldCells(), CELLS(), [0, fy, 0]);
-  cells.castShadow = false;
+  add(root, fieldSideCells(), CELLS(), [0, fy, 0]).castShadow = false;
+  glowAdd(glow, root, fieldTopCells(), CELLS(), [0, WALL_TOP + FIELD_H + 0.004, 0]).castShadow = false;
   // hexagonal emitter pylon through the middle, crowned with a floating crystal
   const top = WALL_TOP + FIELD_H;
   add(root, geo.cyl(0.2, 0.22, 0.06, 6), m.lilac, [0, top + 0.03, 0]);
   add(root, geo.cyl(0.11, 0.14, 0.24, 6), m.pearl, [0, top + 0.16, 0]);
-  add(root, geo.cyl(0.125, 0.13, 0.05, 6), m.team, [0, top + 0.13, 0]);
+  add(root, geo.cyl(0.14, 0.145, 0.06, 6), m.team, [0, top + 0.14, 0]);
   add(root, geo.cyl(0.13, 0.1, 0.04, 6), m.chrome, [0, top + 0.3, 0]);
   glowAdd(glow, root, crystalGeo('forceTip', 0.06, 0.1, 0.04, 0.06, 6), m.violet, [0, top + 0.42, 0]);
   return { root, parts: { glow }, height: 2.0, radius: 0.5 };
@@ -1033,7 +1054,7 @@ export function gate_force(tc) {
     for (const sz of [1, -1]) {
       add(root, geo.box(tw - 0.1, 1.0, 0.02), m.team, [tx, WALL_TOP + 0.7, sz * 0.505]);
       add(root, geo.cyl(0.11, 0.11, 0.03, 6), m.lilac, [tx, WALL_TOP + 0.9, sz * 0.515], [HALF_PI, 0, 0]);
-      add(root, geo.cyl(0.06, 0.06, 0.035, 6), m.white, [tx, WALL_TOP + 0.9, sz * 0.52], [HALF_PI, 0, 0]);
+      add(root, geo.cyl(0.06, 0.06, 0.035, 6), m.teamGlow, [tx, WALL_TOP + 0.9, sz * 0.52], [HALF_PI, 0, 0]);
     }
     for (const sz of [1, -1]) add(root, geo.box(0.05, TH, 0.05), m.lilac, [s * (PW + 0.04), WALL_TOP + TH / 2, sz * 0.49]);
     add(root, geo.box(0.02, 1.36, 0.14), m.void, [s * (PW + 0.025), WALL_TOP + 0.76, 0]);
