@@ -190,8 +190,13 @@ export class ModelLibrary {
     return m;
   }
 
+  /** A copy of a model drawn entirely in one material (placement previews). */
+  instantiateFlat(id: string, material: StandardMaterial, name = id): ModelInstance {
+    return this.instantiate(id, 0, name, null, material);
+  }
+
   /** A new copy of a model for one unit, with the given team colour (hex). */
-  instantiate(id: string, team: number, name = id, ghost: GhostMode | null = null): ModelInstance {
+  instantiate(id: string, team: number, name = id, ghost: GhostMode | null = null, flat: StandardMaterial | null = null): ModelInstance {
     const t = this.templates.get(id) ?? this.templates.get('construction')!;
     const color = teamColor4(team);
     const byName = new Map<string, TransformNode>();
@@ -200,10 +205,11 @@ export class ModelLibrary {
       let node: TransformNode;
       // The glTF loader turns a mesh shared by several nodes into instances of its first node.
       const mesh = src instanceof InstancedMesh ? src.sourceMesh : src instanceof Mesh && src.getTotalVertices() > 0 ? src : null;
-      if (mesh && ghost) {
-        // Ghosts are rare (illusions, wind walk): plain copies with their own materials.
+      if (mesh && (ghost || flat)) {
+        // Ghosts are rare (illusions, wind walk) and previews single: plain copies with their own
+        // materials.
         const clone = mesh.clone(src.name, null, true);
-        clone.material = this.ghostMaterial(mesh.material as StandardMaterial, ghost, team);
+        clone.material = flat ?? this.ghostMaterial(mesh.material as StandardMaterial, ghost!, team);
         clone.isVisible = true;
         clone.isPickable = false;
         clone.doNotSyncBoundingInfo = false;

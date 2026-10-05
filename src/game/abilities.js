@@ -109,12 +109,15 @@ export const ABILITIES = {
           const r = Math.sqrt(Math.random()) * 3;
           const x = point.x + Math.cos(a) * r;
           const z = point.z + Math.sin(a) * r;
-          game.fx.meteor(x, z, () => {
+          // The meteor falls for 0.7 s (drawn by the renderer); the impact is game time.
+          game.fx.meteor(x, z);
+          game.later(0.7, () => {
             for (const u of game.enemiesInRadius(c.owner, x, z, 2.2)) {
               game.dealDamage(c, u, 140, 'spell', { spell: true });
               game.stun(u, 1);
             }
             game.sound('explosion', x, z);
+            game.shake(0.2);
           });
         });
       }

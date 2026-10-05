@@ -2,10 +2,9 @@
 // `View` (src/render/view.js), so main.js, the input code, the HUD, the minimap and the overlay
 // work with either renderer.
 //
-// Migration strategy: the parts not ported yet keep running on a hidden three.js view (`legacy`),
-// which is updated every frame but never drawn. It still supplies what the game and HUD expect
-// from it today (effect and projectile timers, command-card icons). Each milestone moves another
-// part onto Babylon; MIGRATION.md tracks what is left, and M12 removes `legacy`.
+// Migration strategy: the parts not ported yet stay on a hidden three.js view (`legacy`) that is
+// never drawn: today only the command-card icon renderer (M6). Each milestone moves another part
+// onto Babylon; MIGRATION.md tracks what is left, and M12 removes `legacy`.
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
@@ -21,6 +20,9 @@ import { registerLinearLighting } from './Lighting';
 import { ModelLibrary, type ModelInstance } from './ModelLibrary';
 import { UnitAssets, UnitView, ItemView, quatFromEulerXYZ } from './UnitView';
 import { ITEMS } from '../data/items.js';
+import { Effects } from './Effects';
+import { ProjectileView } from './Projectiles';
+import { Previews } from './Previews';
 import type { GameLike, ItemLike, UnitLike } from './types';
 
 export interface ScreenPoint {
@@ -50,6 +52,11 @@ export class BabylonView {
   private models: ModelLibrary | null = null;
   private unitAssets: UnitAssets | null = null;
   readonly unitViews = new Map<number, UnitView>();
+  /** Visual effects (the game's `hooks.fx`). */
+  fx: Effects | null = null;
+  private projectileView: ProjectileView | null = null;
+  /** Placement ghost and line preview (used by src/input.js); set once the models are loaded. */
+  previews!: Previews;
   readonly itemViews = new Map<ItemLike, ItemView>();
   /** Resolves when the baked models are loaded; main.js waits for it before starting a game. */
   readonly ready: Promise<void>;
@@ -71,6 +78,7 @@ export class BabylonView {
     this.ready = ModelLibrary.load(scene).then((lib) => {
       this.models = lib;
       this.unitAssets = new UnitAssets(scene, lib);
+      this.previews = new Previews(scene, lib);
     });
 
     // The hidden three.js view: an offscreen canvas that is never shown or drawn to.
@@ -91,23 +99,14 @@ export class BabylonView {
     return this.legacy.renderer;
   }
 
-  /** three.js scene the simulation still adds meshes to until M5 (never drawn). */
-  get scene() {
-    return this.legacy.scene;
-  }
-
-  get fx() {
-    return this.legacy.fx;
-  }
-
-  get projectiles() {
-    return this.legacy.projectiles;
-  }
-
   // ---- Game hooks --------------------------------------------------------------------------------
   attachGame(game: GameLike): void {
     this.game = game;
     this.legacy.attachGame(game);
+    this.fx?.clear();
+    this.projectileView?.clear();
+    this.fx = new Effects(game, this.bscene);
+    this.projectileView = new ProjectileView(game as never, this.fx);
   }
 
   addUnit(u: UnitLike): void {
@@ -139,6 +138,8 @@ export class BabylonView {
 
   clearWorld(): void {
     this.legacy.clearWorld();
+    this.fx?.clear();
+    this.projectileView?.clear();
     for (const v of this.unitViews.values()) v.dispose();
     this.unitViews.clear();
     for (const v of this.itemViews.values()) v.dispose();
@@ -164,14 +165,12 @@ export class BabylonView {
   render(dt: number): void {
     const g = this.game;
     if (!g) return;
-    // Legacy pass: animation state, visibility, effect and projectile timers (not drawn).
-    this.legacy.cam.target.set(this.cam.target.x, this.cam.target.y, this.cam.target.z);
-    this.legacy.update(dt);
-
     this.updateWorld(g);
     this.updateLighting(g.timeOfDay);
     for (const v of this.unitViews.values()) v.sync(dt, g.time);
     for (const v of this.itemViews.values()) v.sync(dt, g.time);
+    this.fx?.update(dt);
+    this.projectileView?.update(dt);
     this.cam.update(g.terrain, g.shakeAmount);
     this.engine.beginFrame();
     this.bscene.render();

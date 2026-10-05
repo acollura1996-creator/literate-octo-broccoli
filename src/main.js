@@ -297,6 +297,7 @@ function teardown() {
   running = false;
   input.enabled = false;
   input.cancelPlacement();
+  input.cancelLine();
   view.clearWorld();
   game = null;
 }
@@ -329,6 +330,7 @@ function soundHook(name, vol = 1, x, z) {
 }
 
 function createGame() {
+  /** @type {import('./game/hooks').SimHooks} */
   const hooks = {
     onUnitAdded: (u) => view.addUnit(u),
     onUnitRemoved: (u) => view.removeUnit(u),
@@ -345,9 +347,7 @@ function createGame() {
   game = new Game({ ...settings }, hooks);
   view.attachGame(game);
   hooks.fx = view.fx;
-  hooks.projectiles = view.projectiles;
   game.fx = view.fx;
-  game.projectiles = view.projectiles;
   game.setup();
   if (params.get('reveal') === '1') game.fog.reveal();
   // Test helper: let the computer play for the human too.

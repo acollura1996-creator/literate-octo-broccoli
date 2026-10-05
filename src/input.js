@@ -1,19 +1,13 @@
 // Mouse & keyboard: selection, smart right-click orders, targeting modes,
 // building placement, control groups and camera controls.
-import * as THREE from 'three';
 import { UNITS, ROAD } from './data/units.js';
 import { Roads } from './game/roads.js';
 import { ABILITIES } from './game/abilities.js';
 import { canCast } from './game/behavior.js';
-import { createModel } from './render/models.js';
 
 const MAX_SELECTION = 24;
 
-const linePreviewMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false });
 const MAX_LINE = 160;
-
-const ghostOk = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.45, depthWrite: false });
-const ghostBad = new THREE.MeshBasicMaterial({ color: 0xff3030, transparent: true, opacity: 0.45, depthWrite: false });
 
 export class Input {
   constructor(game, view, canvas) {
@@ -420,27 +414,14 @@ export class Input {
     }
     this.cancelPlacement();
     this.cancelLine();
-    const m = createModel(def.ageModels?.[Math.max(1, g.human.tier) - 1] ?? def.model, g.human.color);
-    const ghost = new THREE.Group();
-    ghost.add(m.root);
-    const fp = def.footprint;
-    const tiles = new THREE.Mesh(new THREE.PlaneGeometry(fp, fp, fp, fp), ghostOk);
-    tiles.rotation.x = -Math.PI / 2;
-    tiles.position.y = 0.12;
-    ghost.add(tiles);
-    const meshes = [];
-    m.root.traverse((o) => {
-      if (o.isMesh) meshes.push(o);
-    });
-    this.view.scene.add(ghost);
-    this.placement = { type, ghost, tiles, meshes, ok: false, x: 0, z: 0 };
+    this.view.previews.beginPlacement(def.ageModels?.[Math.max(1, g.human.tier) - 1] ?? def.model, g.human.color, def.footprint);
+    this.placement = { type, ok: false, x: 0, z: 0 };
     this.cardMenu = null;
   }
 
   cancelPlacement() {
     if (!this.placement) return;
-    this.placement.ghost.removeFromParent();
-    this.placement.tiles.geometry.dispose();
+    this.view.previews.endPlacement();
     this.placement = null;
   }
 
@@ -456,10 +437,7 @@ export class Input {
     pl.x = x;
     pl.z = z;
     pl.ok = g.canPlace(pl.type, x, z, g.human);
-    pl.ghost.position.set(x, g.terrain.heightAt(x, z), z);
-    const m = pl.ok ? ghostOk : ghostBad;
-    pl.tiles.material = m;
-    for (const mesh of pl.meshes) mesh.material = m;
+    this.view.previews.updatePlacement(x, g.terrain.heightAt(x, z), z, pl.ok);
   }
 
   confirmPlacement(shift) {
@@ -486,22 +464,14 @@ export class Input {
     this.cancelPlacement();
     this.cancelLine();
     this.cancelTarget();
-    const geo = new THREE.BoxGeometry(0.96, 1, 0.96);
-    geo.translate(0, 0.5, 0);
-    const mesh = new THREE.InstancedMesh(geo, linePreviewMat, MAX_LINE);
-    mesh.count = 0;
-    mesh.frustumCulled = false;
-    mesh.renderOrder = 4;
-    this.view.scene.add(mesh);
-    this.linePlan = { kind, start: null, cells: [], ok: [], mesh };
+    this.view.previews.beginLine(MAX_LINE);
+    this.linePlan = { kind, start: null, cells: [], ok: [] };
     this.cardMenu = null;
   }
 
   cancelLine() {
     if (!this.linePlan) return;
-    this.linePlan.mesh.removeFromParent();
-    this.linePlan.mesh.geometry.dispose();
-    this.linePlan.mesh.dispose();
+    this.view.previews.endLine();
     this.linePlan = null;
   }
 
@@ -521,19 +491,8 @@ export class Input {
     if (cells.length > MAX_LINE) cells = cells.slice(0, MAX_LINE);
     lp.cells = cells;
     lp.ok = cells.map(([cx, cz]) => this.lineCellOk(lp.kind, cx, cz));
-    const m = new THREE.Matrix4();
-    const col = new THREE.Color();
-    const tall = lp.kind === 'wall' ? 1.4 : 0.08;
-    cells.forEach(([cx, cz], i) => {
-      const x = cx + 0.5;
-      const z = cz + 0.5;
-      m.makeScale(1, tall, 1).setPosition(x, this.game.terrain.heightAt(x, z) + 0.02, z);
-      lp.mesh.setMatrixAt(i, m);
-      lp.mesh.setColorAt(i, col.set(lp.ok[i] ? 0x40ff60 : 0xff3030));
-    });
-    lp.mesh.count = cells.length;
-    lp.mesh.instanceMatrix.needsUpdate = true;
-    if (lp.mesh.instanceColor) lp.mesh.instanceColor.needsUpdate = true;
+    const centres = cells.map(([cx, cz]) => [cx + 0.5, this.game.terrain.heightAt(cx + 0.5, cz + 0.5) + 0.02, cz + 0.5]);
+    this.view.previews.updateLine(centres, lp.ok, lp.kind === 'wall' ? 1.4 : 0.08);
   }
 
   lineSummary() {

@@ -2,8 +2,9 @@
 import * as THREE from 'three';
 import { UnitView, ItemView } from './unitview.js';
 import { Effects } from './effects.js';
-import { Projectiles } from './projectiles.js';
+import { ProjectileView } from './projectiles.js';
 import { TerrainView, RoadMesh, FogTexture, buildCitadel } from './terrainView.js';
+import { Previews } from './previews.js';
 import { MAP_SIZE } from '../world/layout.js';
 import { ITEMS } from '../data/items.js';
 
@@ -118,13 +119,14 @@ export class View {
     this.terrainView = null;
     this.roadMesh = null;
     this.fogTexture = null;
+    this.previews = new Previews(this.scene);
     this.resize();
   }
 
   attachGame(game) {
     this.game = game;
     this.fx = new Effects(game, this.scene);
-    this.projectiles = new Projectiles(game, this.scene);
+    this.projectiles = new ProjectileView(game, this.scene);
   }
 
   addUnit(u) {
@@ -199,6 +201,7 @@ export class View {
     for (const v of this.unitViews.values()) v.sync(dt, time);
     for (const v of this.itemViews.values()) v.sync(dt, time);
     this.fx.update(dt);
+    this.projectiles.update(dt);
     this.cam.update(g.terrain, g.shakeAmount);
   }
 

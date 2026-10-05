@@ -49,6 +49,7 @@ export interface FogGridLike {
   size: number;
   texData: Uint8Array;
   version: number;
+  isVisible(x: number, z: number): boolean;
 }
 
 export interface PlayerLike {

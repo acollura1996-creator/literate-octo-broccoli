@@ -12,6 +12,7 @@ import { GameEvents } from './events.js';
 import { Terrain } from '../world/terrain.js';
 import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, CITY_RADIUS } from '../world/layout.js';
 import { Fog } from './fog.js';
+import { Projectiles } from './projectiles.js';
 import { TEAM_COLORS, lightenHex } from '../data/colors.js';
 import { CreepManager } from '../ai/creeps.js';
 import { LegionManager } from '../ai/legion.js';
@@ -32,7 +33,8 @@ export class Game {
    * opts: { mode: 'hero'|'empire', heroId, difficulty: 'easy'|'normal'|'hard',
    *         rivals: [{ mode: 'random'|'hero'|'empire', hero: 'random'|heroId, team: 'rival'|'ally' }] }
    *   (legacy: opponents (1-3) and diplomacy: 'ffa'|'allied' are still accepted)
-   * hooks: { onUnitAdded(u), onUnitRemoved(u), onUnitChanged(u), fx, projectiles, sound(name, vol) }
+   * hooks: SimHooks (src/game/hooks.ts): onUnitAdded(u), onUnitRemoved(u), onUnitChanged(u), fx,
+   *        sound(name, vol), ... all optional.
    */
   constructor(opts, hooks) {
     this.opts = opts;
@@ -55,6 +57,7 @@ export class Game {
     this.shakeAmount = 0;
     this.buckets = Array.from({ length: HASH_DIM * HASH_DIM }, () => []);
     this.difficulty = { easy: 0, normal: 1, hard: 2 }[opts.difficulty] ?? 1;
+    this.projectiles = new Projectiles(this);
   }
 
   // ------------------------------------------------------------------ setup
@@ -1541,7 +1544,7 @@ export class Game {
 
     this.separate(dt);
     this.grid.passTeam = -99;
-    this.hooks.projectiles?.update(dt);
+    this.projectiles.update(dt);
 
     // Remove dead units after their death animation.
     for (const u of list) {

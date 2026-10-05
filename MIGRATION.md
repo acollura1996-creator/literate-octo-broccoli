@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M4 are done; see section 3.
+Status: **in progress.** Milestones M1–M5 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -290,11 +290,26 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - The glTF loader turns meshes shared by several nodes into `InstancedMesh` templates; the library instances their source mesh.
     - Unlit StandardMaterials show only their emissive colour, so the selection ring's per-instance colour goes in through the team-colour plugin's emissive term.
     - `BabylonView.ready` resolves once the models are loaded; `main.js` waits for it before creating a game.
-- [ ] **M5 – Reconnect the game logic.**
+- [x] **M5 – Reconnect the game logic.**
   - [x] (done in M3/M4) Move the citadel walls, road mesh and fog texture out of the simulation.
-  - Typed `SimHooks`.
-  - Projectiles, all effects (meshes first, particles in M8), placement ghosts, the line tool and tree highlights.
-  - Full-game check: the existing Playwright scenario tests (interaction, walls, mechanics, research, town-center UI) and a 30-minute AI simulation, all passing against the Babylon renderer.
+  - [x] Typed `SimHooks` and `EffectsApi` (`src/game/hooks.ts`). The Babylon `Effects` implements `EffectsApi`, and `main.js` annotates its hooks object with the type.
+  - [x] Projectiles.
+    - Flight now lives in the simulation (`src/game/projectiles.js`): homing, arcs, beams, and the moment a shot lands and calls `onHit`. Before, a renderer object moved them and the game advanced it through `hooks.projectiles`, so damage timing depended on the renderer.
+    - The muzzle table moved to `src/data/muzzles.js`.
+    - Both renderers draw `game.projectiles.list`: `ProjectileView` in `src/render/projectiles.js` and `src/babylon/Projectiles.ts`.
+  - [x] All effects (meshes now, particles in M8) in `src/babylon/Effects.ts`: the same API, timings and shapes as `src/render/effects.js`.
+    - Built on `src/babylon/FxKit.ts`, a small three.js-style toolkit. Each shape is created once per style; every visual is an `InstancedMesh` with per-instance colour and opacity, so effects create no materials or shaders at runtime.
+    - The Meteor Shower's damage, stun and screen shake are now timed by the game (`game.later(0.7, …)`) rather than by the falling-meteor effect.
+  - [x] Placement ghosts, the road/wall line tool and tree highlights.
+    - `src/input.js` keeps the logic and draws through `view.previews` (`src/render/previews.js`, `src/babylon/Previews.ts`). `input.js` no longer imports three.js.
+    - Tree highlights are part of the effects API.
+  - [x] Full-game check. The scenario tests (interaction, walls, mechanics, research, town-centre UI, tree hover) pass against both renderers.
+    - A 28-minute AI game (the AI plays all four empires and heroes) ran on the Babylon renderer through 11 ages to an empire's collapse with a clean console.
+    - Scene objects stay proportional to the units on the map (about 21 instanced parts per unit), and effects are released as they expire.
+  - Notes:
+    - The hidden three.js view inside `BabylonView` is no longer updated each frame. All that remains on it is the command-card icon renderer (M6).
+    - Leaving a game now also cancels an active road/wall line tool. Before, its preview could linger into the next game.
+    - The walls test now waits for the camera to settle before dragging (it drags in screen pixels).
 - [ ] **M6 – HUD and interface.**
   - Keep the HTML/CSS HUD.
   - Port command-card icons to `RenderTargetTexture` and the live portrait to `engine.registerView`.
