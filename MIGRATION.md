@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M2 are done; see section 3.
+Status: **in progress.** Milestones M1–M3 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -249,11 +249,19 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - Babylon keeps its own front-face winding in right-handed scenes (the opposite of three.js). Hand-built geometry uses Babylon's order; the glTF loader handles the baked models.
     - Checked against three.js at the same camera position: ground picking within 0.02 units, projection within about 1 px, the minimap view polygon within 0.2 units. Zoom steps, middle-drag (4.51 against 4.56 units), keyboard and edge panning and minimap clicks all behave the same. Pan distances per second differ in the headless check only because software-rendered three.js runs at a few frames per second and hits the 0.1 s frame cap.
     - Scenario tests (interaction, walls, mechanics, research, town-centre UI) pass on both renderers. The research test was flaky on both: random bandit raids and the first Legion wave could kill its units, so the test now holds them off.
-- [ ] **M3 – Terrain and props.**
-  - Split `terrain.js` into data and view.
-  - Heightfield mesh with the painted ground (`DynamicTexture`) and detail map, moat water, roads painted into the ground.
-  - Citadel walls; trees and doodads as **thin instances** per chunk, with felling.
-  - Fog-of-war material plugin with a `RawTexture`.
+- [x] **M3 – Terrain and props.**
+  - [x] Split `terrain.js` into data and view. `src/world/terrain.js` is now engine-free (heights, ground types, trees with their tints, scattered doodads, the painted ground canvas, felling). The three.js meshes moved to `src/render/terrainView.js`, and the Babylon ones are in `src/babylon/TerrainView.ts`. `fog.js` and `roads.js` no longer import three.js either: they expose their data plus a `version` counter that each renderer watches. The shared canvas art (detail map, road cobbles) and road geometry are in `src/world/groundArt.js`.
+  - [x] Heightfield mesh with the painted ground (`DynamicTexture`) and detail map (a `GroundDetailPlugin` material plugin), moat water (`ShaderMaterial` with the same shader), and roads drawn over the ground.
+  - [x] Trees and doodads as **thin instances** per 32×32-cell chunk and species, with felling (stumps).
+  - [→ M4] Citadel walls: they are built from the procedural models, so they arrive with the model bake.
+  - [x] Fog-of-war material plugin (`FogOfWarPlugin`, registered for every material) with a single-channel `RawTexture`.
+  - Notes:
+    - The hidden three.js view no longer builds terrain, roads or the fog texture when Babylon draws them (`View.drawsWorld`).
+    - Colour parity until M8: three.js lights in linear space and encodes to sRGB, while Babylon's StandardMaterial works in gamma space. Linear instance and vertex colours (tree tints, doodads, roads) are converted to gamma once. The detail-map factor is raised to 1/2.2, and the day/night light intensities are scaled so flat ground matches three.js's brightness at every hour. M8 replaces this with a linear pipeline.
+    - Babylon stores thin-instance buffers on the geometry, which clones share, so each tree chunk calls `makeGeometryUnique()`.
+    - Babylon ES modules are excluded from Vite's dependency pre-bundling (`optimizeDeps.exclude`). Otherwise each newly imported Babylon module makes the dev server re-optimise and fail the next page load (HTTP 504 "Outdated Optimize Dep").
+    - Checked against three.js at the same camera position: home base, zoomed out, moat water, citadel plaza, fog of war (black mask and explored areas), night and noon, and felled trees. Shadows are not drawn on Babylon until M8.
+    - Fixed in passing: the HUD clock showed `-1:-1:-1` for the first split second of a game (game time starts slightly below zero).
 - [ ] **M4 – Models and units.**
   - Bake script: all 147 models to GLB, with parts metadata and team-colour material tags.
   - GLB library with a per-model template.

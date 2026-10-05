@@ -10,7 +10,7 @@ import { Minimap } from './minimap.js';
 const $ = (id) => document.getElementById(id);
 
 function fmtTime(s) {
-  s = Math.floor(s);
+  s = Math.max(0, Math.floor(s)); // the game clock starts slightly below zero
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
@@ -133,15 +133,22 @@ export class Hud {
   updateOffers() {
     const g = this.game;
     const offers = (g.empires?.offers ?? []).filter((o) => o.to === g.human);
-    const sig = offers.map((o) => `${o.from.index}:${Math.ceil(o.expires - g.time)}`).join('|');
-    if (sig === this.offerSig) return;
-    this.offerSig = sig;
     const box = $('offers');
+    // Rebuild only when the offers change: rebuilding replaces the buttons, which would drop a
+    // click in progress. The countdowns are updated in place.
+    const sig = offers.map((o) => `${o.from.index}:${o.fee}:${o.expires}`).join('|');
+    if (sig === this.offerSig) {
+      box.querySelectorAll('.of-left').forEach((el, i) => {
+        if (offers[i]) el.textContent = `(${Math.ceil(offers[i].expires - g.time)}s)`;
+      });
+      return;
+    }
+    this.offerSig = sig;
     box.innerHTML = offers
       .map(
         (o, i) => `<div class="offer" data-i="${i}">
           <div class="of-title" style="color:${g.nameColor(o.from)}">${o.from.name} wants to hire you</div>
-          <div class="of-body">${o.fee} gold to fight for them for ${ECONOMY.hireTime / 60} minutes. Their enemies become yours. <span class="dim">(${Math.ceil(o.expires - g.time)}s)</span></div>
+          <div class="of-body">${o.fee} gold to fight for them for ${ECONOMY.hireTime / 60} minutes. Their enemies become yours. <span class="dim of-left">(${Math.ceil(o.expires - g.time)}s)</span></div>
           <div class="of-btns"><button class="of-yes">Accept</button><button class="of-no">Decline</button></div>
         </div>`,
       )

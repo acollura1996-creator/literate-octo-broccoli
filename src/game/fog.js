@@ -1,7 +1,5 @@
-// Fog of war and black mask for the human player (and allies in allied mode).
-import * as THREE from 'three';
+// Fog of war and black mask for the human player (and allies in allied mode). Engine-free.
 import { MAP_SIZE } from '../world/layout.js';
-import { fogUniforms } from '../render/assets.js';
 
 const VISIBLE = 255;
 const EXPLORED = 110;
@@ -15,14 +13,10 @@ export class Fog {
     this.explored = new Uint8Array(n);
     this.target = new Uint8Array(n);
     this.current = new Float32Array(n);
+    // Fog brightness per cell (0 black mask, 110 explored, 255 visible), eased over time. The
+    // renderers upload it as a single-channel texture whenever `version` changes.
     this.texData = new Uint8Array(n);
-    this.texture = new THREE.DataTexture(this.texData, MAP_SIZE, MAP_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
-    this.texture.magFilter = THREE.LinearFilter;
-    this.texture.minFilter = THREE.LinearFilter;
-    this.texture.generateMipmaps = false;
-    this.texture.needsUpdate = true;
-    fogUniforms.uFogTex.value = this.texture;
-    fogUniforms.uWorldSize.value.set(MAP_SIZE, MAP_SIZE);
+    this.version = 0;
     this.lastCompute = -1;
     this.revealAll = false;
     this.circles = new Map();
@@ -88,7 +82,7 @@ export class Fog {
         changed = true;
       }
     }
-    if (changed) this.texture.needsUpdate = true;
+    if (changed) this.version++;
   }
 
   isVisible(x, z) {

@@ -15,7 +15,8 @@ import type { Scene } from '@babylonjs/core/scene';
 import { View as LegacyView } from '../render/view.js';
 import { createBabylon } from './engine';
 import { RTSCamera, type GroundPoint } from './RTSCamera';
-import { GroundView } from './GroundView';
+import { TerrainView, RoadView } from './TerrainView';
+import { FogOfWar, registerFogOfWar } from './FogOfWar';
 import { UnitMarkers } from './UnitMarkers';
 import type { GameLike, ItemLike, UnitLike } from './types';
 
@@ -39,7 +40,9 @@ export class BabylonView {
 
   private readonly hemi: HemisphericLight;
   private readonly sun: DirectionalLight;
-  private ground: GroundView | null = null;
+  private terrainView: TerrainView | null = null;
+  private roadView: RoadView | null = null;
+  private fog: FogOfWar | null = null;
   private readonly markers: UnitMarkers;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -49,6 +52,8 @@ export class BabylonView {
     this.bscene = scene;
     this.cam = new RTSCamera(scene);
     scene.activeCamera = this.cam.camera;
+    // Before any material is created: every material gets the fog-of-war plugin.
+    registerFogOfWar();
 
     this.hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
     this.sun = new DirectionalLight('sun', new Vector3(-0.4, -1, -0.4), scene);
@@ -60,6 +65,7 @@ export class BabylonView {
     off.height = 1;
     this.legacy = new LegacyView(off);
     this.legacy.renderer.setSize(1, 1, false);
+    this.legacy.drawsWorld = false; // terrain, roads and fog are drawn here
 
     this.resize();
     (window as unknown as { __babylon: unknown }).__babylon = { engine, scene, view: this };
@@ -123,8 +129,12 @@ export class BabylonView {
   clearWorld(): void {
     this.legacy.clearWorld();
     this.markers.clear();
-    this.ground?.dispose();
-    this.ground = null;
+    this.terrainView?.dispose();
+    this.terrainView = null;
+    this.roadView?.dispose();
+    this.roadView = null;
+    this.fog?.dispose();
+    this.fog = null;
   }
 
   // ---- Frame -------------------------------------------------------------------------------------
@@ -142,10 +152,7 @@ export class BabylonView {
     this.legacy.cam.target.set(this.cam.target.x, this.cam.target.y, this.cam.target.z);
     this.legacy.update(dt);
 
-    if (!this.ground || this.ground.terrain !== g.terrain) {
-      this.ground?.dispose();
-      this.ground = new GroundView(this.bscene, g.terrain);
-    }
+    this.updateWorld(g);
     this.updateLighting(g.timeOfDay);
     this.markers.sync();
     this.cam.update(g.terrain, g.shakeAmount);
@@ -154,15 +161,39 @@ export class BabylonView {
     this.engine.endFrame();
   }
 
-  /** Day/night cycle: the same curve as the three.js view. */
+  /** Build the terrain, road and fog visuals for a new game, then keep them in sync. */
+  private updateWorld(g: GameLike): void {
+    if (this.fog?.fog !== g.fog) {
+      this.fog?.dispose();
+      this.fog = new FogOfWar(g.fog, this.bscene);
+    }
+    this.fog.update();
+    if (this.terrainView?.terrain !== g.terrain) {
+      this.terrainView?.dispose();
+      this.terrainView = new TerrainView(this.bscene, g.terrain);
+    }
+    if (this.roadView?.roads !== g.roads) {
+      this.roadView?.dispose();
+      this.roadView = g.roads ? new RoadView(this.bscene, g.roads, g) : null;
+    }
+    this.terrainView.update(g.time);
+    this.roadView?.update();
+  }
+
+  /**
+   * Day/night cycle: the same curve as the three.js view.
+   *
+   * three.js lights in linear space (light intensities divided by π) and encodes the result to
+   * sRGB; Babylon's StandardMaterial lights in gamma space. To match three.js brightness, both
+   * lights are scaled so that flat ground receives I^(1/2.2) instead of I. The visual upgrade (M8)
+   * replaces this with a linear pipeline.
+   */
   private updateLighting(hour: number): void {
     const dayness = clamp01(Math.sin(((hour - 6) / 12) * Math.PI) * 1.4 + 0.25);
     const night = 1 - dayness;
-    // three.js divides direct and ambient light by π (physically based units); Babylon's
-    // StandardMaterial does not, hence the scale factors.
-    this.sun.intensity = (0.55 + dayness * 1.75) / Math.PI;
+    const sunI = (0.55 + dayness * 1.75) / Math.PI;
+    const hemiI = (0.75 + dayness * 0.55) / Math.PI;
     this.sun.diffuse.set(1 - night * 0.45, 0.95 - night * 0.3, 0.85 + night * 0.15);
-    this.hemi.intensity = (0.75 + dayness * 0.55) / Math.PI;
     this.hemi.diffuse.set(0.81 - night * 0.35, 0.9 - night * 0.3, 1.0);
     this.hemi.groundColor.set(0.35 - night * 0.15, 0.29 - night * 0.12, 0.19 + night * 0.05);
     this.hemi.specular = Color3.Black();
@@ -170,6 +201,11 @@ export class BabylonView {
     const sx = Math.cos(ang) * 30;
     const sy = 45 + Math.abs(Math.sin(ang)) * 20;
     this.sun.direction.set(-sx, -sy, -25).normalize();
+    const lum = (c: Color3): number => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    const flat = hemiI * lum(this.hemi.diffuse) + sunI * (sy / Math.hypot(sx, sy, 25)) * lum(this.sun.diffuse);
+    const k = Math.pow(Math.max(flat, 1e-3), 1 / 2.2) / Math.max(flat, 1e-3);
+    this.sun.intensity = sunI * k;
+    this.hemi.intensity = hemiI * k;
   }
 
   // ---- Screen <-> world --------------------------------------------------------------------------

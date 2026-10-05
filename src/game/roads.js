@@ -3,10 +3,8 @@
 // units move faster on roads. Roads are drawn as a mesh hugging the terrain;
 // their surface follows the owner's age (packed dirt, then cobbles, then
 // dressed paving).
-import * as THREE from 'three';
 import { MAP_SIZE } from '../world/layout.js';
 import { ROAD } from '../data/units.js';
-import { patchFog } from '../render/assets.js';
 
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -18,9 +16,7 @@ export class Roads {
     this.connected = new Uint8Array(MAP_SIZE * MAP_SIZE);
     this.count = 0;
     this.counts = new Int32Array(16); // road tiles per general index
-    this.dirty = true;
-    this.mesh = null;
-    this.material = null;
+    this.version = 0; // bumped whenever the road surface changes (renderers rebuild their mesh)
   }
 
   idx(cx, cz) {
@@ -104,7 +100,7 @@ export class Roads {
       this.count++;
       this.counts[p.index]++;
     }
-    this.dirty = true;
+    this.version++;
     this.recompute(p);
     return n;
   }
@@ -124,7 +120,7 @@ export class Roads {
       }
     }
     if (changed) {
-      this.dirty = true;
+      this.version++;
       this.recompute(changed);
     }
   }
@@ -189,46 +185,8 @@ export class Roads {
     }
   }
 
-  // ---------------------------------------------------------------- render
-  buildMaterial() {
-    // Small tiling texture: cobbles with mortar lines; vertex colors tint by age.
-    const c = document.createElement('canvas');
-    c.width = 64;
-    c.height = 64;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#d9d2c2';
-    ctx.fillRect(0, 0, 64, 64);
-    let seed = 7;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    for (let row = 0; row < 4; row++) {
-      for (let col = 0; col < 4; col++) {
-        const x = col * 16 + (row % 2) * 8;
-        const y = row * 16;
-        const v = 200 + Math.floor(rnd() * 50);
-        ctx.fillStyle = `rgb(${v},${v - 6},${v - 18})`;
-        ctx.beginPath();
-        ctx.roundRect?.(x + 1.5, y + 1.5, 13, 13, 4);
-        if (!ctx.roundRect) ctx.rect(x + 1.5, y + 1.5, 13, 13);
-        ctx.fill();
-        if (x + 16 > 64) {
-          ctx.beginPath();
-          ctx.rect(x - 64 + 1.5, y + 1.5, 13, 13);
-          ctx.fill();
-        }
-      }
-    }
-    const tex = new THREE.CanvasTexture(c);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    const m = patchFog(new THREE.MeshLambertMaterial({ map: tex, vertexColors: true }));
-    m.polygonOffset = true;
-    m.polygonOffsetFactor = -2;
-    m.polygonOffsetUnits = -2;
-    return m;
-  }
-
+  // ------------------------------------------------------------ appearance
+  /** Road surface colour for a general's age (the renderers tint the cobble texture with it). */
   colorFor(p) {
     const tier = p?.tier ?? 1;
     if (tier <= 2) return [0.55, 0.42, 0.27]; // packed dirt
@@ -237,50 +195,5 @@ export class Roads {
     if (tier === 6) return [0.5, 0.46, 0.44]; // macadam
     if (tier === 7) return [0.3, 0.31, 0.33]; // asphalt
     return [0.82, 0.9, 0.95]; // smart paving
-  }
-
-  /** Rebuild the road mesh when roads or ages change. */
-  update(scene) {
-    if (!this.dirty) return;
-    this.dirty = false;
-    const g = this.game;
-    this.material ??= this.buildMaterial();
-    const n = this.count;
-    const pos = new Float32Array(n * 12);
-    const uv = new Float32Array(n * 8);
-    const col = new Float32Array(n * 12);
-    const idx = new Uint32Array(n * 6);
-    const S = this.size;
-    const h = (x, z) => g.terrain.heightAt(x, z) + 0.05;
-    let q = 0;
-    for (let k = 0; k < this.owner.length && q < n; k++) {
-      if (this.owner[k] < 0) continue;
-      const x = k % S;
-      const z = (k - x) / S;
-      const c = this.colorFor(g.generals[this.owner[k]]);
-      const corners = [[x, z], [x + 1, z], [x, z + 1], [x + 1, z + 1]];
-      corners.forEach(([cx, cz], i) => {
-        pos.set([cx, h(cx, cz), cz], q * 12 + i * 3);
-        uv.set([cx * 0.5, cz * 0.5], q * 8 + i * 2);
-        col.set(c, q * 12 + i * 3);
-      });
-      idx.set([q * 4, q * 4 + 2, q * 4 + 1, q * 4 + 1, q * 4 + 2, q * 4 + 3], q * 6);
-      q++;
-    }
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geom.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-    geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geom.setIndex(new THREE.BufferAttribute(idx, 1));
-    geom.computeVertexNormals();
-    if (this.mesh) {
-      this.mesh.geometry.dispose();
-      this.mesh.geometry = geom;
-    } else {
-      this.mesh = new THREE.Mesh(geom, this.material);
-      this.mesh.receiveShadow = true;
-      this.mesh.renderOrder = 1;
-      scene.add(this.mesh);
-    }
   }
 }

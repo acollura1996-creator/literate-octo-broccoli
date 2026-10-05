@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { UnitView, ItemView } from './unitview.js';
 import { Effects } from './effects.js';
 import { Projectiles } from './projectiles.js';
+import { TerrainView, RoadMesh, FogTexture } from './terrainView.js';
 import { MAP_SIZE } from '../world/layout.js';
 import { ITEMS } from '../data/items.js';
 
@@ -112,6 +113,11 @@ export class View {
     this.scene.add(this.sun.target);
     this.unitViews = new Map();
     this.itemViews = new Map();
+    // Terrain, roads and fog of war. False when another renderer draws them (see BabylonView).
+    this.drawsWorld = true;
+    this.terrainView = null;
+    this.roadMesh = null;
+    this.fogTexture = null;
     this.resize();
   }
 
@@ -188,13 +194,22 @@ export class View {
   update(dt) {
     const g = this.game;
     const time = g.time;
-    g.terrain.update(time);
-    g.roads?.update(this.scene);
+    if (this.drawsWorld) this.updateWorld(g, time);
     this.updateLighting();
     for (const v of this.unitViews.values()) v.sync(dt, time);
     for (const v of this.itemViews.values()) v.sync(dt, time);
     this.fx.update(dt);
     this.cam.update(g.terrain, g.shakeAmount);
+  }
+
+  /** Build the terrain, road and fog visuals for a new game, then keep them in sync. */
+  updateWorld(g, time) {
+    if (this.terrainView?.terrain !== g.terrain) this.terrainView = new TerrainView(g.terrain, this.scene);
+    if (this.roadMesh?.roads !== g.roads) this.roadMesh = g.roads ? new RoadMesh(g.roads, g, this.scene) : null;
+    if (this.fogTexture?.fog !== g.fog) this.fogTexture = new FogTexture(g.fog);
+    this.terrainView.update(time);
+    this.roadMesh?.update();
+    this.fogTexture.update();
   }
 
   draw() {
@@ -212,6 +227,9 @@ export class View {
     }
     this.unitViews.clear();
     this.itemViews.clear();
+    this.terrainView = null;
+    this.roadMesh = null;
+    this.fogTexture = null;
   }
 
   /** Screen pixels per world unit at a world point (used for picking radii). */

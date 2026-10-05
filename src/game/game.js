@@ -96,8 +96,8 @@ export class Game {
     for (const n of this.layout.neutrals) clear.push({ x: n.at[0], z: n.at[1], r: 5 });
     for (const c of this.layout.camps) clear.push({ x: c.at[0], z: c.at[1], r: 5 });
     t.plantTrees((x, z) => clear.some((c) => (x - c.x) ** 2 + (z - c.z) ** 2 < c.r * c.r));
-    t.buildMeshes();
-    this.scene.add(t.group);
+    t.paintTexture(); // the painted ground map, used by the renderers and the minimap
+    t.scatterDoodads();
     this.buildCitadelWalls();
 
     // Neutral buildings.
@@ -1107,7 +1107,7 @@ export class Game {
       if (b.def.tier) this.upgradeStructureAge(b, p.tier);
       else this.later(0.5 + Math.random() * 5, () => this.upgradeStructureAge(b, p.tier));
     }
-    this.roads.dirty = true;
+    this.roads.version++;
     p.ai?.onAgeAdvanced?.();
     this.hooks.onAgeAdvanced?.(p);
   }

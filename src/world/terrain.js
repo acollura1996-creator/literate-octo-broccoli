@@ -1,10 +1,9 @@
-// Terrain generation: heightmap, painted ground texture (Lordaeron Summer
-// look with a blighted citadel), water, trees and decorative doodads.
-import * as THREE from 'three';
+// Terrain generation: heightmap, ground classification, the painted ground map (Lordaeron Summer
+// look with a blighted citadel), trees and decorative doodads. Engine-free: the meshes are built by
+// the renderers from this data.
 import { fbm, valueNoise, mulberry32, smoothstep, distToSegment } from './noise.js';
 import { MAP_SIZE, CENTER, CITADEL, MOAT } from './layout.js';
 import { BLOCK_TERRAIN, BLOCK_TREE } from './pathgrid.js';
-import { fogUniforms, patchFog, mat, geo } from '../render/assets.js';
 
 export const WATER_LEVEL = -0.35;
 
@@ -59,7 +58,8 @@ export class Terrain {
     this.types = new Uint8Array(MAP_SIZE * MAP_SIZE);
     this.trees = [];
     this.flatSpots = [];
-    this.group = new THREE.Group();
+    this.felled = []; // trees cut down, in order (renderers replay this list)
+    this.doodads = null; // { rocks, bushes, flowers } from scatterDoodads()
   }
 
   /** Register a spot (center + radius) that should be flat (for buildings). */
@@ -212,7 +212,6 @@ export class Terrain {
             species,
             scale: 0.7 + rand() * 0.3,
             rot: rand() * Math.PI * 2,
-            index: -1,
           });
           this.types[i] = this.types[i] === T_GRASS ? T_FOREST : this.types[i];
           this.grid.setFlag(cx, cz, BLOCK_TREE, true);
@@ -221,6 +220,13 @@ export class Terrain {
     }
     this.treeByCell = new Map();
     for (const tr of this.trees) this.treeByCell.set(tr.cz * MAP_SIZE + tr.cx, tr);
+    // Canopy tint per tree: summer pine, broadleaf ash, dead/blighted.
+    const tint = mulberry32(this.seed + 7);
+    for (const tr of this.trees) {
+      if (tr.species === 0) tr.tint = [0.13 + tint() * 0.05, 0.36 + tint() * 0.1, 0.16 + tint() * 0.05];
+      else if (tr.species === 1) tr.tint = [0.27 + tint() * 0.1, 0.5 + tint() * 0.12, 0.14 + tint() * 0.05];
+      else tr.tint = [0.32, 0.27, 0.3];
+    }
   }
 
   treeAtCell(cx, cz) {
@@ -228,13 +234,10 @@ export class Terrain {
     return t && t.alive ? t : null;
   }
 
-  // ------------------------------------------------------------------ meshes
-  buildMeshes() {
-    this.buildGround();
-    this.buildWater();
-    this.buildTrees();
-    this.buildDoodads();
-  }
+  // ------------------------------------------------------------- appearance
+  // Engine-free inputs for the renderers: the painted ground map, per-tree tints and the scattered
+  // rocks, bushes and flowers. The meshes are built by the renderer (src/render/terrainView.js,
+  // src/babylon/TerrainView.ts).
 
   paintTexture() {
     const RES = 2048;
@@ -349,203 +352,17 @@ export class Terrain {
     return canvas;
   }
 
-  buildGround() {
-    const S = MAP_SIZE;
-    const geom = new THREE.PlaneGeometry(S, S, S, S);
-    geom.rotateX(-Math.PI / 2);
-    geom.translate(S / 2, 0, S / 2);
-    const pos = geom.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const z = pos.getZ(i);
-      const xi = Math.round(x);
-      const zi = Math.round(z);
-      pos.setY(i, this.heights[zi * (S + 1) + xi]);
-    }
-    geom.computeVertexNormals();
-    const canvas = this.paintTexture();
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
-    tex.generateMipmaps = true;
-    tex.minFilter = THREE.LinearMipmapLinearFilter;
-    const material = patchFog(new THREE.MeshLambertMaterial({ map: tex }));
-    // A tiling detail texture keeps the ground crisp up close on the large map.
-    const detail = makeDetailTexture();
-    const fogCompile = material.onBeforeCompile;
-    material.onBeforeCompile = (shader) => {
-      fogCompile(shader);
-      shader.uniforms.uDetail = { value: detail };
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform sampler2D uDetail;')
-        .replace(
-          '#include <map_fragment>',
-          `#include <map_fragment>
-          float dA = texture2D(uDetail, vFogWorldPos.xz * 0.37).r;
-          float dB = texture2D(uDetail, vFogWorldPos.xz * 0.091 + 0.37).g;
-          diffuseColor.rgb *= 0.62 + 0.5 * dA + 0.26 * (dB - 0.5);`,
-        );
-    };
-    material.customProgramCacheKey = () => 'ground-detail';
-    const m = new THREE.Mesh(geom, material);
-    m.receiveShadow = true;
-    m.name = 'ground';
-    this.groundMesh = m;
-    this.group.add(m);
-  }
-
-  buildWater() {
-    const geomW = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE, 1, 1);
-    geomW.rotateX(-Math.PI / 2);
-    geomW.translate(MAP_SIZE / 2, WATER_LEVEL, MAP_SIZE / 2);
-    this.waterUniforms = { uTime: { value: 0 } };
-    const material = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: {
-        uTime: this.waterUniforms.uTime,
-        uFogTex: fogUniforms.uFogTex,
-        uWorldSize: fogUniforms.uWorldSize,
-        uFogEnabled: fogUniforms.uFogEnabled,
-      },
-      vertexShader: `
-        varying vec3 vW;
-        void main() {
-          vec4 w = modelMatrix * vec4(position, 1.0);
-          vW = w.xyz;
-          gl_Position = projectionMatrix * viewMatrix * w;
-        }`,
-      fragmentShader: `
-        varying vec3 vW;
-        uniform float uTime;
-        uniform sampler2D uFogTex;
-        uniform vec2 uWorldSize;
-        uniform float uFogEnabled;
-        void main() {
-          float w1 = sin(vW.x * 1.3 + uTime * 1.1) * sin(vW.z * 1.1 - uTime * 0.9);
-          float w2 = sin((vW.x + vW.z) * 2.3 + uTime * 1.7);
-          float s = w1 * 0.5 + w2 * 0.25;
-          vec3 deep = vec3(0.08, 0.27, 0.42);
-          vec3 light = vec3(0.32, 0.6, 0.72);
-          vec3 col = mix(deep, light, 0.45 + s * 0.25);
-          col += vec3(0.9) * smoothstep(0.62, 0.75, s) * 0.35;
-          float fogV = texture2D(uFogTex, vW.xz / uWorldSize).r;
-          col *= mix(1.0, fogV, uFogEnabled);
-          gl_FragColor = vec4(col, 0.78);
-        }`,
-    });
-    const water = new THREE.Mesh(geomW, material);
-    water.renderOrder = 1;
-    this.group.add(water);
-  }
-
-  buildTrees() {
-    // Three species: 0 summer pine, 1 broadleaf ash, 2 dead/blighted tree.
-    const trunkGeo = new THREE.CylinderGeometry(0.09, 0.16, 1.0, 6);
-    trunkGeo.translate(0, 0.5, 0);
-    const pineGeo = (() => {
-      const parts = [];
-      const a = new THREE.ConeGeometry(0.85, 1.3, 7);
-      a.translate(0, 1.35, 0);
-      const b = new THREE.ConeGeometry(0.68, 1.15, 7);
-      b.translate(0, 2.0, 0);
-      const c = new THREE.ConeGeometry(0.45, 0.95, 7);
-      c.translate(0, 2.6, 0);
-      parts.push(a, b, c);
-      return mergeGeometries(parts);
-    })();
-    const ashGeo = (() => {
-      const a = new THREE.IcosahedronGeometry(0.85, 0);
-      a.translate(0, 1.85, 0);
-      const b = new THREE.IcosahedronGeometry(0.6, 0);
-      b.translate(0.45, 1.5, 0.2);
-      const c = new THREE.IcosahedronGeometry(0.58, 0);
-      c.translate(-0.4, 1.55, -0.25);
-      const d = new THREE.IcosahedronGeometry(0.5, 0);
-      d.translate(0.05, 2.45, 0.1);
-      return mergeGeometries([a, b, c, d]);
-    })();
-    const deadGeo = (() => {
-      const a = new THREE.ConeGeometry(0.06, 1.0, 4);
-      a.rotateZ(0.9);
-      a.translate(0.35, 1.5, 0);
-      const b = new THREE.ConeGeometry(0.05, 0.9, 4);
-      b.rotateZ(-0.8);
-      b.translate(-0.3, 1.7, 0.1);
-      const c = new THREE.ConeGeometry(0.05, 0.8, 4);
-      c.rotateX(0.8);
-      c.translate(0, 1.6, 0.3);
-      const d = new THREE.ConeGeometry(0.08, 1.2, 5);
-      d.translate(0, 1.9, 0);
-      return mergeGeometries([a, b, c, d]);
-    })();
-
-    // Trees are batched per 32x32-cell chunk so off-screen forests are culled
-    // (in both the main and the shadow pass).
-    const CH = 32;
-    const chunksPerSide = Math.ceil(MAP_SIZE / CH);
-    const trunkMat = mat(0x6b4a2b);
-    const leafMats = [mat(0xffffff), mat(0xffffff), mat(0x4a3a40)];
-    const canopyGeos = [pineGeo, ashGeo, deadGeo];
-    const buckets = new Map();
-    for (const t of this.trees) {
-      const key = `${Math.floor(t.cx / CH) + Math.floor(t.cz / CH) * chunksPerSide}:${t.species}`;
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key).push(t);
-    }
-    const dummy = new THREE.Object3D();
-    const color = new THREE.Color();
-    const rand = mulberry32(this.seed + 7);
-    for (const list of buckets.values()) {
-      const s = list[0].species;
-      const trunks = new THREE.InstancedMesh(trunkGeo, s === 2 ? mat(0x3d3236) : trunkMat, list.length);
-      const canopy = new THREE.InstancedMesh(canopyGeos[s], leafMats[s], list.length);
-      trunks.castShadow = true;
-      canopy.castShadow = true;
-      canopy.receiveShadow = true;
-      list.forEach((t, i) => {
-        t.index = i;
-        t.mesh = { trunks, canopy };
-        dummy.position.set(t.x, this.heightAt(t.x, t.z) - 0.05, t.z);
-        dummy.rotation.set(0, t.rot, 0);
-        dummy.scale.setScalar(t.scale);
-        dummy.updateMatrix();
-        trunks.setMatrixAt(i, dummy.matrix);
-        canopy.setMatrixAt(i, dummy.matrix);
-        if (s === 0) color.setRGB(0.13 + rand() * 0.05, 0.36 + rand() * 0.1, 0.16 + rand() * 0.05);
-        else if (s === 1) color.setRGB(0.27 + rand() * 0.1, 0.5 + rand() * 0.12, 0.14 + rand() * 0.05);
-        else color.setRGB(0.32, 0.27, 0.3);
-        canopy.setColorAt(i, color);
-      });
-      trunks.instanceMatrix.needsUpdate = true;
-      canopy.instanceMatrix.needsUpdate = true;
-      if (canopy.instanceColor) canopy.instanceColor.needsUpdate = true;
-      trunks.computeBoundingSphere();
-      canopy.computeBoundingSphere();
-      this.group.add(trunks, canopy);
-    }
-  }
-
-  /** Remove a chopped-down tree. */
+  /** Remove a chopped-down tree (the renderers turn it into a stump). */
   fellTree(tree) {
     if (!tree.alive) return;
     tree.alive = false;
-    const tm = tree.mesh;
-    const dummy = new THREE.Object3D();
-    dummy.position.set(tree.x, this.heightAt(tree.x, tree.z) - 0.05, tree.z);
-    dummy.scale.set(tree.scale * 1.3, 0.12, tree.scale * 1.3);
-    dummy.updateMatrix();
-    tm.trunks.setMatrixAt(tree.index, dummy.matrix);
-    dummy.scale.setScalar(0);
-    dummy.updateMatrix();
-    tm.canopy.setMatrixAt(tree.index, dummy.matrix);
-    tm.trunks.instanceMatrix.needsUpdate = true;
-    tm.canopy.instanceMatrix.needsUpdate = true;
+    this.felled.push(tree);
     this.grid.setFlag(tree.cx, tree.cz, BLOCK_TREE, false);
     this.types[tree.cz * MAP_SIZE + tree.cx] = T_GRASS;
   }
 
-  buildDoodads() {
+  /** Scatter rocks, bushes and flowers; each entry has a position, rotation, scale and colour. */
+  scatterDoodads() {
     const rand = mulberry32(this.seed + 31);
     const rocks = [];
     const bushes = [];
@@ -572,133 +389,28 @@ export class Terrain {
         else if (roll < 0.36) flowers.push({ x, z, s: 0.5 + rand() * 0.6 });
       }
     }
-    const dummy = new THREE.Object3D();
-    const place = (list, geometry, material, castShadow, yOff, colorFn) => {
-      const im = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length));
-      im.count = list.length;
-      const col = new THREE.Color();
-      list.forEach((d, i) => {
-        dummy.position.set(d.x, this.heightAt(d.x, d.z) + yOff * d.s, d.z);
-        dummy.rotation.set(rand() * 0.4, rand() * Math.PI * 2, rand() * 0.3);
-        dummy.scale.set(d.s, d.s * (0.7 + rand() * 0.5), d.s);
-        dummy.updateMatrix();
-        im.setMatrixAt(i, dummy.matrix);
-        if (colorFn) {
-          colorFn(col);
-          im.setColorAt(i, col);
-        }
-      });
-      im.castShadow = castShadow;
-      im.receiveShadow = true;
-      im.instanceMatrix.needsUpdate = true;
-      im.computeBoundingSphere();
-      this.group.add(im);
-    };
-    place(rocks, geo.dodeca(1, 0), mat(0xffffff), true, 0.3, (c) => {
-      const v = 0.45 + rand() * 0.2;
-      c.setRGB(v, v * 0.97, v * 0.92);
-    });
-    place(bushes, geo.ico(1, 0), mat(0xffffff), true, 0.5, (c) => c.setRGB(0.18 + rand() * 0.1, 0.38 + rand() * 0.12, 0.12));
-    const flowerGeo = geo.custom('flowerpatch', () => {
-      const parts = [];
-      for (let k = 0; k < 5; k++) {
-        const p = new THREE.OctahedronGeometry(0.07, 0);
-        const a = (k / 5) * Math.PI * 2;
-        p.translate(Math.cos(a) * 0.22, 0.06, Math.sin(a) * 0.22);
-        parts.push(p);
+    // Placement: y offset (in units of the doodad's scale), rotation, stretch and colour.
+    const place = (list, yOff, colorFn) => {
+      for (const d of list) {
+        d.y = this.heightAt(d.x, d.z) + yOff * d.s;
+        d.rot = [rand() * 0.4, rand() * Math.PI * 2, rand() * 0.3];
+        d.scale = [d.s, d.s * (0.7 + rand() * 0.5), d.s];
+        d.color = colorFn();
       }
-      return mergeGeometries(parts);
+    };
+    place(rocks, 0.3, () => {
+      const v = 0.45 + rand() * 0.2;
+      return [v, v * 0.97, v * 0.92];
     });
-    place(flowers, flowerGeo, mat(0xffffff, { flat: true }), false, 0, (c) => {
-      const pal = [[1, 0.9, 0.3], [1, 1, 1], [0.9, 0.4, 0.8], [0.5, 0.6, 1], [1, 0.5, 0.3]];
-      const p = pal[Math.floor(rand() * pal.length)];
-      c.setRGB(p[0], p[1], p[2]);
-    });
+    place(bushes, 0.5, () => [0.18 + rand() * 0.1, 0.38 + rand() * 0.12, 0.12]);
+    const pal = [[1, 0.9, 0.3], [1, 1, 1], [0.9, 0.4, 0.8], [0.5, 0.6, 1], [1, 0.5, 0.3]];
+    place(flowers, 0, () => pal[Math.floor(rand() * pal.length)]);
+    this.doodads = { rocks, bushes, flowers };
+    return this.doodads;
   }
 
   isNearFlatSpot(x, z) {
     for (const s of this.flatSpots) if (Math.hypot(x - s.x, z - s.z) < s.radius + 1.5) return true;
     return false;
   }
-
-  update(time) {
-    if (this.waterUniforms) this.waterUniforms.uTime.value = time;
-  }
-}
-
-/** Grayscale tiling noise (R: fine blades/specks, G: soft blotches) for ground detail. */
-function makeDetailTexture() {
-  const N = 256;
-  const c = document.createElement('canvas');
-  c.width = N;
-  c.height = N;
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(N, N);
-  const rand = mulberry32(777);
-  const fine = new Float32Array(N * N);
-  for (let i = 0; i < N * N; i++) fine[i] = rand();
-  for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      // Short vertical streaks read as grass blades from the RTS camera.
-      let v = 0;
-      for (let k = 0; k < 3; k++) v += fine[((y + k) % N) * N + x];
-      v = v / 3;
-      // Tileable soft noise from wrapped value noise.
-      const u = (x / N) * 8;
-      const w = (y / N) * 8;
-      const s = valueNoiseWrap(u, w, 8);
-      const o = (y * N + x) * 4;
-      img.data[o] = Math.round(v * 255);
-      img.data[o + 1] = Math.round(s * 255);
-      img.data[o + 2] = 0;
-      img.data[o + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = THREE.RepeatWrapping;
-  t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 8;
-  t.generateMipmaps = true;
-  t.minFilter = THREE.LinearMipmapLinearFilter;
-  return t;
-}
-
-function valueNoiseWrap(x, z, period) {
-  const xi = Math.floor(x);
-  const zi = Math.floor(z);
-  const fx = x - xi;
-  const fz = z - zi;
-  const h = (a, b) => valueNoise(((a % period) + period) % period, ((b % period) + period) % period, 99);
-  const sx = fx * fx * (3 - 2 * fx);
-  const sz = fz * fz * (3 - 2 * fz);
-  const a = h(xi, zi);
-  const b = h(xi + 1, zi);
-  const c = h(xi, zi + 1);
-  const d = h(xi + 1, zi + 1);
-  return a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz;
-}
-
-/** Minimal geometry merge (non-indexed output) to avoid pulling in addons. */
-export function mergeGeometries(geoms) {
-  let total = 0;
-  const prepared = geoms.map((g) => {
-    const ng = g.index ? g.toNonIndexed() : g;
-    total += ng.attributes.position.count;
-    return ng;
-  });
-  const pos = new Float32Array(total * 3);
-  const nor = new Float32Array(total * 3);
-  let o = 0;
-  for (const g of prepared) {
-    if (!g.attributes.normal) g.computeVertexNormals();
-    pos.set(g.attributes.position.array, o * 3);
-    nor.set(g.attributes.normal.array, o * 3);
-    o += g.attributes.position.count;
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-  out.computeBoundingSphere();
-  return out;
 }
