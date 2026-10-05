@@ -26,6 +26,9 @@ export function createBabylon(canvas: HTMLCanvasElement): BabylonContext {
   const scene = new Scene(engine);
   scene.useRightHandedSystem = true;
   scene.clearColor = new Color4(0, 0, 0, 1);
+  // The game has its own input handling (src/input.js). Babylon's pointer handling would cancel
+  // pointerdown, which stops the browser from sending the mouse events the game listens for.
+  scene.detachControl();
   window.addEventListener('resize', () => engine.resize());
   return { engine, scene, canvas };
 }

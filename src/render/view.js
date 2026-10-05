@@ -6,6 +6,8 @@ import { Projectiles } from './projectiles.js';
 import { MAP_SIZE } from '../world/layout.js';
 import { ITEMS } from '../data/items.js';
 
+const _tmp = new THREE.Vector3();
+
 export class RTSCamera {
   constructor(aspect) {
     this.camera = new THREE.PerspectiveCamera(42, aspect, 0.5, 400);
@@ -178,6 +180,12 @@ export class View {
   }
 
   render(dt) {
+    this.update(dt);
+    this.draw();
+  }
+
+  /** Advance everything visual by dt (animations, effects, camera) without drawing. */
+  update(dt) {
     const g = this.game;
     const time = g.time;
     g.terrain.update(time);
@@ -187,10 +195,30 @@ export class View {
     for (const v of this.itemViews.values()) v.sync(dt, time);
     this.fx.update(dt);
     this.cam.update(g.terrain, g.shakeAmount);
+  }
+
+  draw() {
     this.renderer.setScissorTest(false);
     this.renderer.setViewport(0, 0, this.width, this.height);
     this.renderer.clear();
     this.renderer.render(this.scene, this.cam.camera);
+  }
+
+  /** Remove the world (everything but the lights) when a game ends. */
+  clearWorld() {
+    for (const child of [...this.scene.children]) {
+      if (child === this.hemi || child === this.sun || child === this.sun.target) continue;
+      this.scene.remove(child);
+    }
+    this.unitViews.clear();
+    this.itemViews.clear();
+  }
+
+  /** Screen pixels per world unit at a world point (used for picking radii). */
+  pixelsPerUnit(x, y, z) {
+    const cam = this.cam.camera;
+    const fovK = this.height / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)));
+    return fovK / Math.max(0.01, cam.position.distanceTo(_tmp.set(x, y, z)));
   }
 
   /** Project a world point to CSS pixel coordinates. */

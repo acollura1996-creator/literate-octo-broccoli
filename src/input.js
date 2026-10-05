@@ -93,8 +93,6 @@ export class Input {
     const g = this.game;
     let best = null;
     let bestD = Infinity;
-    const cam = this.view.cam.camera;
-    const fovK = this.view.height / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)));
     for (const u of g.units) {
       if (u.dead || u.removed || !u.view?.visibleNow) continue;
       const gy = g.terrain.heightAt(u.x, u.z);
@@ -102,8 +100,7 @@ export class Input {
       const bottom = this.view.project(u.x, gy + 0.1, u.z);
       if (bottom.behind) continue;
       const top = this.view.project(u.x, gy + h, u.z);
-      const depth = cam.position.distanceTo(new THREE.Vector3(u.x, gy + h / 2, u.z));
-      const pr = Math.max(10, (u.isBuilding ? u.def.footprint * 0.5 : u.radius + 0.15) * (fovK / depth));
+      const pr = Math.max(10, (u.isBuilding ? u.def.footprint * 0.5 : u.radius + 0.15) * this.view.pixelsPerUnit(u.x, gy + h / 2, u.z));
       // Distance from mouse to the vertical segment.
       const vx = top.x - bottom.x;
       const vy = top.y - bottom.y;

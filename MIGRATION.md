@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **Step 1, audit and plan. No code has been converted yet.**
+Status: **in progress.** Milestones M1–M2 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -196,6 +196,13 @@ tools/
   gallery.html     Babylon model gallery.
 ```
 
+**Migration path.** While the port is in progress, the Babylon renderer lives in `src/babylon/` and
+is selected with `?renderer=babylon` (the desktop build opts in). `BabylonView` implements the same
+interface as the three.js `View`. Whatever is not ported yet runs on a hidden three.js view inside
+it, which is updated every frame but never drawn, so the full game stays playable on Babylon after
+every milestone. Each milestone moves another part across. In M12, `src/babylon/` replaces
+`src/render/` and the hidden view is removed.
+
 **Simulation and rendering boundary.** The simulation already reports through `game.hooks`
 (`onUnitAdded`, `onUnitRemoved`, `onUnitChanged`, `fx.*`, `projectiles.*`, `sound`). M5 formalises
 this as a typed interface and removes the three remaining direct dependencies: citadel wall
@@ -230,10 +237,18 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - Electron is checked with a development-only self-capture: `HE3D_SCREENSHOT=out.png` saves a window screenshot, prints the page console and confirms `require`/`process` are not exposed, then quits. It is ignored in packaged builds.
     - In this container Electron also needs `--no-sandbox` (it runs as root) and SwiftShader WebGL flags (`--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`). These are passed on the command line for the check only; the app does not set them.
     - Checked: handedness matches three.js (+X to the right, +Z toward the camera); Babylon reports WebGL2; the three.js game still runs with a clean console.
-- [ ] **M2 – RTS camera.**
-  - Port `RTSCamera`: 56° pitch, FOV 42° converted to radians, distance 12–68 with smooth zoom.
-  - Ramped edge scrolling, keyboard panning, middle-drag, wheel modes, shake, terrain following.
-  - Port ground picking and `project()` with Babylon's `Vector3.Project`.
+- [x] **M2 – RTS camera.**
+  - [x] Port `RTSCamera` (`src/babylon/RTSCamera.ts`): 56° pitch, FOV 42° converted to radians, distance 12–68 with smooth zoom.
+  - [x] Ramped edge scrolling, keyboard panning, middle-drag, wheel modes, shake, terrain following.
+  - [x] Port ground picking and `project()`. Projection uses the camera's view-projection matrix directly (the same maths as `Vector3.Project`, plus the "behind the camera" flag the overlay needs).
+  - Notes:
+    - `?renderer=babylon` now runs the **real game** through `BabylonView` (`src/babylon/BabylonView.ts`), which has the same interface as the three.js `View`. The camera controls in `src/input.js`, the minimap and the overlay drive it unchanged.
+    - Parts not ported yet keep running on a hidden three.js view inside `BabylonView` (`legacy`): it is updated each frame but never drawn (see section 2, "Migration path"). M2 draws the painted ground and team-coloured placeholder blocks for units and buildings.
+    - `input.js` no longer touches the camera object directly for pick radii: both views provide `pixelsPerUnit()`. `View.render()` is split into `update()` and `draw()`, and the scene clean-up moved into `View.clearWorld()`.
+    - Babylon's own pointer handling is detached (`scene.detachControl()`). It cancels `pointerdown`, which stops the browser from sending the mouse events the game listens for.
+    - Babylon keeps its own front-face winding in right-handed scenes (the opposite of three.js). Hand-built geometry uses Babylon's order; the glTF loader handles the baked models.
+    - Checked against three.js at the same camera position: ground picking within 0.02 units, projection within about 1 px, the minimap view polygon within 0.2 units. Zoom steps, middle-drag (4.51 against 4.56 units), keyboard and edge panning and minimap clicks all behave the same. Pan distances per second differ in the headless check only because software-rendered three.js runs at a few frames per second and hits the 0.1 s frame cap.
+    - Scenario tests (interaction, walls, mechanics, research, town-centre UI) pass on both renderers. The research test was flaky on both: random bandit raids and the first Legion wave could kill its units, so the test now holds them off.
 - [ ] **M3 – Terrain and props.**
   - Split `terrain.js` into data and view.
   - Heightfield mesh with the painted ground (`DynamicTexture`) and detail map, moat water, roads painted into the ground.

@@ -89,9 +89,13 @@ let running = false;
 let lastFrame = 0;
 let endShown = false;
 
+// The renderer: three.js by default, Babylon.js with `?renderer=babylon` (migration in progress,
+// see MIGRATION.md). Resolved before boot.
+let ViewClass = View;
+
 function ensureView() {
   if (view) return;
-  view = new View($('gl'));
+  view = new ViewClass($('gl'));
   overlay = new Overlay($('overlay'), null, view, null);
   window.addEventListener('resize', () => {
     view.resize();
@@ -293,13 +297,7 @@ function teardown() {
   running = false;
   input.enabled = false;
   input.cancelPlacement();
-  // Clear the scene (keep lights).
-  for (const child of [...view.scene.children]) {
-    if (child === view.hemi || child === view.sun || child === view.sun.target) continue;
-    view.scene.remove(child);
-  }
-  view.unitViews.clear();
-  view.itemViews.clear();
+  view.clearWorld();
   game = null;
 }
 
@@ -462,18 +460,11 @@ function boot(data) {
 // When hosted in the Artifact viewer, keep the chosen settings across page updates.
 const hot = window.claude?.hot;
 hot?.snapshot?.(() => ({ settings: { ...settings, rivals: settings.rivals.map((r) => ({ ...r })) } }));
-// Babylon.js renderer (migration in progress, see MIGRATION.md): `?renderer=babylon`.
-const useBabylon = params.get('renderer') === 'babylon';
-if (useBabylon) {
-  $('screen-title').classList.add('hidden');
-  $('screen-loading').classList.add('hidden');
-  import('./babylon/sandbox.ts').then((m) => m.runSandbox($('gl')));
-} else if (hot?.ready) hot.ready(boot);
-else boot(hot?.data ?? {});
 
 // Test/debug helpers: ?autostart=hero:paladin or ?autostart=empire
-const auto = params.get('autostart');
-if (auto && !useBabylon) {
+function autostart() {
+  const auto = params.get('autostart');
+  if (!auto) return;
   const [mode, heroId] = auto.split(':');
   settings.mode = mode === 'empire' ? 'empire' : 'hero';
   if (heroId && HEROES[heroId]) settings.heroId = heroId;
@@ -495,4 +486,22 @@ if (auto && !useBabylon) {
   if (params.get('difficulty')) settings.difficulty = params.get('difficulty');
   startGame();
 }
+
+function launch() {
+  if (hot?.ready) hot.ready(boot);
+  else boot(hot?.data ?? {});
+  autostart();
+}
+
+if (params.get('renderer') === 'babylon') {
+  import('./babylon/BabylonView.ts')
+    .then((m) => {
+      ViewClass = m.BabylonView;
+      launch();
+    })
+    .catch((e) => {
+      console.error('Babylon.js renderer failed to load; using three.js', e);
+      launch();
+    });
+} else launch();
 window.__setSpeed = (s) => (speed = s);
