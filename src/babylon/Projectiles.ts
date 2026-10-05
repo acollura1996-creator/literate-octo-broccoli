@@ -4,34 +4,11 @@
 import type { FxKit, FxNode, LitSpec } from './FxKit';
 import { FxMaterial, shape as geo } from './FxKit';
 import type { Effects } from './Effects';
+import type { Game } from '../game/game.ts';
+import type { Beam, Projectile } from '../game/projectiles.ts';
 
-interface ShotLike {
-  id: number;
-  beam?: boolean;
-  kind: string;
-  color?: number;
-  x: number;
-  y: number;
-  z: number;
-  px?: number;
-  py?: number;
-  pz?: number;
-  // beams
-  sx?: number;
-  sy?: number;
-  sz?: number;
-  tx?: number;
-  ty?: number;
-  tz?: number;
-  width?: number;
-  t: number;
-  life?: number;
-}
-
-interface GameLike {
-  projectiles: { list: ShotLike[] };
-  fog: { isVisible(x: number, z: number): boolean };
-}
+/** What the projectile view reads from the game. */
+type GameLike = Pick<Game, 'projectiles' | 'fog'>;
 
 interface ShotView {
   root: FxNode;
@@ -168,26 +145,26 @@ function makeShot(kit: FxKit, kind: string, color?: number): ShotView {
 }
 
 export class ProjectileView {
-  private readonly views = new Map<ShotLike, ShotView>();
+  private readonly views = new Map<Projectile, ShotView>();
 
   constructor(
     readonly game: GameLike,
     private readonly fx: Effects,
   ) {}
 
-  private makeBeam(p: ShotLike): ShotView {
+  private makeBeam(p: Beam): ShotView {
     const kit = this.fx.kit;
     const width = p.width ?? 1;
     const outer = new FxMaterial(p.color ?? 0x5ff2ff, 0.9, true, false);
     const core = new FxMaterial(0xffffff, 0.95, true, false);
     const g = kit.group('beam');
     g.add(kit.mesh(geo.box(0.09 * width, 0.09 * width, 1), outer), kit.mesh(geo.box(0.035 * width, 0.035 * width, 1), core));
-    const len = Math.hypot(p.tx! - p.sx!, p.ty! - p.sy!, p.tz! - p.sz!);
+    const len = Math.hypot(p.tx - p.sx, p.ty - p.sy, p.tz - p.sz);
     g.scale.set(1, 1, len);
-    g.position.set((p.sx! + p.tx!) / 2, (p.sy! + p.ty!) / 2, (p.sz! + p.tz!) / 2);
+    g.position.set((p.sx + p.tx) / 2, (p.sy + p.ty) / 2, (p.sz + p.tz) / 2);
     g.node.computeWorldMatrix(true);
-    g.lookAt(p.tx!, p.ty!, p.tz!);
-    g.visible = this.game.fog.isVisible(p.sx!, p.sz!) || this.game.fog.isVisible(p.tx!, p.tz!);
+    g.lookAt(p.tx, p.ty, p.tz);
+    g.visible = this.game.fog.isVisible(p.sx, p.sz) || this.game.fog.isVisible(p.tx, p.tz);
     return { root: g, trailT: 0, outer, core };
   }
 

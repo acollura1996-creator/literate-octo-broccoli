@@ -10,12 +10,10 @@ import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { Constants } from '@babylonjs/core/Engines/constants';
 import type { Scene } from '@babylonjs/core/scene';
+import type { Fog } from '../game/fog.ts';
 
-export interface FogLike {
-  size: number;
-  texData: Uint8Array;
-  version: number;
-}
+/** What the fog texture reads from the game's fog of war. */
+export type FogLike = Pick<Fog, 'size' | 'texData' | 'version'>;
 
 /** The fog texture shared by every material (and the water shader). */
 export class FogOfWar {

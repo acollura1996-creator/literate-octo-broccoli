@@ -25,7 +25,9 @@ import { WATER_LEVEL } from '../world/terrain.ts';
 import { makeDetailCanvas, makeCobbleCanvas, roadGeometry } from '../world/groundArt.ts';
 import { FogOfWar } from './FogOfWar';
 import { paint, type PaintKind } from './Painterly';
-import type { GameLike, TerrainLike, TreeLike, DoodadLike, RoadsLike } from './types';
+import type { Game } from '../game/game.ts';
+import type { Roads } from '../game/roads.ts';
+import type { Doodad, Terrain, Tree } from '../world/terrain.ts';
 
 const CHUNK = 32;
 
@@ -178,17 +180,17 @@ interface TreeSlot {
 }
 
 export class TerrainView {
-  readonly terrain: TerrainLike;
+  readonly terrain: Terrain;
   private readonly scene: Scene;
   private readonly disposables: Array<{ dispose(): void }> = [];
-  private readonly treeSlots = new Map<TreeLike, TreeSlot>();
+  private readonly treeSlots = new Map<Tree, TreeSlot>();
   private felledSeen = 0;
   private water!: ShaderMaterial;
   /** Meshes that cast and receive shadows (trees, rocks, bushes) and the ground, which receives. */
   readonly casters: Mesh[] = [];
   readonly receivers: Mesh[] = [];
 
-  constructor(scene: Scene, terrain: TerrainLike) {
+  constructor(scene: Scene, terrain: Terrain) {
     this.scene = scene;
     this.terrain = terrain;
     this.buildGround();
@@ -343,7 +345,7 @@ export class TerrainView {
 
     // Batch per 32×32-cell chunk and species, so off-screen forests are culled.
     const chunksPerSide = Math.ceil(this.terrain.size / CHUNK);
-    const buckets = new Map<string, TreeLike[]>();
+    const buckets = new Map<string, Tree[]>();
     for (const t of this.terrain.trees) {
       const key = `${Math.floor(t.cx / CHUNK) + Math.floor(t.cz / CHUNK) * chunksPerSide}:${t.species}`;
       let list = buckets.get(key);
@@ -378,7 +380,7 @@ export class TerrainView {
   }
 
   /** A felled tree leaves a low stump and no canopy. */
-  private fellTree(tree: TreeLike): void {
+  private fellTree(tree: Tree): void {
     const slot = this.treeSlots.get(tree);
     if (!slot) return;
     const y = this.terrain.heightAt(tree.x, tree.z) - 0.05;
@@ -402,7 +404,7 @@ export class TerrainView {
       petals.push(bake(toRadius(CreatePolyhedron('petal', { type: 1, size: 1, flat: true }, sc), 0.07), Matrix.Translation(Math.cos(a) * 0.22, 0.06, Math.sin(a) * 0.22)));
     }
     const flower = merged('flowers', petals);
-    const place = (mesh: Mesh, list: DoodadLike[], kind: PaintKind | null): void => {
+    const place = (mesh: Mesh, list: Doodad[], kind: PaintKind | null): void => {
       this.keep(mesh);
       mesh.material = doodadMat(kind);
       mesh.isPickable = false;
@@ -430,14 +432,14 @@ export class TerrainView {
 
 /** The road surface, rebuilt when the road network or a general's age changes. */
 export class RoadView {
-  readonly roads: RoadsLike;
-  private readonly game: GameLike;
+  readonly roads: Roads;
+  private readonly game: Game;
   private readonly mesh: Mesh;
   private readonly material: StandardMaterial;
   private readonly texture: DynamicTexture;
   private version = -1;
 
-  constructor(scene: Scene, roads: RoadsLike, game: GameLike) {
+  constructor(scene: Scene, roads: Roads, game: Game) {
     this.roads = roads;
     this.game = game;
     this.mesh = new Mesh('roads', scene);

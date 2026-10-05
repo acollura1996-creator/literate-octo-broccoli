@@ -1,0 +1,10 @@
+{
+  // The engine-free simulation must stay loadable by Node's type stripping (the model bake tool
+  // and headless runs import it directly), so it may only use erasable TypeScript syntax.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "erasableSyntaxOnly": true,
+    "types": []
+  },
+  "include": ["src/data", "src/world", "src/game", "src/ai"]
+}

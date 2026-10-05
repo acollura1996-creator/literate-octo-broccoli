@@ -28,6 +28,7 @@ npm run dev            # browser, http://localhost:5173 (three.js renderer)
                        # http://localhost:5173/?renderer=babylon for the Babylon.js port in progress
 npm run dev:electron   # desktop window (Electron) against the dev server, with hot reload
 npm run typecheck      # TypeScript, game and Electron code
+npm run sim            # headless game (no renderer): four computer generals, a state hash per minute
 npm run build          # typecheck, then dist/ (game) and dist-electron/ (desktop main process)
 npm run preview        # serve dist/ in the browser
 npm run dist           # build, then the Windows installer in release/ (electron-builder, NSIS x64)
@@ -238,9 +239,10 @@ src/
   main.js              title screen, game setup, main loop
   input.js             selection, smart orders, targeting, building placement, hotkeys
   audio.js             synthesized sound effects, unit acknowledgements, ambience and music (Web Audio)
-  data/                units, buildings, heroes, items
+  data/                units, buildings, heroes, items (types.ts: UnitDef, ItemDef, ...)
   game/                simulation: Game, Unit, orders/behaviour, abilities, fog of war, roads,
-                       empire economy (citizens, taxes, ages, hiring, nukes) and random events
+                       empire economy (citizens, taxes, ages, hiring, nukes) and random events;
+                       types.ts: Player, Order, Buff, ...; hooks.ts: what the simulation reports
   ai/                  creep camps, Kalenden's Legion, rival general AI (hero and empire)
   world/               map layout, terrain generation, A* path grid, noise
   render/              view and camera, procedural models, unit views, effects, projectiles, overlay
@@ -250,7 +252,12 @@ src/
 tools/
   gallery.html         dev gallery of every procedural model (npm run dev → /tools/gallery.html)
   build-artifact.mjs   post-build step for the hosted version
+  headless-sim.mjs     npm run sim: the simulation without any renderer
 ```
+
+The simulation (`data/`, `world/`, `game/`, `ai/`) is strict TypeScript and never imports an
+engine; renderers read its state and implement `SimHooks`. It sticks to erasable TypeScript syntax
+(checked by `tsconfig.sim.json`), so Node runs it directly for the model bake and `npm run sim`.
 
 Testing helpers (dev server only): `?autostart=hero:paladin` or `?autostart=empire` skips the
 title screen, and `&rivals=hero-ranger-ally,empire,random` sets the computer generals

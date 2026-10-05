@@ -22,17 +22,13 @@ import '@babylonjs/core/Engines/Extensions/engine.readTexture';
 import { ModelLibrary, type ModelInstance, type ModelParts } from './ModelLibrary';
 import type { FogOfWarPlugin } from './FogOfWar';
 import { quatFromEulerXYZ, eulerXYZFromQuat } from './UnitView';
+import type { Unit } from '../game/unit.ts';
 
 const ICON_SIZE = 96;
 const DEG = Math.PI / 180;
 
-interface UnitLike {
-  id: number;
-  modelId: string;
-  isBuilding: boolean;
-  owner: { color: number };
-  def: { modelColor?: number };
-}
+/** What icons and portraits need of a unit (the HUD also passes stand-ins for unit types). */
+type UnitLike = Pick<Unit, 'id' | 'modelId' | 'isBuilding'> & { owner: { color: number }; def: { modelColor?: number } };
 
 /** Frame a model nicely: whole thing for buildings, upper body for units (as in icons.js). */
 function frame(cam: TargetCamera, m: ModelInstance, isBuilding: boolean, portrait = false): void {

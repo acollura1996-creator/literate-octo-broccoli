@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M10 are done; see section 3.
+Status: **in progress.** Milestones M1–M11 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -446,10 +446,25 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
   - Not checked here **(flag D5)**: running the game from the installed `.exe`. Electron starts under Wine but draws no window (Wine has no DirectComposition), so this needs a Windows PC.
   - Building on Linux needs Wine, 64- and 32-bit: electron-builder runs the uninstaller stub under it. Its downloadable Wine 11 bundle for Linux lacks the Windows-side DLLs, so it doesn't work. Building on Windows needs nothing extra (README).
   - Testing under Wine needs one workaround in the Wine prefix: Wine's `powershell.exe` stub returns success for everything, so the installer's "is the game still running?" check always answers yes and the install aborts. With the stub removed, the installer falls back to `tasklist`. Real Windows runs the actual query.
-- [ ] **M11 – TypeScript simulation.** Convert `sim/` file by file to strict TypeScript with interfaces for the core entities. No behaviour changes: the simulation and scenario tests must pass after each file.
+- [x] **M11 – TypeScript simulation.** The whole engine-free simulation is strict TypeScript: 22 files and about 9,100 lines in `src/data`, `src/world`, `src/game` and `src/ai`, converted in four steps (data, world, core game, AI) with the game running and tested after each.
+  - [x] Shared types:
+    - `data/types.ts`: `UnitDef` (every field the 93 unit and building definitions use), `HeroDef`, `ItemDef`, `AgeDef`, `UpgradeDef`, `Mood`.
+    - `game/types.ts`: `Player` (with the empire economy as `EmpirePlayer` and an `isEmpire` guard), `Order` as a discriminated union of the 16 order types, `Buff`/`Mods`, harvest state, training and research queues, corpses, ground items, creep camps.
+    - The classes are their own types: `Game`, `Unit` (every field it carries is declared, including the ones that used to appear at runtime), `Terrain`, `PathGrid`, `Roads`, `Fog`, `Projectiles` (`Shot | Beam`), `GeneralAI`.
+    - `SimHooks` (`game/hooks.ts`) now speaks `Unit`, `Player` and `GroundItem`.
+  - [x] The Babylon renderer uses these types directly. Its stand-in interfaces (`babylon/types.ts` and the local `*Like` types) and the `as never` casts are gone; components that need only a few fields take a `Pick<>` of the real type.
+  - [x] Imports of the converted modules use `.ts` specifiers (`allowImportingTsExtensions`), which Vite, `tsc` and Node's type stripping all accept. `tsconfig.sim.json` (part of `npm run typecheck`) keeps the simulation to erasable syntax, so Node can run it directly: the model bake tool does, and so does the new `npm run sim`.
+  - [x] `npm run sim` runs a seeded game with four computer generals and no renderer, printing a hash of the whole world state (every unit's position, health and order, every player's economy, the fog) each game minute. This is also the check that the simulation does not depend on an engine.
+  - [x] No behaviour changes, checked three ways:
+    - Seeded headless runs of the converted code produce exactly the same per-minute world hashes as the JavaScript it replaced: 15 minutes on Hard with four AI generals, and 30 minutes on Easy with a Hero and allied empires reaching the eleventh age.
+    - Map generation (heights, ground types, path flags, trees, doodads) hashes identically before and after.
+    - The scenario suites pass on both renderers (67/67 each), and a boot test of both renderers plays with no console errors after each step.
+  - Where the types meet the dynamic code: about 16 type assertions (`as`), mostly at call sites whose invariant the code already relies on (a harvest order's target is a gold mine or a tree, a unit-target spell always has a target). Non-null assertions (`!`) mark values that are present by construction (typed-array reads, a building's footprint, a hero's level), exactly where the JavaScript read them without checks.
+  - Still JavaScript after M11 (outside the simulation): the HUD (`ui/`), `input.js`, `main.js`, `audio.js` and the three.js renderer (`render/`). M12 removes the three.js renderer and converts the rest.
 - [ ] **M12 – Remove three.js.**
   - Drop the `?renderer=three` path and every three.js import from `src/`.
   - three.js remains only as a devDependency of `tools/bake-models.ts` (D1).
+  - Convert the remaining application code to strict TypeScript: `main`, `input`, `audio` and the HUD (`ui/`).
   - Final feature-parity pass against section 1.1, before/after screenshots, updated `README.md`, every box ticked here.
 
 ---
@@ -463,6 +478,6 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
 | Live portrait (second `WebGLRenderer`) | Babylon prefers one engine. | `engine.registerView(canvas, camera)` renders a second camera into the portrait canvas. |
 | Procedural music on raw Web Audio | AudioEngineV2 hides some low-level scheduling. | Resolved in M7: the engine runs on audio.js's `AudioContext`, and the music stays a raw Web Audio scheduler on it. The engine's output is routed into the same compressor and master gain, through one internal property (`mainOut._inNode`) with a fallback. |
 | Windows `.exe` verification | No Windows here; Electron draws no window under Wine. | D5: installer checked under Wine (install, uninstall, reinstall); running the game needs a Windows PC. |
-| Size of the strict-TypeScript conversion | About 19,000 lines of dynamic JavaScript. | Incremental `allowJs` → `.ts` (D2, M11). |
+| Size of the strict-TypeScript conversion | About 19,000 lines of dynamic JavaScript. | Incremental `allowJs` → `.ts` (D2): the simulation in M11, checked against the old code with seeded headless runs; the UI in M12. |
 | 200+ units at 60 fps on integrated GPUs | Many small meshes per unit. | Part instancing with instanced team colour; LOD (hide small details beyond a distance); quality presets. |
 | Headless verification | Screenshots use software rendering (SwiftShader), so fps numbers aren't representative. | Report draw calls, active meshes and CPU frame time from the benchmark scene. GPU fps must be checked on real hardware. |

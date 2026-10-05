@@ -7,12 +7,11 @@ import { Color4 } from '@babylonjs/core/Maths/math.color';
 import type { ParticleFx } from './Particles';
 import type { Scene } from '@babylonjs/core/scene';
 import { FxKit, FxMaterial, FxNode, shape as geo } from './FxKit';
-import type { EffectsApi } from '../game/hooks';
+import type { EffectsApi } from '../game/hooks.ts';
+import type { Game } from '../game/game.ts';
 
-interface GameLike {
-  terrain: { heightAt(x: number, z: number): number };
-  fog: { isVisible(x: number, z: number): boolean };
-}
+/** What the effects read from the game. */
+type GameLike = Pick<Game, 'terrain' | 'fog'>;
 
 interface Entry {
   obj: FxNode;

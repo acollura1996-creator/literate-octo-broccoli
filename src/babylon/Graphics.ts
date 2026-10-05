@@ -21,6 +21,7 @@ import { Scene } from '@babylonjs/core/scene';
 import type { Camera } from '@babylonjs/core/Cameras/camera';
 import type { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
+import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { Frustum } from '@babylonjs/core/Maths/math.frustum';
 import { Matrix } from '@babylonjs/core/Maths/math.vector';
 import { Constants } from '@babylonjs/core/Engines/constants';
@@ -203,7 +204,7 @@ export class Graphics {
   addGlow(mesh: AbstractMesh): void {
     if (this.glowing.has(mesh)) return;
     this.glowing.add(mesh);
-    this.glow?.addIncludedOnlyMesh(mesh as never);
+    this.glow?.addIncludedOnlyMesh(mesh as Mesh);
     mesh.onDisposeObservable.addOnce(() => this.glowing.delete(mesh));
   }
 
@@ -260,7 +261,7 @@ export class Graphics {
     if (p.glow) {
       const glow = new GlowLayer('glow', scene, { mainTextureRatio: 0.5, blurKernelSize: 48 });
       glow.intensity = 0.55;
-      for (const m of this.glowing) glow.addIncludedOnlyMesh(m as never);
+      for (const m of this.glowing) glow.addIncludedOnlyMesh(m as Mesh);
       this.glow = glow;
     }
 

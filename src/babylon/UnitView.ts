@@ -23,6 +23,9 @@ import '@babylonjs/core/Meshes/instancedMesh';
 import type { GhostMode, ModelInstance, ModelLibrary, ModelParts } from './ModelLibrary';
 import type { FogOfWarPlugin } from './FogOfWar';
 import { TeamColorPlugin } from './TeamColor';
+import type { Unit } from '../game/unit.ts';
+import type { Game } from '../game/game.ts';
+import type { GroundItem } from '../game/types.ts';
 
 // ---------------------------------------------------------------------------------- shared data
 // Pole weapons thrust instead of swinging (same table as src/render/unitview.js).
@@ -182,53 +185,6 @@ export class UnitAssets {
 }
 
 // ------------------------------------------------------------------------------------ unit view
-interface UnitLike {
-  id: number;
-  x: number;
-  z: number;
-  facing: number;
-  radius: number;
-  speed: number;
-  modelId: string;
-  dead: boolean;
-  removed?: boolean;
-  hidden?: boolean;
-  invisible?: boolean;
-  isIllusion?: boolean;
-  isBuilding: boolean;
-  isHero?: boolean;
-  selected?: boolean;
-  seenByHuman?: boolean;
-  deathTime: number;
-  anim: string;
-  animTime: number;
-  walkCycle: number;
-  attackCooldown: number;
-  lastShotAt?: number;
-  moving?: boolean;
-  underConstruction?: boolean;
-  buildProgress: number;
-  projectile?: { kind?: string } | null;
-  carry?: { kind?: string } | null;
-  owner: { color: number; team?: number; general?: unknown };
-  mods: { scale?: number };
-  def: { modelColor?: number; footprint: number; firearm?: boolean; vehicle?: boolean; attackGround?: boolean; worker?: boolean };
-  heroDef?: { abilities: string[] };
-  buffs: Map<string, { visual?: string }>;
-  hasBuff(id: string): boolean;
-  abilityLevel(id: string): number;
-}
-
-interface GameLike {
-  time: number;
-  human: unknown;
-  terrain: { heightAt(x: number, z: number): number };
-  fog: { isVisible(x: number, z: number): boolean };
-  isEnemy(a: unknown, b: unknown): boolean;
-  isAlliedToHuman(p: unknown): boolean;
-  unitsNear(x: number, z: number, r: number): Array<{ isBuilding: boolean; dead: boolean; owner: { team?: number } }>;
-}
-
 /** Guns aim (weapon x rotation) and kick back when they fire (filled in like the three.js AIM). */
 export const AIM: Record<string, number> = {};
 
@@ -255,8 +211,8 @@ export class UnitView {
   private rootScale = 1;
 
   constructor(
-    readonly unit: UnitLike,
-    readonly game: GameLike,
+    readonly unit: Unit,
+    readonly game: Game,
     private readonly assets: UnitAssets,
   ) {
     this.group = new TransformNode(`unit-${unit.id}`, assets.scene);
@@ -282,7 +238,7 @@ export class UnitView {
     this.rootScale = this.unit.mods.scale || 1;
     this.ghostMode = ghost;
     if (!this.ring) {
-      const r = u.isBuilding ? u.def.footprint * 0.62 : u.radius * 1.35 + 0.1;
+      const r = u.isBuilding ? u.def.footprint! * 0.62 : u.radius * 1.35 + 0.1;
       this.ring = this.assets.ring.createInstance(`ring-${u.id}`);
       this.ring.parent = this.group;
       this.ring.scaling.setAll(r);
@@ -389,14 +345,14 @@ export class UnitView {
     } else ring.setEnabled(false);
   }
 
-  private syncConstruction(u: UnitLike): void {
+  private syncConstruction(u: Unit): void {
     const rootNode = this.model.root;
     if (u.underConstruction) {
       const k = Math.max(0.05, u.buildProgress);
       rootNode.scaling.y = this.rootScale * (0.08 + 0.92 * k);
       if (!this.scaffold) {
         const sc = this.assets.models.instantiate('construction', u.owner.color, `scaffold-${u.id}`);
-        const fp = u.def.footprint;
+        const fp = u.def.footprint!;
         sc.root.scaling.set(fp, fp * 0.8, fp);
         sc.root.parent = this.group;
         this.scaffold = sc;
@@ -407,7 +363,7 @@ export class UnitView {
     }
   }
 
-  private animate(u: UnitLike, dt: number, time: number, P: ModelParts): void {
+  private animate(u: Unit, dt: number, time: number, P: ModelParts): void {
     const anim = u.anim;
     const t = u.animTime;
     if (anim === 'walk') u.walkCycle += dt * (u.speed * 2.6 + 2);
@@ -531,7 +487,7 @@ export class UnitView {
     if (u.hasBuff('bladestorm')) this.rootPose.ry = time * 22;
   }
 
-  private syncCarry(u: UnitLike): void {
+  private syncCarry(u: Unit): void {
     if (!u.def.worker) return;
     const kind = u.carry?.kind ?? null;
     if (kind === this.carryKind) return;
@@ -547,7 +503,7 @@ export class UnitView {
     this.carryMesh = m;
   }
 
-  private syncBuffVisuals(u: UnitLike, dt: number, time: number, dead: boolean): void {
+  private syncBuffVisuals(u: Unit, dt: number, time: number, dead: boolean): void {
     const want = new Set<string>();
     if (!dead) {
       for (const b of u.buffs.values()) if (b.visual) want.add(b.visual);
@@ -650,11 +606,6 @@ export class UnitView {
 }
 
 // ------------------------------------------------------------------------------------ ground items
-interface ItemLike {
-  x: number;
-  z: number;
-}
-
 /** Ground item (dropped by creeps): a chest with a coloured lid over a glowing ring. */
 export class ItemView {
   private readonly group: TransformNode;
@@ -662,8 +613,8 @@ export class ItemView {
   private readonly glow: StandardMaterial;
 
   constructor(
-    readonly item: ItemLike,
-    readonly game: GameLike,
+    readonly item: GroundItem,
+    readonly game: Game,
     scene: Scene,
     color: number,
   ) {

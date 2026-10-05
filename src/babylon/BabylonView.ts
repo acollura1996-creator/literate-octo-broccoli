@@ -27,7 +27,9 @@ import { UiRenderer } from './UiRenderer';
 import { Graphics, QUALITIES, type Quality } from './Graphics';
 import { ParticleFx, type BurningSite } from './Particles';
 import { SceneInstrumentation } from '@babylonjs/core/Instrumentation/sceneInstrumentation';
-import type { GameLike, ItemLike, UnitLike } from './types';
+import type { Game } from '../game/game.ts';
+import type { Unit } from '../game/unit.ts';
+import type { GroundItem } from '../game/types.ts';
 
 export interface ScreenPoint {
   x: number;
@@ -59,7 +61,7 @@ export class BabylonView {
   readonly cam: RTSCamera;
   width = 1;
   height = 1;
-  game: GameLike | null = null;
+  game: Game | null = null;
 
   private readonly hemi: HemisphericLight;
   private readonly sun: DirectionalLight;
@@ -89,7 +91,7 @@ export class BabylonView {
   /** Placement ghost and line preview (used by src/input.js); set once the models are loaded. */
   previews!: Previews;
   private ui!: UiRenderer;
-  readonly itemViews = new Map<ItemLike, ItemView>();
+  readonly itemViews = new Map<GroundItem, ItemView>();
   /** Resolves when the baked models are loaded; main.js waits for it before starting a game. */
   readonly ready: Promise<void>;
 
@@ -185,39 +187,39 @@ export class BabylonView {
   }
 
   // ---- Game hooks --------------------------------------------------------------------------------
-  attachGame(game: GameLike): void {
+  attachGame(game: Game): void {
     this.game = game;
     this.fx?.clear();
     this.projectileView?.clear();
     this.particles.clear();
     this.fx = new Effects(game, this.bscene);
     this.fx.particles = this.particles;
-    this.projectileView = new ProjectileView(game as never, this.fx);
+    this.projectileView = new ProjectileView(game, this.fx);
   }
 
-  addUnit(u: UnitLike): void {
-    const v = new UnitView(u as never, this.game as never, this.unitAssets!);
+  addUnit(u: Unit): void {
+    const v = new UnitView(u, this.game!, this.unitAssets!);
     u.view = v;
     this.unitViews.set(u.id, v);
   }
 
-  removeUnit(u: UnitLike): void {
+  removeUnit(u: Unit): void {
     this.unitViews.get(u.id)?.dispose();
     this.unitViews.delete(u.id);
     u.view = null;
   }
 
-  changeUnit(u: UnitLike, modelChanged: boolean): void {
+  changeUnit(u: Unit, modelChanged: boolean): void {
     if (modelChanged) this.unitViews.get(u.id)?.buildModel();
   }
 
-  addItem(it: ItemLike): void {
+  addItem(it: GroundItem): void {
     const def = (ITEMS as Record<string, { color?: string }>)[(it as { id: string }).id];
     const color = parseInt((def?.color ?? '#ffd700').replace('#', ''), 16);
-    this.itemViews.set(it, new ItemView(it as never, this.game as never, this.bscene, color));
+    this.itemViews.set(it, new ItemView(it, this.game!, this.bscene, color));
   }
 
-  removeItem(it: ItemLike): void {
+  removeItem(it: GroundItem): void {
     this.itemViews.get(it)?.dispose();
     this.itemViews.delete(it);
   }
@@ -304,7 +306,7 @@ export class BabylonView {
   }
 
   /** Build the terrain, road and fog visuals for a new game, then keep them in sync. */
-  private updateWorld(g: GameLike): void {
+  private updateWorld(g: Game): void {
     if (this.fog?.fog !== g.fog) {
       this.fog?.dispose();
       this.fog = new FogOfWar(g.fog, this.bscene);
@@ -330,11 +332,11 @@ export class BabylonView {
    * Buildings below half health burn, more fiercely the closer they are to falling (only where
    * the player can see them), nearest the camera first.
    */
-  private burningSites(g: GameLike): BurningSite[] {
+  private burningSites(g: Game): BurningSite[] {
     const sites: Array<BurningSite & { d: number }> = [];
     const t = this.cam.target;
     for (const v of this.unitViews.values()) {
-      const u = v.unit as unknown as { id: number; x: number; z: number; hp: number; maxHp: number; isBuilding?: boolean; dead?: boolean; underConstruction?: boolean; def: { footprint?: number; wall?: boolean } };
+      const u = v.unit;
       if (!u.isBuilding || u.dead || u.underConstruction || u.def.wall || u.hp >= u.maxHp * 0.5) continue;
       if (!g.fog.isVisible(u.x, u.z)) continue;
       const size = (u.def.footprint ?? 2) / 2;
@@ -344,7 +346,7 @@ export class BabylonView {
   }
 
   /** Kalenden's citadel walls and towers, from the placements in game.citadelWalls. */
-  private buildCitadel(g: GameLike): void {
+  private buildCitadel(g: Game): void {
     for (const c of this.citadel) c.dispose();
     this.citadel = (g.citadelWalls ?? []).map((w, i) => {
       const m = this.models!.instantiate(w.model, w.color, `citadel-${i}`);
