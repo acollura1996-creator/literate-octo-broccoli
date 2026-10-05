@@ -116,7 +116,7 @@ interface OrderVariants {
   patrol: { point: Point; origin?: Point };
   follow: { target: Unit };
   harvest: { target?: Unit | Tree | null };
-  returnRes: { resume?: Order };
+  returnRes: { resume?: Order | null };
   build: { building: string; x: number; z: number; paid?: boolean };
   construct: { target: Unit };
   cast: { ability: string; target?: Unit | null; point?: Point | null };

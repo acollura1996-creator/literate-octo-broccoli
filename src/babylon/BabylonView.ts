@@ -1,5 +1,5 @@
 // The game's view on Babylon.js. It kept the public interface of the original three.js `View`, so
-// main.js, the input code, the HUD, the minimap and the overlay carried over unchanged.
+// main.ts, the input code, the HUD, the minimap and the overlay carried over unchanged.
 //
 // Everything it draws is Babylon: terrain, units, effects, projectiles, previews, and the HUD's
 // icons and portrait (UiRenderer).
@@ -87,11 +87,11 @@ export class BabylonView {
   /** Visual effects (the game's `hooks.fx`). */
   fx: Effects | null = null;
   private projectileView: ProjectileView | null = null;
-  /** Placement ghost and line preview (used by src/input.js); set once the models are loaded. */
+  /** Placement ghost and line preview (used by src/input.ts); set once the models are loaded. */
   previews!: Previews;
   private ui!: UiRenderer;
   readonly itemViews = new Map<GroundItem, ItemView>();
-  /** Resolves when the baked models are loaded; main.js waits for it before starting a game. */
+  /** Resolves when the baked models are loaded; main.ts waits for it before starting a game. */
   readonly ready: Promise<void>;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -208,7 +208,7 @@ export class BabylonView {
     u.view = null;
   }
 
-  changeUnit(u: Unit, modelChanged: boolean): void {
+  changeUnit(u: Unit, modelChanged = false): void {
     if (modelChanged) this.unitViews.get(u.id)?.buildModel();
   }
 

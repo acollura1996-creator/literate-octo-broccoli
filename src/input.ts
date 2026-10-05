@@ -4,13 +4,85 @@ import { UNITS, ROAD } from './data/units.ts';
 import { Roads } from './game/roads.ts';
 import { ABILITIES } from './game/abilities.ts';
 import { canCast } from './game/behavior.ts';
+import type { Game } from './game/game.ts';
+import type { Unit } from './game/unit.ts';
+import type { Cell } from './game/roads.ts';
+import type { GroundItem, Order, OrderType, Point } from './game/types.ts';
+import type { Tree } from './world/terrain.ts';
+import type { BabylonView } from './babylon/BabylonView.ts';
+import type { Effects } from './babylon/Effects.ts';
+import type { CommandButton } from './ui/commands.ts';
+import type { BarkKind } from './audio.ts';
 
 const MAX_SELECTION = 24;
 
 const MAX_LINE = 160;
 
+/** What the next click does after a command-card button asked for a target. */
+export type TargetMode =
+  | { kind: 'move' | 'attack' | 'patrol' | 'gather' | 'rally' }
+  | { kind: 'nuke'; silo: Unit }
+  | { kind: 'cast'; ability: string; caster: Unit };
+
+export interface CameraSettings {
+  scrollSpeed: number;
+  /** 'auto' tells mouse wheels (zoom) from trackpads (pan). */
+  wheelMode: 'auto' | 'zoom' | 'pan';
+  edgeScroll: boolean;
+}
+
+interface DragState {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  shift: boolean;
+  ctrl: boolean;
+  target: Unit | null;
+}
+
 export class Input {
-  constructor(game, view, canvas) {
+  /** The game being played (replaced when a new game starts). */
+  game: Game;
+  readonly view: BabylonView;
+  readonly canvas: HTMLCanvasElement;
+  selection: Unit[];
+  /** The unit type whose commands the card shows (Tab cycles). */
+  activeType: string | null;
+  /** An open submenu of the command card ('build', 'build2', 'hire', 'learn'). */
+  cardMenu: string | null;
+  targetMode: TargetMode | null;
+  /** Control groups by digit. */
+  groups: Record<string, Unit[]>;
+  /** Keys held, by KeyboardEvent.code. */
+  keys: Set<string>;
+  mouse: { x: number; y: number; inside: boolean; inWindow?: boolean };
+  drag: DragState | null;
+  /** The drag rectangle once the mouse has moved far enough to box-select. */
+  dragRect: DragState | null;
+  /** Alt held: show every health bar. */
+  altDown: boolean;
+  lastClick: { time: number; unit: Unit | null };
+  lastGroupKey: { key: string | null; time: number };
+  lastF1?: number;
+  hovered: Unit | null;
+  hoverTree: Tree | null = null;
+  treeFlash: { tree: Tree; until: number } | null = null;
+  placement: { type: string; ok: boolean; x: number; z: number } | null;
+  linePlan: { kind: 'road' | 'wall'; start: Cell | null; cells: Cell[]; ok: boolean[] } | null = null;
+  panDrag: { anchor: Point } | null = null;
+  /** The current command-card buttons (set by the HUD). */
+  buttons: CommandButton[];
+  enabled: boolean;
+  settings: CameraSettings;
+  /** Called for unit acknowledgements (set by main). */
+  onBark?: (u: Unit, kind: BarkKind) => void;
+  /** Numpad inventory keys (set by the HUD). */
+  onInventoryClick?: (slot: number, e: KeyboardEvent) => void;
+  private cursorEl?: HTMLElement | null;
+  private cursorTextShown?: string | null;
+
+  constructor(game: Game, view: BabylonView, canvas: HTMLCanvasElement) {
     this.game = game;
     this.view = view;
     this.canvas = canvas;
@@ -39,24 +111,29 @@ export class Input {
     this.bind();
   }
 
+  /** The view's effects (created with the game, before any input arrives). */
+  private get fx(): Effects {
+    return this.view.fx!;
+  }
+
   // ------------------------------------------------------------ selection
-  activeUnit() {
+  activeUnit(): Unit | null {
     const sel = this.selection.filter((u) => !u.dead);
     if (!sel.length) return null;
     if (this.activeType) {
       const a = sel.find((u) => u.type === this.activeType);
       if (a) return a;
     }
-    return sel[0];
+    return sel[0]!;
   }
 
-  sortSelection() {
-    const rank = (u) => (u.isHero ? 0 : u.isBuilding ? 3 : u.def.worker ? 2 : 1);
-    this.selection.sort((a, b) => rank(a) - rank(b) || UNITS[b.type].level - UNITS[a.type].level || a.id - b.id);
+  sortSelection(): void {
+    const rank = (u: Unit): number => (u.isHero ? 0 : u.isBuilding ? 3 : u.def.worker ? 2 : 1);
+    this.selection.sort((a, b) => rank(a) - rank(b) || UNITS[b.type]!.level - UNITS[a.type]!.level || a.id - b.id);
     if (!this.selection.some((u) => u.type === this.activeType)) this.activeType = this.selection[0]?.type ?? null;
   }
 
-  setSelection(list, sound = true) {
+  setSelection(list: Unit[], sound = true): void {
     for (const u of this.selection) u.selected = false;
     this.selection = list.slice(0, MAX_SELECTION);
     for (const u of this.selection) u.selected = true;
@@ -70,12 +147,12 @@ export class Input {
   }
 
   /** The lead unit of the selection acknowledges, Warcraft III style ('select' | 'move' | 'attack'). */
-  barkFor(kind) {
+  barkFor(kind: BarkKind): void {
     const u = this.selection.find((s) => s.owner === this.game.human && !s.isBuilding && !s.dead);
     if (u) this.onBark?.(u, kind);
   }
 
-  pruneSelection() {
+  pruneSelection(): void {
     if (this.selection.some((u) => u.dead || u.removed)) {
       const alive = this.selection.filter((u) => !u.dead && !u.removed);
       for (const u of this.selection) if (u.dead) u.selected = false;
@@ -87,23 +164,23 @@ export class Input {
     if (this.linePlan && !hasWorker) this.cancelLine();
   }
 
-  ownSelected() {
+  ownSelected(): Unit[] {
     return this.selection.filter((u) => !u.dead && u.owner === this.game.human);
   }
 
   // ------------------------------------------------------------- picking
-  pickUnit(px, py) {
+  pickUnit(px: number, py: number): Unit | null {
     const g = this.game;
-    let best = null;
+    let best: Unit | null = null;
     let bestD = Infinity;
     for (const u of g.units) {
       if (u.dead || u.removed || !u.view?.visibleNow) continue;
       const gy = g.terrain.heightAt(u.x, u.z);
-      const h = u.view.height * (u.mods.scale || 1);
+      const h = u.view.height! * (u.mods.scale || 1);
       const bottom = this.view.project(u.x, gy + 0.1, u.z);
       if (bottom.behind) continue;
       const top = this.view.project(u.x, gy + h, u.z);
-      const pr = Math.max(10, (u.isBuilding ? u.def.footprint * 0.5 : u.radius + 0.15) * this.view.pixelsPerUnit(u.x, gy + h / 2, u.z));
+      const pr = Math.max(10, (u.isBuilding ? u.def.footprint! * 0.5 : u.radius + 0.15) * this.view.pixelsPerUnit(u.x, gy + h / 2, u.z));
       // Distance from mouse to the vertical segment.
       const vx = top.x - bottom.x;
       const vy = top.y - bottom.y;
@@ -121,10 +198,10 @@ export class Input {
     return best;
   }
 
-  pickTree(px, py, ground) {
+  pickTree(px: number, py: number, ground: Point | null): Tree | null {
     if (!ground) return null;
     const t = this.game.terrain;
-    let best = null;
+    let best: Tree | null = null;
     let bd = 26;
     const cx = Math.floor(ground.x);
     const cz = Math.floor(ground.z);
@@ -143,19 +220,19 @@ export class Input {
     return best;
   }
 
-  pickItem(ground) {
+  pickItem(ground: Point | null): GroundItem | null {
     if (!ground) return null;
     return this.game.groundItems.find((it) => !it.taken && Math.hypot(it.x - ground.x, it.z - ground.z) < 0.9 && this.game.fog.isVisible(it.x, it.z)) ?? null;
   }
 
   // -------------------------------------------------------------- orders
-  orderAll(order, shift = false) {
+  orderAll(order: Order, shift = false): void {
     const units = this.ownSelected().filter((u) => !u.isBuilding);
     for (const u of units) this.game.issueOrder(u, { ...order }, shift);
     if (order.type === 'idle') for (const u of units) u.orderQueue = [];
   }
 
-  formationPoints(units, x, z) {
+  formationPoints(units: Unit[], x: number, z: number): { u?: Unit; x: number; z: number }[] {
     const n = units.length;
     if (n <= 1) return [{ x, z }];
     const cols = Math.ceil(Math.sqrt(n));
@@ -176,7 +253,7 @@ export class Input {
     dz /= l;
     const px = -dz;
     const pz = dx;
-    const slots = [];
+    const slots: { u: Unit; x: number; z: number }[] = [];
     // Melee in front, ranged behind.
     const sorted = [...units].sort((a, b) => (a.def.projectile ? 1 : 0) - (b.def.projectile ? 1 : 0) || a.id - b.id);
     const rows = Math.ceil(n / cols);
@@ -198,17 +275,17 @@ export class Input {
     return slots;
   }
 
-  moveGroup(units, x, z, type, shift) {
+  moveGroup(units: Unit[], x: number, z: number, type: 'move' | 'attackMove', shift: boolean): void {
     const slots = this.formationPoints(units, x, z);
     if (units.length === 1) {
-      this.game.issueOrder(units[0], { type, point: { x, z } }, shift);
+      this.game.issueOrder(units[0]!, { type, point: { x, z } }, shift);
       return;
     }
-    for (const s of slots) this.game.issueOrder(s.u, { type, point: { x: s.x, z: s.z } }, shift);
+    for (const s of slots) this.game.issueOrder(s.u!, { type, point: { x: s.x, z: s.z } }, shift);
   }
 
   /** Right-click on the world (or minimap). */
-  smartOrderAt(ground, target, shift = false, px = null, py = null) {
+  smartOrderAt(ground: Point | null, target: Unit | null, shift = false, px: number | null = null, py: number | null = null): void {
     const g = this.game;
     const own = this.ownSelected();
     if (!own.length) return;
@@ -217,15 +294,15 @@ export class Input {
     if (!movers.length) {
       const trainers = own.filter((u) => u.def.trains);
       for (const b of trainers) b.rally = target ? { x: target.x, z: target.z, target } : ground ? { x: ground.x, z: ground.z } : null;
-      if (ground) this.view.fx.orderMarker(ground.x, ground.z, 0xffee55);
+      if (ground) this.fx.orderMarker(ground.x, ground.z, 0xffee55);
       return;
     }
-    const tree = !target && px !== null ? this.pickTree(px, py, ground) : null;
+    const tree = !target && px !== null ? this.pickTree(px, py!, ground) : null;
     const item = !target && ground ? this.pickItem(ground) : null;
 
     if (target) {
       const enemy = g.isEnemy(g.human, target.owner);
-      if (enemy && target.targetableBy(movers[0])) {
+      if (enemy && target.targetableBy(movers[0]!)) {
         for (const u of movers) {
           if (u.canAttack) g.issueOrder(u, { type: 'attack', target }, shift);
           else g.issueOrder(u, { type: 'move', point: { x: target.x, z: target.z }, range: 2 }, shift);
@@ -251,9 +328,9 @@ export class Input {
       return;
     }
     if (item && movers.some((u) => u.isHero)) {
-      const h = movers.find((u) => u.isHero && !u.isIllusion) ?? movers[0];
+      const h = movers.find((u) => u.isHero && !u.isIllusion) ?? movers[0]!;
       g.issueOrder(h, { type: 'pickup', item }, shift);
-      this.view.fx.orderMarker(item.x, item.z, 0xffee55);
+      this.fx.orderMarker(item.x, item.z, 0xffee55);
       this.barkFor('move');
       return;
     }
@@ -267,47 +344,47 @@ export class Input {
     }
     if (!ground) return;
     this.moveGroup(movers, ground.x, ground.z, 'move', shift);
-    this.view.fx.orderMarker(ground.x, ground.z, 0x40ff40);
+    this.fx.orderMarker(ground.x, ground.z, 0x40ff40);
     this.barkFor('move');
   }
 
   /** Show clearly which tree was chosen for harvesting. */
-  flashTree(tree) {
+  flashTree(tree: Tree): void {
     this.treeFlash = { tree, until: performance.now() + 1100 };
-    this.view.fx.ring(tree.x, tree.z, 0x40ff40, 1.6, 0.5, 0.5);
-    this.view.fx.orderMarker(tree.x, tree.z, 0x40ff40);
+    this.fx.ring(tree.x, tree.z, 0x40ff40, 1.6, 0.5, 0.5);
+    this.fx.orderMarker(tree.x, tree.z, 0x40ff40);
     this.game.sound('click', undefined, undefined, 0.4);
   }
 
-  flash(target, friendly = false) {
+  flash(target: Unit, friendly = false): void {
     if (!target.view) return;
     target.view.flashUntil = this.game.time + 0.6;
-    this.view.fx.ring(target.x, target.z, friendly ? 0x40ff40 : 0xff4040, (target.isBuilding ? target.def.footprint * 0.6 : target.radius * 1.5) + 0.2, 0.45, target.radius);
+    this.fx.ring(target.x, target.z, friendly ? 0x40ff40 : 0xff4040, (target.isBuilding ? target.def.footprint! * 0.6 : target.radius * 1.5) + 0.2, 0.45, target.radius);
   }
 
-  orderWorkersReturn() {
+  orderWorkersReturn(): void {
     for (const u of this.ownSelected()) {
       if (u.def.worker && u.carry) {
-        const resume = u.harvest?.kind === 'gold' ? { type: 'harvest', target: u.harvest.mine } : u.harvest?.tree ? { type: 'harvest', target: u.harvest.tree } : null;
+        const resume: Order | null = u.harvest?.kind === 'gold' ? { type: 'harvest', target: u.harvest.mine } : u.harvest?.tree ? { type: 'harvest', target: u.harvest.tree } : null;
         this.game.issueOrder(u, { type: 'returnRes', resume });
       }
     }
   }
 
   // ---------------------------------------------------------- targeting
-  beginTarget(mode) {
+  beginTarget(mode: TargetMode): void {
     this.targetMode = mode;
     this.canvas.style.cursor = 'crosshair';
   }
 
-  cancelTarget() {
+  cancelTarget(): void {
     this.targetMode = null;
     this.canvas.style.cursor = '';
   }
 
-  useAbility(u, id) {
+  useAbility(u: Unit, id: string): void {
     const g = this.game;
-    const ab = ABILITIES[id];
+    const ab = ABILITIES[id]!;
     if (!canCast(g, u, id, false)) {
       g.sound('error');
       return;
@@ -319,7 +396,7 @@ export class Input {
     this.beginTarget({ kind: 'cast', ability: id, caster: u });
   }
 
-  executeTargetAt(ground, target, shift, px = null, py = null) {
+  executeTargetAt(ground: Point | null, target: Unit | null, shift: boolean, px: number | null = null, py: number | null = null): void {
     const g = this.game;
     const m = this.targetMode;
     if (!m) return;
@@ -330,7 +407,7 @@ export class Input {
         if (target && target !== movers[0]) for (const u of movers) g.issueOrder(u, { type: 'follow', target }, shift);
         else if (ground) {
           this.moveGroup(movers, ground.x, ground.z, 'move', shift);
-          this.view.fx.orderMarker(ground.x, ground.z, 0x40ff40);
+          this.fx.orderMarker(ground.x, ground.z, 0x40ff40);
         }
         this.barkFor('move');
         break;
@@ -340,18 +417,18 @@ export class Input {
           this.flash(target);
         } else if (ground) {
           this.moveGroup(movers.filter((u) => u.canAttack), ground.x, ground.z, 'attackMove', shift);
-          this.view.fx.orderMarker(ground.x, ground.z, 0xff4040);
+          this.fx.orderMarker(ground.x, ground.z, 0xff4040);
         }
         this.barkFor('attack');
         break;
       case 'patrol':
         if (ground) {
           for (const u of movers) g.issueOrder(u, { type: 'patrol', point: { x: ground.x, z: ground.z } }, shift);
-          this.view.fx.orderMarker(ground.x, ground.z, 0xffee55);
+          this.fx.orderMarker(ground.x, ground.z, 0xffee55);
         }
         break;
       case 'gather': {
-        const tree = !target && px !== null ? this.pickTree(px, py, ground) : null;
+        const tree = !target && px !== null ? this.pickTree(px, py!, ground) : null;
         const res = target?.type === 'goldmine' ? target : tree;
         if (!res) {
           g.message('Must target a Gold Mine or trees.', '#ff8080');
@@ -360,7 +437,7 @@ export class Input {
         }
         for (const u of movers) if (u.def.worker) g.issueOrder(u, { type: 'harvest', target: res }, shift);
         if (tree) this.flashTree(tree);
-        else this.flash(res, true);
+        else this.flash(res as Unit, true);
         break;
       }
       case 'nuke': {
@@ -374,17 +451,17 @@ export class Input {
         break;
       }
       case 'rally': {
-        const tree = !target && px !== null ? this.pickTree(px, py, ground) : null;
+        const tree = !target && px !== null ? this.pickTree(px, py!, ground) : null;
         for (const b of own.filter((u) => u.def.trains)) {
           if (target) b.rally = { x: target.x, z: target.z, target };
           else if (tree) b.rally = { x: tree.x, z: tree.z, target: tree };
           else if (ground) b.rally = { x: ground.x, z: ground.z };
         }
-        if (ground) this.view.fx.orderMarker(ground.x, ground.z, 0xffee55);
+        if (ground) this.fx.orderMarker(ground.x, ground.z, 0xffee55);
         break;
       }
       case 'cast': {
-        const ab = ABILITIES[m.ability];
+        const ab = ABILITIES[m.ability]!;
         const caster = m.caster;
         if (caster.dead) break;
         if (ab.target === 'unit') {
@@ -410,7 +487,7 @@ export class Input {
           const pt = target ? { x: target.x, z: target.z } : ground;
           if (!pt) return;
           g.issueOrder(caster, { type: 'cast', ability: m.ability, point: pt }, shift);
-          this.view.fx.ring(pt.x, pt.z, 0x9fd8ff, ab.aoe ?? 2, 0.4, (ab.aoe ?? 2) * 0.9, 0.5);
+          this.fx.ring(pt.x, pt.z, 0x9fd8ff, ab.aoe ?? 2, 0.4, (ab.aoe ?? 2) * 0.9, 0.5);
         }
         break;
       }
@@ -420,9 +497,9 @@ export class Input {
   }
 
   // ---------------------------------------------------------- placement
-  beginPlacement(type) {
+  beginPlacement(type: string): void {
     const g = this.game;
-    const def = UNITS[type];
+    const def = UNITS[type]!;
     if (g.missingRequirements(g.human, def).length) return;
     if (!g.canAfford(g.human, def.cost)) {
       g.spend(g.human, def.cost); // shows the message
@@ -430,24 +507,24 @@ export class Input {
     }
     this.cancelPlacement();
     this.cancelLine();
-    this.view.previews.beginPlacement(def.ageModels?.[Math.max(1, g.human.tier) - 1] ?? def.model, g.human.color, def.footprint);
+    this.view.previews.beginPlacement(def.ageModels?.[Math.max(1, g.human.tier) - 1] ?? def.model, g.human.color, def.footprint!);
     this.placement = { type, ok: false, x: 0, z: 0 };
     this.cardMenu = null;
   }
 
-  cancelPlacement() {
+  cancelPlacement(): void {
     if (!this.placement) return;
     this.view.previews.endPlacement();
     this.placement = null;
   }
 
-  updatePlacement() {
+  updatePlacement(): void {
     const pl = this.placement;
     if (!pl) return;
     const ground = this.view.screenToGround(this.mouse.x, this.mouse.y);
     if (!ground) return;
     const g = this.game;
-    const fp = UNITS[pl.type].footprint;
+    const fp = UNITS[pl.type]!.footprint!;
     const x = g.snap(ground.x, fp);
     const z = g.snap(ground.z, fp);
     pl.x = x;
@@ -456,7 +533,7 @@ export class Input {
     this.view.previews.updatePlacement(x, g.terrain.heightAt(x, z), z, pl.ok);
   }
 
-  confirmPlacement(shift) {
+  confirmPlacement(shift: boolean): void {
     const g = this.game;
     const pl = this.placement;
     if (!pl) return;
@@ -467,16 +544,16 @@ export class Input {
     }
     const workers = this.ownSelected().filter((u) => u.def.worker);
     if (!workers.length) return;
-    const builder = workers.sort((a, b) => Math.hypot(a.x - pl.x, a.z - pl.z) - Math.hypot(b.x - pl.x, b.z - pl.z))[0];
-    const def = UNITS[pl.type];
+    const builder = workers.sort((a, b) => Math.hypot(a.x - pl.x, a.z - pl.z) - Math.hypot(b.x - pl.x, b.z - pl.z))[0]!;
+    const def = UNITS[pl.type]!;
     if (!g.spend(g.human, def.cost)) return;
     g.issueOrder(builder, { type: 'build', building: pl.type, x: pl.x, z: pl.z, paid: true }, shift && builder.order.type !== 'idle');
-    this.view.fx.orderMarker(pl.x, pl.z, 0x40ff40);
+    this.fx.orderMarker(pl.x, pl.z, 0x40ff40);
     if (!shift || !g.canAfford(g.human, def.cost)) this.cancelPlacement();
   }
 
   // ------------------------------------------------------- road / wall lines
-  beginLine(kind) {
+  beginLine(kind: 'road' | 'wall'): void {
     this.cancelPlacement();
     this.cancelLine();
     this.cancelTarget();
@@ -485,45 +562,45 @@ export class Input {
     this.cardMenu = null;
   }
 
-  cancelLine() {
+  cancelLine(): void {
     if (!this.linePlan) return;
     this.view.previews.endLine();
     this.linePlan = null;
   }
 
-  lineCellOk(kind, cx, cz) {
+  lineCellOk(kind: 'road' | 'wall', cx: number, cz: number): boolean {
     const g = this.game;
     if (kind === 'road') return g.roads.canPlace(cx, cz, g.human);
     return g.canPlace('wall', cx + 0.5, cz + 0.5, g.human);
   }
 
-  updateLine() {
+  updateLine(): void {
     const lp = this.linePlan;
     if (!lp) return;
     const ground = this.view.screenToGround(this.mouse.x, this.mouse.y);
     if (!ground) return;
-    const cur = [Math.floor(ground.x), Math.floor(ground.z)];
+    const cur: Cell = [Math.floor(ground.x), Math.floor(ground.z)];
     let cells = lp.start ? Roads.line(lp.start[0], lp.start[1], cur[0], cur[1]) : [cur];
     if (cells.length > MAX_LINE) cells = cells.slice(0, MAX_LINE);
     lp.cells = cells;
     lp.ok = cells.map(([cx, cz]) => this.lineCellOk(lp.kind, cx, cz));
-    const centres = cells.map(([cx, cz]) => [cx + 0.5, this.game.terrain.heightAt(cx + 0.5, cz + 0.5) + 0.02, cz + 0.5]);
+    const centres = cells.map(([cx, cz]): [number, number, number] => [cx + 0.5, this.game.terrain.heightAt(cx + 0.5, cz + 0.5) + 0.02, cz + 0.5]);
     this.view.previews.updateLine(centres, lp.ok, lp.kind === 'wall' ? 1.4 : 0.08);
   }
 
-  lineSummary() {
-    const lp = this.linePlan;
+  lineSummary(): string {
+    const lp = this.linePlan!;
     const n = lp.ok.filter(Boolean).length;
     if (lp.kind === 'road') {
       return lp.start ? `Road: ${n} tile${n === 1 ? '' : 's'} · ${n * ROAD.cost.gold} gold` : 'Lay road: click and drag';
     }
-    const c = UNITS.wall.cost;
+    const c = UNITS['wall']!.cost;
     return lp.start ? `Wall: ${n} piece${n === 1 ? '' : 's'} · ${n * c.gold} gold, ${n * c.lumber} lumber` : 'Build wall: click and drag';
   }
 
-  confirmLine(shift) {
+  confirmLine(shift: boolean): void {
     const g = this.game;
-    const lp = this.linePlan;
+    const lp = this.linePlan!;
     const cells = lp.cells.filter((_, i) => lp.ok[i]);
     lp.start = null;
     if (!cells.length) {
@@ -540,25 +617,25 @@ export class Input {
     } else {
       const workers = this.ownSelected().filter((u) => u.def.worker);
       if (!workers.length) return;
-      const plan = [];
+      const plan: Cell[] = [];
       for (const c of cells) {
-        if (!g.canAfford(g.human, UNITS.wall.cost)) break;
-        g.spend(g.human, UNITS.wall.cost);
+        if (!g.canAfford(g.human, UNITS['wall']!.cost)) break;
+        g.spend(g.human, UNITS['wall']!.cost);
         plan.push(c);
       }
       if (!plan.length) {
-        g.spend(g.human, UNITS.wall.cost); // explains what is missing
+        g.spend(g.human, UNITS['wall']!.cost); // explains what is missing
       } else {
         if (plan.length < cells.length) g.message(`Planned ${plan.length} of ${cells.length} wall pieces: not enough resources.`, '#ffb070');
         // Split the line into contiguous stretches, one per Peasant (nearest stretch first).
         const per = Math.ceil(plan.length / workers.length);
-        const chunks = [];
+        const chunks: Cell[][] = [];
         for (let i = 0; i < plan.length; i += per) chunks.push(plan.slice(i, i + per));
         const free = [...workers];
         for (const chunk of chunks) {
-          const [fx, fz] = chunk[0];
+          const [fx, fz] = chunk[0]!;
           free.sort((a, b) => Math.hypot(a.x - fx, a.z - fz) - Math.hypot(b.x - fx, b.z - fz));
-          const w = free.shift();
+          const w = free.shift()!;
           chunk.forEach(([cx, cz], i) => {
             g.issueOrder(w, { type: 'build', building: 'wall', x: cx + 0.5, z: cz + 0.5, paid: true }, i > 0 || (shift && w.order.type !== 'idle'));
           });
@@ -569,7 +646,7 @@ export class Input {
     if (!shift) this.cancelLine();
   }
 
-  cancelConstruction(b) {
+  cancelConstruction(b: Unit): void {
     const g = this.game;
     if (!b.underConstruction || b.dead) return;
     const c = b.def.cost;
@@ -578,7 +655,7 @@ export class Input {
   }
 
   // --------------------------------------------------------------- events
-  bind() {
+  bind(): void {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -606,10 +683,10 @@ export class Input {
    * Mouse wheels zoom; trackpads pan with two fingers and zoom with a pinch
    * (pinches arrive as ctrl+wheel). `wheelMode` can force either behaviour.
    */
-  onWheel(e) {
+  onWheel(e: WheelEvent): void {
     e.preventDefault();
     const cam = this.view.cam;
-    const clampZoom = (v) => Math.max(cam.minDist, Math.min(cam.maxDist, v));
+    const clampZoom = (v: number): number => Math.max(cam.minDist, Math.min(cam.maxDist, v));
     const lineMode = e.deltaMode === 1;
     const looksLikeWheel = lineMode || (e.deltaX === 0 && Math.abs(e.deltaY) >= 40 && Number.isInteger(e.deltaY));
     const mode = this.settings.wheelMode;
@@ -624,12 +701,12 @@ export class Input {
     }
   }
 
-  localXY(e) {
+  localXY(e: MouseEvent): { x: number; y: number } {
     const r = this.canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  onMouseDown(e) {
+  onMouseDown(e: MouseEvent): void {
     if (!this.enabled) return;
     const { x, y } = this.localXY(e);
     if (e.button === 1) {
@@ -674,7 +751,7 @@ export class Input {
     this.drag = { x0: x, y0: y, x1: x, y1: y, shift: e.shiftKey, ctrl: e.ctrlKey, target };
   }
 
-  onMouseMove(e) {
+  onMouseMove(e: MouseEvent): void {
     const { x, y } = this.localXY(e);
     this.mouse.x = x;
     this.mouse.y = y;
@@ -694,7 +771,7 @@ export class Input {
     }
   }
 
-  onMouseUp(e) {
+  onMouseUp(e: MouseEvent): void {
     if (e.button === 1) this.panDrag = null;
     if (e.button === 0 && this.linePlan?.start) {
       this.updateLine();
@@ -758,9 +835,10 @@ export class Input {
     this.setSelection([u]);
   }
 
-  onKeyDown(e) {
+  onKeyDown(e: KeyboardEvent): void {
     if (!this.enabled) return;
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    const el = e.target as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
     const g = this.game;
     this.keys.add(e.code);
     if (e.key === 'Alt') {
@@ -775,7 +853,7 @@ export class Input {
       else if (this.cardMenu) this.cardMenu = null;
       else {
         const btn = this.buttons.find((b) => b.hotkey === 'Escape');
-        if (btn && !btn.disabled) btn.onClick();
+        if (btn && !btn.disabled) btn.onClick?.();
       }
       return;
     }
@@ -811,8 +889,8 @@ export class Input {
       e.preventDefault();
       const types = [...new Set(this.selection.map((u) => u.type))];
       if (types.length > 1) {
-        const i = types.indexOf(this.activeType);
-        this.activeType = types[(i + 1) % types.length];
+        const i = types.indexOf(this.activeType!);
+        this.activeType = types[(i + 1) % types.length]!;
         this.cardMenu = null;
       }
       return;
@@ -830,9 +908,9 @@ export class Input {
       return;
     }
     // Inventory (numpad like Warcraft III).
-    const numpad = { Numpad7: 0, Numpad8: 1, Numpad4: 2, Numpad5: 3, Numpad1: 4, Numpad2: 5 };
+    const numpad: Record<string, number> = { Numpad7: 0, Numpad8: 1, Numpad4: 2, Numpad5: 3, Numpad1: 4, Numpad2: 5 };
     if (e.code in numpad) {
-      this.onInventoryClick?.(numpad[e.code], e);
+      this.onInventoryClick?.(numpad[e.code]!, e);
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -842,13 +920,13 @@ export class Input {
     if (btn) {
       e.preventDefault();
       if (!btn.disabled) {
-        btn.onClick(e);
+        btn.onClick?.(e);
         this.game.sound('click', undefined, undefined, 0.4);
       } else g.sound('error');
     }
   }
 
-  saveSettings() {
+  saveSettings(): void {
     try {
       localStorage.setItem('he3d-camera', JSON.stringify(this.settings));
     } catch {
@@ -856,12 +934,12 @@ export class Input {
     }
   }
 
-  centerOn(x, z) {
+  centerOn(x: number, z: number): void {
     this.view.cam.setTarget(x, z + this.view.cam.distance * 0.12);
   }
 
   // ---------------------------------------------------------- per frame
-  update(dt) {
+  update(dt: number): void {
     this.pruneSelection();
     const cam = this.view.cam;
     // Smooth zoom.
@@ -876,7 +954,7 @@ export class Input {
     if (this.keys.has('ArrowDown')) dz += 1;
     if (this.settings.edgeScroll && this.mouse.inWindow && this.enabled && !this.drag && !this.panDrag && document.hasFocus()) {
       const zone = 26;
-      const ramp = (d) => (d >= zone ? 0 : 0.3 + 0.7 * (1 - d / zone));
+      const ramp = (d: number): number => (d >= zone ? 0 : 0.3 + 0.7 * (1 - d / zone));
       const { x, y } = this.mouse;
       dx -= ramp(x);
       dx += ramp(this.view.width - 1 - x);
@@ -912,19 +990,19 @@ export class Input {
     }
     this.hoverTree = ht;
     const flash = this.treeFlash && performance.now() < this.treeFlash.until && this.treeFlash.tree.alive ? this.treeFlash.tree : null;
-    if (flash) this.view.fx.highlightTree(flash, 0x40ff40);
-    else if (ht) this.view.fx.highlightTree(ht, 0xffe14a);
-    else this.view.fx.clearTreeHighlight();
+    if (flash) this.fx.highlightTree(flash, 0x40ff40);
+    else if (ht) this.fx.highlightTree(ht, 0xffe14a);
+    else this.fx.clearTreeHighlight();
     this.updatePlacement();
     this.updateLine();
     this.updateCursorLabel();
   }
 
   /** What a click would do right now, shown next to the cursor. */
-  cursorText() {
+  cursorText(): string | null {
     const g = this.game;
     if (this.linePlan) return this.lineSummary();
-    if (this.placement) return this.placement.ok ? `Place ${UNITS[this.placement.type].name}` : g.placeReason || "Can't build here";
+    if (this.placement) return this.placement.ok ? `Place ${UNITS[this.placement.type]!.name}` : g.placeReason || "Can't build here";
     const h = this.hovered;
     const tm = this.targetMode;
     if (tm) {
@@ -943,7 +1021,7 @@ export class Input {
         case 'nuke':
           return 'Launch the nuclear missile here';
         case 'cast': {
-          const ab = ABILITIES[tm.ability];
+          const ab = ABILITIES[tm.ability]!;
           if (ab.target === 'unit') return h ? `${ab.name}: ${h.def.name}` : `${ab.name}: choose a target`;
           return `${ab.name}: choose an area`;
         }
@@ -959,7 +1037,7 @@ export class Input {
     }
     const workers = movers.some((u) => u.def.worker);
     if (h) {
-      if (g.isEnemy(g.human, h.owner) && h.targetableBy(movers[0])) return `Attack ${h.def.name}`;
+      if (g.isEnemy(g.human, h.owner) && h.targetableBy(movers[0]!)) return `Attack ${h.def.name}`;
       if (workers && h.type === 'goldmine') return 'Mine gold';
       if (workers && h.owner === g.human && h.isBuilding && h.underConstruction) return 'Help build';
       if (workers && h.owner === g.human && h.def.dropOff && movers.some((u) => u.carry && (h.def.dropOff === true || h.def.dropOff === u.carry.kind))) return 'Return resources';
@@ -971,7 +1049,7 @@ export class Input {
     return null;
   }
 
-  updateCursorLabel() {
+  updateCursorLabel(): void {
     const el = (this.cursorEl ??= document.getElementById('cursor-label'));
     if (!el) return;
     const text = this.mouse.inside && !this.drag ? this.cursorText() : null;

@@ -3,45 +3,89 @@ import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES, AGES, ECONOMY, researchC
 import { moodOf } from '../game/empire.ts';
 import { ITEMS, SHOP_STOCK } from '../data/items.ts';
 import { ABILITIES, requiredHeroLevel } from '../game/abilities.ts';
+import { isEmpire } from '../game/types.ts';
+import type { Cost } from '../data/types.ts';
+import type { Game } from '../game/game.ts';
+import type { Input } from '../input.ts';
+
+/** A click on a button, or its hotkey. */
+export type ButtonEvent = MouseEvent | KeyboardEvent;
+
+/** A button on the 4x3 command card. */
+export interface CommandButton {
+  id: string;
+  /** Grid position. */
+  x: number;
+  y: number;
+  hotkey?: string;
+  /** Shown instead of the hotkey (e.g. 'Esc'). */
+  keyLabel?: string;
+  /** An emoji icon on a coloured tile, or a model picture. */
+  icon?: string;
+  iconBg?: string;
+  model?: string;
+  building?: boolean;
+  /** A small mark over the icon (+, −, ✖). */
+  label?: string;
+  name: string;
+  /** HTML. */
+  tooltip?: string;
+  /** HTML. */
+  cost?: string;
+  count?: number;
+  level?: number;
+  /** 0-1 progress overlay. */
+  progress?: number;
+  /** 0-1 cooldown sweep. */
+  cooldown?: number;
+  glow?: boolean;
+  passive?: boolean;
+  unlearned?: boolean;
+  noMana?: boolean;
+  autocast?: boolean;
+  disabled?: boolean;
+  onClick?(e?: ButtonEvent): void;
+  onRightClick?(e?: ButtonEvent): void;
+}
 
 const GRID_KEYS = [['Q', 'W', 'E', 'R'], ['A', 'S', 'D', 'F'], ['Z', 'X', 'C', 'V']];
 
-function costLine(cost, food) {
-  const parts = [];
+function costLine(cost?: Partial<Cost> | null, food?: number): string {
+  const parts: string[] = [];
   if (cost?.gold) parts.push(`<span class="c-gold">◉ ${cost.gold}</span>`);
   if (cost?.lumber) parts.push(`<span class="c-lumber">♣ ${cost.lumber}</span>`);
   if (food) parts.push(`<span class="c-food">🍖 ${food}</span>`);
   return parts.join(' ');
 }
 
-export function getCommands(game, input) {
+export function getCommands(game: Game, input: Input): CommandButton[] {
   const sel = input.selection.filter((u) => !u.dead);
   const p = game.human;
   if (!sel.length) return [];
   const u = input.activeUnit();
   if (!u) return [];
   const own = u.owner === p;
-  const B = [];
+  const B: CommandButton[] = [];
 
   // Neutral shops & mercenaries can be "used" by selecting them.
   if (u.def.shop) {
-    const stock = SHOP_STOCK[u.def.shop];
+    const stock = SHOP_STOCK[u.def.shop]!;
     const customer = game.shopCustomer(p, u);
     stock.forEach((id, i) => {
-      const it = ITEMS[id];
+      const it = ITEMS[id]!;
       const x = i % 4;
       const y = Math.floor(i / 4);
       B.push({
         id: `buy:${id}`,
         x,
         y,
-        hotkey: GRID_KEYS[y][x],
+        hotkey: GRID_KEYS[y]![x]!,
         icon: it.icon,
         iconBg: it.color,
         name: `Purchase ${it.name}`,
         tooltip: `${it.description}`,
         cost: costLine({ gold: it.cost }),
-        disabled: !customer || p.gold < it.cost,
+        disabled: !customer || p.gold < it.cost!,
         onClick: () => game.buyItem(p, u, id),
       });
     });
@@ -49,18 +93,18 @@ export function getCommands(game, input) {
   }
   if (u.def.mercenaries) {
     u.def.mercenaries.forEach((type, i) => {
-      const d = UNITS[type];
+      const d = UNITS[type]!;
       B.push({
         id: `hire:${type}`,
         x: i,
         y: 0,
-        hotkey: GRID_KEYS[0][i],
+        hotkey: GRID_KEYS[0]![i]!,
         model: d.model,
         name: `Hire ${d.name}`,
-        tooltip: `${d.description ?? ''}<br><span class="dim">HP ${d.hp} · Damage ${d.damage[0]}-${d.damage[1]} · Level ${d.level}</span><br><span class="dim">Available: ${u.stock[type]}</span>`,
+        tooltip: `${d.description ?? ''}<br><span class="dim">HP ${d.hp} · Damage ${d.damage![0]}-${d.damage![1]} · Level ${d.level}</span><br><span class="dim">Available: ${u.stock![type]}</span>`,
         cost: costLine(d.cost, d.food),
-        count: u.stock[type],
-        disabled: u.stock[type] < 1 || p.gold < d.cost.gold,
+        count: u.stock![type],
+        disabled: u.stock![type]! < 1 || p.gold < d.cost.gold,
         onClick: () => game.hireMerc(p, u, type),
       });
     });
@@ -71,7 +115,7 @@ export function getCommands(game, input) {
   // ---------------------------------------------------------------- menus
   if ((input.cardMenu === 'build' || input.cardMenu === 'build2') && u.def.worker) {
     const order = input.cardMenu === 'build' ? BUILD_MENUS.basic : BUILD_MENUS.advanced;
-    const keys = {
+    const keys: Record<string, string> = {
       house: 'H', road: 'R', farm: 'F', wall: 'W', gate: 'G', lumberyard: 'L', barracks: 'B', scouttower: 'T', townhall: 'N',
       research_center: 'C', stable: 'E', sanctum: 'A', workshop: 'K', factory: 'Y', missile_silo: 'M',
     };
@@ -87,7 +131,7 @@ export function getCommands(game, input) {
         });
         return;
       }
-      const d = UNITS[type];
+      const d = UNITS[type]!;
       const missing = game.missingRequirements(p, d);
       const line = !!d.wall;
       B.push({
@@ -97,7 +141,7 @@ export function getCommands(game, input) {
         model: d.ageModels?.[Math.max(1, p.tier) - 1] ?? d.model,
         building: true,
         name: `Build ${d.ageNames?.[Math.max(1, p.tier) - 1] ?? d.name}`,
-        tooltip: `${d.description}${line ? '<br><span class="dim">Click and drag to build a line of wall.</span>' : ''}${d.housingByAge ? `<br><span class="dim">Shelters ${d.housingByAge[Math.max(1, p.tier) - 1]} citizens in the ${AGE_NAMES[Math.max(1, p.tier)]} (more in later ages).</span>` : ''}${d.foodRateByAge ? `<br><span class="dim">Grows ${Math.round(d.foodRateByAge[Math.max(1, p.tier) - 1] * 60)} food per minute in the ${AGE_NAMES[Math.max(1, p.tier)]}.</span>` : ''}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
+        tooltip: `${d.description}${line ? '<br><span class="dim">Click and drag to build a line of wall.</span>' : ''}${d.housingByAge ? `<br><span class="dim">Shelters ${d.housingByAge[Math.max(1, p.tier) - 1]} citizens in the ${AGE_NAMES[Math.max(1, p.tier)]!} (more in later ages).</span>` : ''}${d.foodRateByAge ? `<br><span class="dim">Grows ${Math.round(d.foodRateByAge[Math.max(1, p.tier) - 1]! * 60)} food per minute in the ${AGE_NAMES[Math.max(1, p.tier)]!}.</span>` : ''}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
         cost: `${costLine(d.cost)}${line ? ' <span class="dim">per piece</span>' : ''}`,
         disabled: missing.length > 0 || !game.canAfford(p, d.cost),
         onClick: () => (line ? input.beginLine('wall') : input.beginPlacement(type)),
@@ -109,10 +153,10 @@ export function getCommands(game, input) {
   if (input.cardMenu === 'hire' && u.def.tier && u.owner === p) {
     const list = game.empires.heroesForHire(p);
     list.slice(0, 8).forEach((hg, i) => {
-      const h = hg.hero;
+      const h = hg.hero!;
       const fee = game.empires.hireFee(hg);
       B.push({
-        id: `hirehero:${hg.index}`, x: i % 4, y: Math.floor(i / 4), hotkey: GRID_KEYS[Math.floor(i / 4)][i % 4],
+        id: `hirehero:${hg.index}`, x: i % 4, y: Math.floor(i / 4), hotkey: GRID_KEYS[Math.floor(i / 4)]![i % 4]!,
         model: h.def.model, name: `Hire ${hg.name}'s ${h.def.name} (level ${h.level})`,
         tooltip: `The Hero fights on your side for ${ECONOMY.hireTime / 60} minutes: your enemies become theirs.${hg.isHuman ? '' : ''}${hg.team === p.team ? '' : '<br><span class="dim">Currently not your ally.</span>'}`,
         cost: costLine({ gold: fee }),
@@ -129,9 +173,10 @@ export function getCommands(game, input) {
     return B;
   }
   if (input.cardMenu === 'learn' && u.isHero) {
-    u.heroDef.abilities.forEach((id, i) => {
-      const ab = ABILITIES[id];
-      const cur = u.abilityLevels[id];
+    const level = u.level!;
+    u.heroDef!.abilities.forEach((id, i) => {
+      const ab = ABILITIES[id]!;
+      const cur = u.abilityLevels![id]!;
       const req = cur < ab.levels ? requiredHeroLevel(ab, cur + 1) : 99;
       B.push({
         id: `learn:${id}`,
@@ -141,13 +186,13 @@ export function getCommands(game, input) {
         icon: ab.icon,
         iconBg: ab.color,
         name: `Learn ${ab.name} - [Level ${cur + 1}]`,
-        tooltip: `${ab.tooltip(cur + 1)}${cur >= ab.levels ? '<br><span class="dim">Fully learned.</span>' : u.level < req ? `<br><span class="req">Requires Hero level ${req}.</span>` : ''}`,
+        tooltip: `${ab.tooltip(cur + 1)}${cur >= ab.levels ? '<br><span class="dim">Fully learned.</span>' : level < req ? `<br><span class="req">Requires Hero level ${req}.</span>` : ''}`,
         level: cur,
-        disabled: cur >= ab.levels || u.level < req || u.skillPoints <= 0,
+        disabled: cur >= ab.levels || level < req || u.skillPoints! <= 0,
         onClick: () => {
           if (game.learnAbility(u, id)) {
             game.sound('click');
-            if (u.skillPoints <= 0) input.cardMenu = null;
+            if (u.skillPoints! <= 0) input.cardMenu = null;
           }
         },
       });
@@ -173,11 +218,11 @@ export function getCommands(game, input) {
       });
     }
     const trains = (u.def.trains ?? []).filter((type) => {
-      const a = UNITS[type].age ?? 1;
+      const a = UNITS[type]!.age ?? 1;
       return type === 'peasant' || (a <= Math.max(1, p.tier) && a >= p.tier - 1);
     });
     trains.forEach((type, i) => {
-      const d = UNITS[type];
+      const d = UNITS[type]!;
       const missing = game.missingRequirements(p, d);
       B.push({
         id: `train:${type}`,
@@ -186,14 +231,14 @@ export function getCommands(game, input) {
         hotkey: d.hotkey,
         model: d.model,
         name: `Train ${d.name}`,
-        tooltip: `${d.description ?? ''}<br><span class="dim">HP ${d.hp} · Damage ${d.damage[0]}-${d.damage[1]} · Armor ${d.armor}</span>${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
+        tooltip: `${d.description ?? ''}<br><span class="dim">HP ${d.hp} · Damage ${d.damage![0]}-${d.damage![1]} · Armor ${d.armor}</span>${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
         cost: costLine(d.cost, d.food),
         disabled: missing.length > 0 || !!u.upgrading,
         onClick: () => game.trainUnit(u, type),
       });
     });
     (u.def.researches ?? []).forEach((upg, i) => {
-      const U = UPGRADES[upg];
+      const U = UPGRADES[upg]!;
       const lvl = p.upgrades[upg] ?? 0;
       const cap = researchCap(p);
       const x = i % 4;
@@ -214,19 +259,19 @@ export function getCommands(game, input) {
         id: `research:${upg}`,
         x,
         y,
-        hotkey: GRID_KEYS[y][x],
+        hotkey: GRID_KEYS[y]![x]!,
         icon: U.icon,
         iconBg: '#3a4a5a',
         name: `Research ${U.name} - [Level ${lvl + 1}]`,
-        tooltip: `${U.effect} per level.<br><span class="dim">Level ${lvl} of ${cap} available in the ${AGE_NAMES[Math.max(1, p.tier)]} · ${researchTime(upg, lvl)}s</span>${maxed ? '<br><span class="req">Advance to the next age to research further.</span>' : ''}${busy ? '<br><span class="dim">Being researched at another Research Center.</span>' : ''}`,
+        tooltip: `${U.effect} per level.<br><span class="dim">Level ${lvl} of ${cap} available in the ${AGE_NAMES[Math.max(1, p.tier)]!} · ${researchTime(upg, lvl)}s</span>${maxed ? '<br><span class="req">Advance to the next age to research further.</span>' : ''}${busy ? '<br><span class="dim">Being researched at another Research Center.</span>' : ''}`,
         cost: maxed ? '' : costLine(researchCost(upg, lvl)),
         level: lvl,
-        disabled: !!u.researching || busy || maxed || !game.canAfford(p, researchCost(upg, lvl)),
+        disabled: !!u.researching || !!busy || maxed || !game.canAfford(p, researchCost(upg, lvl)),
         onClick: () => game.startResearch(u, upg),
       });
     });
     if (u.def.upgradesTo && !u.upgrading) {
-      const d = UNITS[u.def.upgradesTo];
+      const d = UNITS[u.def.upgradesTo]!;
       const missing = game.missingRequirements(p, d);
       B.push({
         id: 'upgrade',
@@ -235,14 +280,14 @@ export function getCommands(game, input) {
         hotkey: 'U',
         model: d.model,
         building: true,
-        name: d.tier ? `Advance to the ${AGE_NAMES[d.tier]} (${d.name})` : `Upgrade to ${d.name}`,
+        name: d.tier ? `Advance to the ${AGE_NAMES[d.tier]!} (${d.name})` : `Upgrade to ${d.name}`,
         tooltip: `${d.description}${missing.length ? `<br><span class="req">Requires: ${missing.map((m) => game.requirementName(m)).join(', ')}</span>` : ''}`,
         cost: costLine(d.cost),
         disabled: missing.length > 0 || u.trainQueue.length > 0,
         onClick: () => game.startUpgrade(u),
       });
     }
-    if (u.def.tier && u.owner.mode === 'empire') {
+    if (u.def.tier && isEmpire(p)) {
       const next = game.empires.nextAge(p);
       if (next && !u.upgrading) {
         const missing = game.empires.ageMissing(p);
@@ -258,7 +303,7 @@ export function getCommands(game, input) {
       }
       const mood = moodOf(p.happiness);
       const econ = `<br><span class="dim">Citizens ${Math.floor(p.citizens)}/${p.housing} · Mood ${mood.icon} ${mood.name} · Tax ${p.tax} · Rations ${p.rations}</span><br><span class="dim">There is no limit. Hold Shift to change by 5.</span>`;
-      const step = (e) => (e?.shiftKey ? 5 : 1);
+      const step = (e?: ButtonEvent): number => (e?.shiftKey ? 5 : 1);
       B.push({
         id: 'tax-', x: 0, y: 1, hotkey: 'Z', icon: '💰', iconBg: '#3a5a3a', label: '−', name: `Lower Taxes (now ${p.tax})`,
         tooltip: `Lower taxes make your people happier but bring in less gold.${econ}`,
@@ -322,7 +367,7 @@ export function getCommands(game, input) {
         B.push({
           id: 'revive', x: 0, y: 0, hotkey: '', model: h.def.model, name: `Reviving ${h.def.name}`,
           tooltip: `Your Hero returns in ${left} seconds.`, disabled: true,
-          progress: 1 - left / (12 + 4 * h.level),
+          progress: 1 - left / (12 + 4 * h.level!),
         });
       }
     }
@@ -349,12 +394,13 @@ export function getCommands(game, input) {
     B.push({ id: 'buildmenu2', x: 1, y: 2, hotkey: 'V', icon: '🏛️', iconBg: '#4a4a5a', name: 'Build Advanced Structure', tooltip: 'Research Center, Stable, Workshop, Arcane Sanctum, Factory and Missile Silo. Most unlock in later ages.', onClick: () => (input.cardMenu = 'build2') });
   }
   if (u.isHero && !u.isIllusion) {
-    if (u.skillPoints > 0) {
-      B.push({ id: 'learnmenu', x: 3, y: 1, hotkey: 'O', icon: '✚', iconBg: '#7a6a1a', name: `Hero Abilities (${u.skillPoints} point${u.skillPoints > 1 ? 's' : ''})`, tooltip: 'Learn a new ability or improve an existing one.', glow: true, onClick: () => (input.cardMenu = 'learn') });
+    const points = u.skillPoints!;
+    if (points > 0) {
+      B.push({ id: 'learnmenu', x: 3, y: 1, hotkey: 'O', icon: '✚', iconBg: '#7a6a1a', name: `Hero Abilities (${points} point${points > 1 ? 's' : ''})`, tooltip: 'Learn a new ability or improve an existing one.', glow: true, onClick: () => (input.cardMenu = 'learn') });
     }
-    u.heroDef.abilities.forEach((id, i) => {
-      const ab = ABILITIES[id];
-      const lvl = u.abilityLevels[id];
+    u.heroDef!.abilities.forEach((id, i) => {
+      const ab = ABILITIES[id]!;
+      const lvl = u.abilityLevels![id]!;
       const passive = ab.target === 'passive' || ab.target === 'aura';
       const cd = u.cooldowns[id] || 0;
       const total = ab.cooldown?.[Math.max(0, lvl - 1)] ?? 1;
@@ -380,7 +426,7 @@ export function getCommands(game, input) {
     });
   } else if (u.def.abilities.length) {
     u.def.abilities.forEach((id) => {
-      const ab = ABILITIES[id];
+      const ab = ABILITIES[id]!;
       if (!ab.autocast) return;
       B.push({
         id: `cast:${id}`,
@@ -391,7 +437,7 @@ export function getCommands(game, input) {
         iconBg: ab.color,
         name: ab.name,
         tooltip: `${ab.tooltip(1)}<br><span class="dim">Right-click to toggle autocast.</span>`,
-        cost: `<span class="c-mana">✦ ${ab.mana[0]} mana</span>`,
+        cost: `<span class="c-mana">✦ ${ab.mana![0]} mana</span>`,
         autocast: u.autocast[id],
         onClick: () => input.useAbility(u, id),
         onRightClick: () => {

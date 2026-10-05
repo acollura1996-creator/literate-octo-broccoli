@@ -1,10 +1,13 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M11 are done; see section 3.
+Status: **done.** All twelve milestones are complete (section 3). The game is strict TypeScript on
+Babylon.js, built with Vite and packaged with Electron; three.js is used only at build time, to bake
+the procedural models. One item couldn't be checked in this environment: running the installed game
+from the Windows `.exe` needs a Windows PC (D5).
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
-original stays untouched on its own branch, and the three.js version keeps running until every
-milestone below has been ported and checked.
+original stays untouched on its own branch. The three.js version kept running alongside the port until
+every milestone had been ported and checked, and was removed in M12.
 
 Visual target: the chunky shapes, bold colours and hand-painted look of Warcraft III, with modern
 lighting and effects on top, in the spirit of Warcraft III: Reforged.
@@ -18,13 +21,13 @@ recommendation.
 
 | # | Topic | Situation | Recommendation |
 | --- | --- | --- | --- |
-| D1 | **147 procedural 3D models** | Every unit, building, creep and prop is built in code from three.js geometry: about 10,700 lines in `src/render/models/*`, using `BoxGeometry`, `CylinderGeometry`, `ExtrudeGeometry` with `Shape`, `LatheGeometry`, `mergeGeometries` and so on. There are no model files. | **Bake them to glTF.** A Node script (`tools/bake-models.ts`) runs the existing builders on the CPU (three.js geometry needs no WebGL) and writes `public/models/*.glb`. Team-coloured materials are tagged, and the animation "parts" contract (legs, arms, weapon, doors, …) goes into glTF `extras`. The game loads the GLBs with `@babylonjs/loaders`, so **the shipped app contains no three.js**. three.js stays only as a dev dependency of the bake script, which keeps the models editable as code. The alternative is to hand-port all 10,700 lines to Babylon `MeshBuilder`. That is a large job with a real risk of visual drift, so I don't recommend it. |
-| D2 | **TypeScript strict** | About 19,000 lines of JavaScript, with dynamic objects everywhere (units and players gain properties at runtime). | All **new** code is strict TypeScript from day one. The engine-free simulation is converted **file by file**, so the game keeps running throughout: `allowJs` at first, then `.ts` with interfaces for Unit, Player, Order and Game. Milestone M11 finishes this. |
-| D3 | **Hand-painted textures** | The game has no textures today: everything is flat-coloured Lambert material. | Generate tileable **painterly textures procedurally** at load time (stone, wood, thatch, metal, cloth, leather, foliage, earth, skin). Apply them **triplanar** through a Babylon `MaterialPluginBase`, so baked models need no UV work. No external art assets are needed. |
-| D4 | **Unit acknowledgements** | There are no voice lines. All audio is synthesized with Web Audio: 36 effects plus procedural music. | Pre-render the existing synths into `AudioBuffer`s and play them as Babylon `StaticSound`s with spatial positioning. Add **new synthesized acknowledgement "barks"** (formant-synth grunts per unit type and age) for select, move and attack. These are new content, not ported content. |
+| D1 | **147 procedural 3D models** | Every unit, building, creep and prop is built in code from three.js geometry: about 10,700 lines in `src/render/models/*`, using `BoxGeometry`, `CylinderGeometry`, `ExtrudeGeometry` with `Shape`, `LatheGeometry`, `mergeGeometries` and so on. There are no model files. | **Bake them to glTF.** A Node script (`tools/bake-models.ts`) runs the existing builders on the CPU (three.js geometry needs no WebGL) and writes `public/models/*.glb`. Team-coloured materials are tagged, and the animation "parts" contract (legs, arms, weapon, doors, …) goes into glTF `extras`. The game loads the GLBs with `@babylonjs/loaders`, so **the shipped app contains no three.js**. three.js stays only as a dev dependency of the bake script, which keeps the models editable as code. The alternative is to hand-port all 10,700 lines to Babylon `MeshBuilder`. That is a large job with a real risk of visual drift, so I don't recommend it. **Outcome (M4, M12):** as recommended. The bake script is `tools/bake-models.mjs` (plain JavaScript, since the builders it runs are three.js code), and the builders moved to `tools/models/`. The shipped game contains no three.js. |
+| D2 | **TypeScript strict** | About 19,000 lines of JavaScript, with dynamic objects everywhere (units and players gain properties at runtime). | All **new** code is strict TypeScript from day one. The engine-free simulation is converted **file by file**, so the game keeps running throughout: `allowJs` at first, then `.ts` with interfaces for Unit, Player, Order and Game. Milestone M11 finishes this. **Outcome:** the simulation was converted in M11 and the rest of the app in M12; every file in `src/` is strict TypeScript. |
+| D3 | **Hand-painted textures** | The game has no textures today: everything is flat-coloured Lambert material. | Generate tileable **painterly textures procedurally** at load time (stone, wood, thatch, metal, cloth, leather, foliage, earth, skin). Apply them **triplanar** through a Babylon `MaterialPluginBase`, so baked models need no UV work. No external art assets are needed. **Outcome (M8):** `PainterlyPlugin` (`src/babylon/Painterly.ts`), on every model, tree, rock and bush. |
+| D4 | **Unit acknowledgements** | There are no voice lines. All audio is synthesized with Web Audio: 36 effects plus procedural music. | Pre-render the existing synths into `AudioBuffer`s and play them as Babylon `StaticSound`s with spatial positioning. Add **new synthesized acknowledgement "barks"** (formant-synth grunts per unit type and age) for select, move and attack. These are new content, not ported content. **Outcome (M7):** as recommended, plus ambient loops (wind, birds, crickets, the citadel's drone). |
 | D5 | **Windows installer** | This environment is Linux with no Wine and no Windows machine. | `electron-builder --win nsis` can cross-build the installer here (with `signAndEditExecutable: false`, since Wine isn't available to embed the icon). I'll check the unpacked app runs under Electron on Linux (Xvfb), and that the NSIS `.exe` is produced and well formed. **Installing and running the `.exe` has to be done on a Windows PC.** I can install Wine for a best-effort smoke test, but Electron under Wine is unreliable, so this item stays flagged. **Outcome (M10):** electron-builder 26 embeds the icon without Wine, so only signing is off (`signExecutable: false`). The installer was built, installed, uninstalled and reinstalled under Wine 9. Electron doesn't draw a window under Wine, so **running the game from the `.exe` still has to be confirmed on Windows.** |
-| D6 | **Claude Artifact build** | `npm run build:artifact` builds a single-file web version, which is what's published at the claude.ai link. | Keep it working as a secondary target. Babylon's bundle is larger but still fits in one file. |
-| D7 | **Skeletal animation and AnimationGroups** | No model has a skeleton. Animation is procedural: the code rotates "part" nodes every frame. | Keep the procedural animation driver, ported to Babylon `TransformNode`s. `AnimationGroup` is used only where it helps (door swings, UI). The "baked vertex animation" step in milestone 9 doesn't apply; the performance work goes into instancing instead (see M9). |
+| D6 | **Claude Artifact build** | `npm run build:artifact` builds a single-file web version, which is what's published at the claude.ai link. | Keep it working as a secondary target. Babylon's bundle is larger but still fits in one file. **Outcome:** kept working throughout; the single file is about 10.6 MB and also runs from `file://`. |
+| D7 | **Skeletal animation and AnimationGroups** | No model has a skeleton. Animation is procedural: the code rotates "part" nodes every frame. | Keep the procedural animation driver, ported to Babylon `TransformNode`s. `AnimationGroup` is used only where it helps (door swings, UI). The "baked vertex animation" step in milestone 9 doesn't apply; the performance work goes into instancing instead (see M9). **Outcome:** as planned (M4, M9). |
 
 ---
 
@@ -77,6 +80,8 @@ recommendation.
 - **Tools:** `tools/gallery.html` (development model gallery), `tools/build-artifact.mjs` (Artifact build).
 
 ### 1.2 Files
+
+This is the inventory taken before the port; `README.md` describes the final layout.
 
 Engine coupling: **none** means no three.js; **render** means pure rendering; **mixed** means logic and rendering in the same file and must be split.
 
@@ -197,8 +202,19 @@ tools/
   gallery.html     Babylon model gallery.
 ```
 
-**Migration path.** While the port is in progress, the Babylon renderer lives in `src/babylon/` and
-is selected with `?renderer=babylon` (the desktop build opts in). `BabylonView` implements the same
+**Outcome.** The final code kept the existing folder names rather than introducing `sim/`, `render/`,
+`audio/` and `input/`, since renaming would have touched every import for no change in behaviour:
+
+- the simulation is `src/data`, `src/world`, `src/game` and `src/ai` (no engine, no DOM; checked by
+  `tsconfig.sim.json` and by `npm run sim`, which runs it in Node);
+- the renderer is `src/babylon/`;
+- input is `src/input.ts`, and the HUD is `src/ui/`;
+- audio is `src/audio.ts` (the synthesizer and the music) plus `src/babylon/SpatialAudio.ts` (Babylon
+  AudioEngineV2);
+- `electron/` is as planned, and the bake script is `tools/bake-models.mjs`.
+
+**Migration path** (as followed until M12). While the port was in progress, the Babylon renderer
+lived in `src/babylon/` and was selected with `?renderer=babylon` (the desktop build opted in). `BabylonView` implements the same
 interface as the three.js `View`. Whatever is not ported yet runs on a hidden three.js view inside
 it, which is updated every frame but never drawn, so the full game stays playable on Babylon after
 every milestone. Each milestone moves another part across. In M12, `src/babylon/` replaces
@@ -223,7 +239,7 @@ Each milestone ends with the same check:
 3. Fix every error before moving on.
 4. Commit and push to `babylon-migration`.
 
-The three.js renderer keeps working in parallel, behind `?renderer=three`, until M12.
+The three.js renderer kept working in parallel, behind `?renderer=three`, until M12 removed it.
 
 - [x] **M1 – Scaffold the stack.**
   - [x] Add TypeScript (strict), `@babylonjs/core`, `@babylonjs/loaders`, `@babylonjs/materials`, Electron and electron-builder.
@@ -461,11 +477,55 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - The scenario suites pass on both renderers (67/67 each), and a boot test of both renderers plays with no console errors after each step.
   - Where the types meet the dynamic code: about 16 type assertions (`as`), mostly at call sites whose invariant the code already relies on (a harvest order's target is a gold mine or a tree, a unit-target spell always has a target). Non-null assertions (`!`) mark values that are present by construction (typed-array reads, a building's footprint, a hero's level), exactly where the JavaScript read them without checks.
   - Still JavaScript after M11 (outside the simulation): the HUD (`ui/`), `input.js`, `main.js`, `audio.js` and the three.js renderer (`render/`). M12 removes the three.js renderer and converts the rest.
-- [ ] **M12 – Remove three.js.**
-  - Drop the `?renderer=three` path and every three.js import from `src/`.
-  - three.js remains only as a devDependency of `tools/bake-models.ts` (D1).
-  - Convert the remaining application code to strict TypeScript: `main`, `input`, `audio` and the HUD (`ui/`).
-  - Final feature-parity pass against section 1.1, before/after screenshots, updated `README.md`, every box ticked here.
+- [x] **M12 – Remove three.js.**
+  - [x] Dropped the `?renderer=three` path and every three.js import from `src/`.
+    - Deleted the three.js renderer: `src/render/view.js`, `terrainView.js`, `unitview.js`, `effects.js`, `projectiles.js`, `previews.js`, and `src/ui/icons.js`.
+    - `main.ts` always loads `BabylonView` and `SpatialAudio`.
+    - The 2D overlay moved to `src/ui/overlay.ts`.
+    - The Electron development launcher's `HE3D_QUERY` passes test parameters to the page in unpackaged runs only.
+  - [x] three.js remains only as a devDependency of the model bake (D1).
+    - The procedural builders and their asset helpers moved from `src/render/` to `tools/models/`, next to the three.js gallery that edits them.
+    - `tools/bake-models.mjs` bakes from there. The baked GLB is byte-identical to the one baked from the old location.
+    - Neither `dist/` nor the single-file Artifact build contains any three.js code (checked by searching the bundles).
+  - [x] Converted the rest of the application to strict TypeScript: `main.ts`, `input.ts`, `audio.ts` and the HUD (`ui/hud.ts`, `commands.ts`, `minimap.ts`, `overlay.ts`), about 5,600 lines. Every file in `src/` is now TypeScript.
+    - New shared types:
+      - `input.ts`: `TargetMode`, what the next click does (a union of the order modes, a nuke silo or a spell caster);
+      - `ui/commands.ts`: `CommandButton`, the command card's button model;
+      - `audio.ts`: its voices, synth functions, music state and voice tables (`BarkKind`, `Speaker`, `Formants`, …);
+      - `globals.d.ts`: the desktop bridge and the debug handles on `window`.
+    - `SimHooks.onGameOver` now passes the game's own `GameOver`.
+    - Dropped renderer feature checks in `main.ts` (`typeof view.setQuality === 'function'` and similar): Babylon is the only view.
+    - Behaviour is unchanged, checked with the original JavaScript `audio.js` side by side in Chromium:
+      - all 287 sounds (every effect in two variants, every bark line of every voice, the ambient loops and bird calls) rendered offline by both synths match sample for sample, apart from reverb rounding. The reverb's convolver varies by up to about 0.005 from run to run, by the same amount between two runs of the old code;
+      - the live path creates the same Web Audio nodes for every effect and bark, and the music scheduler runs.
+  - [x] Final checks:
+    - `npm run typecheck`, `npm run build` and `npm run build:artifact` pass.
+    - The 67 scenario checks pass (interaction, walls and gates, map mechanics, research, town-centre UI).
+    - A boot test of an empire game and a hero game plays with a clean console, and so does the title-screen walk-through in the table below.
+    - The seeded headless runs still give the M11 world hashes exactly (15 minutes on Hard, and 30 minutes on Easy with a Hero).
+    - The 120-unit benchmark on High draws 595–611 calls per frame (652 after M9).
+    - The production build runs in Electron (`app://`, offline fonts, no `require` or `process` in the page) and `npm run dist` builds the installer.
+  - [x] Feature parity with section 1.1:
+
+    | Feature group (1.1) | Where it was checked |
+    | --- | --- |
+    | Title and setup screens, menus, end screen | An M12 walk through `main.ts`'s UI with no `autostart` (13 checks, clean console): pick the Empire path, remove and add computer generals, make one an allied hero, set the difficulty, start; open the menu (F10), switch the graphics preset, open Quests, close; lose, then return to the title screen with the settings kept. Fullscreen through F11, Alt+Enter and ⛶ (M10). |
+    | Game modes, victory and defeat | Scenario checks ("empire falls 20 s after losing its last town center", allied hiring); M5's 28-minute AI game to an empire's collapse; the seeded headless runs. |
+    | Map, terrain, water, citadel, trees, doodads, camps, roads | M3 and M4 comparisons against three.js; the screenshots below. |
+    | Fog of war | M3 (black mask and explored fog); the night and citadel screenshots. |
+    | Camera | M2 (picking, projection, zoom, panning, edge scrolling, wheel modes); the walls check drags in screen space. |
+    | Units, models, animation, rings, buffs, carried resources, ghosts | M4: all 147 models, vertex bounds within 0.01 units; M9: merged parts with identical bounds. |
+    | Selection and orders | `interact` checks: click, box select, smart right-click, attack, targeting, casting, placement, the road tool, rally; `walls` checks: line tool, gates. |
+    | Simulation | M11 hashes, unchanged in M12. |
+    | Effects and projectiles | M5 (same API, timings and shapes) and M8 (particles); the battle screenshot. |
+    | HUD, command card, portrait, minimap, overlay | M6; the `tcui` and `research` checks read the command card, tooltips, hotkeys and mood display. |
+    | Audio | M7 (spatial mix, voice limits, mute, music); the M12 synth equivalence check above. |
+    | Tools | `tools/gallery.html` (three.js builders) and `tools/gallery-babylon.html` (baked models); `build-artifact.mjs`. |
+
+  - [x] Before and after screenshots: [`docs/migration/`](docs/migration/). Each image shows the three.js and JavaScript version (left) and the Babylon.js and TypeScript version on High (right), at the same camera position and hour.
+    - [Home base](docs/migration/compare_home.jpg), [close-up](docs/migration/compare_closeup.jpg), [the citadel](docs/migration/compare_citadel.jpg) and [close](docs/migration/compare_citadelclose.jpg), [dusk](docs/migration/compare_dusk.jpg), [night](docs/migration/compare_night.jpg), [zoomed out](docs/migration/compare_zoomout.jpg) and [a 120-unit battle](docs/migration/compare_battle.jpg).
+    - Rendered in software (SwiftShader). Both shots of each pair are taken from the same headless setup.
+  - [x] `README.md`: TypeScript and Babylon.js throughout, the run and build commands, the code layout without `src/render/`, and the model builders under `tools/models/`.
 
 ---
 
@@ -475,9 +535,9 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
 | --- | --- | --- |
 | Procedural model builders | No Babylon equivalent of three's full geometry API (`ExtrudeGeometry` bevels, `LatheGeometry` UVs). | Bake with three.js at build time (D1). |
 | `onBeforeCompile` string patches | Babylon shaders are structured differently. | `MaterialPluginBase` gives defined hook points. |
-| Live portrait (second `WebGLRenderer`) | Babylon prefers one engine. | `engine.registerView(canvas, camera)` renders a second camera into the portrait canvas. |
+| Live portrait (second `WebGLRenderer`) | Babylon prefers one engine. | Resolved in M6, without `registerView`: the portrait renders into a scissored rectangle of the main canvas each frame and is copied into its own 2D canvas, with no second WebGL context. |
 | Procedural music on raw Web Audio | AudioEngineV2 hides some low-level scheduling. | Resolved in M7: the engine runs on audio.js's `AudioContext`, and the music stays a raw Web Audio scheduler on it. The engine's output is routed into the same compressor and master gain, through one internal property (`mainOut._inNode`) with a fallback. |
 | Windows `.exe` verification | No Windows here; Electron draws no window under Wine. | D5: installer checked under Wine (install, uninstall, reinstall); running the game needs a Windows PC. |
 | Size of the strict-TypeScript conversion | About 19,000 lines of dynamic JavaScript. | Incremental `allowJs` → `.ts` (D2): the simulation in M11, checked against the old code with seeded headless runs; the UI in M12. |
-| 200+ units at 60 fps on integrated GPUs | Many small meshes per unit. | Part instancing with instanced team colour; LOD (hide small details beyond a distance); quality presets. |
+| 200+ units at 60 fps on integrated GPUs | Many small meshes per unit. | M9: parts merged per animated node and instanced with the team colour per instance, unit-level frustum culling, shadow casters culled per cascade, quality presets and a first-run quality check. No LOD was added. The GPU frame rate still has to be measured on real hardware. |
 | Headless verification | Screenshots use software rendering (SwiftShader), so fps numbers aren't representative. | Report draw calls, active meshes and CPU frame time from the benchmark scene. GPU fps must be checked on real hardware. |

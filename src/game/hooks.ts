@@ -4,7 +4,7 @@
 // renderers read its state (units, terrain, roads, fog, projectiles) each frame.
 
 import type { Unit } from './unit.ts';
-import type { GroundItem, Player } from './types.ts';
+import type { GameOver, GroundItem, Player } from './types.ts';
 
 export interface Point {
   x: number;
@@ -19,6 +19,8 @@ export interface UnitViewHandle {
   height?: number;
   visibleNow?: boolean;
   hovered?: boolean;
+  /** Game time until which the unit flashes (the player just ordered something at it). */
+  flashUntil?: number;
   root?: { scale?: { x: number }; rotation?: { y: number } };
 }
 
@@ -57,7 +59,7 @@ export interface SimHooks {
   centerOn?(x: number, z: number): void;
   /** Play a sound, optionally at a map position (volume falls off with camera distance). */
   sound?(name: string, volume: number, x?: number, z?: number): void;
-  onGameOver?(over: { victory: boolean; text: string }): void;
+  onGameOver?(over: GameOver): void;
   onAgeAdvanced?(player: Player): void;
   onOffersChanged?(): void;
   onTeamsChanged?(): void;

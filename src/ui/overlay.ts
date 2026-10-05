@@ -1,37 +1,52 @@
 // 2D overlay drawn over the 3D view: health/mana bars, floating combat
 // text, the drag-selection rectangle and construction progress.
+import type { Game } from '../game/game.ts';
+import type { Input } from '../input.ts';
+import type { BabylonView, ScreenPoint } from '../babylon/BabylonView.ts';
+import type { Tree } from '../world/terrain.ts';
 
 export class Overlay {
-  constructor(canvas, game, view, input) {
+  readonly canvas: HTMLCanvasElement;
+  readonly ctx: CanvasRenderingContext2D;
+  /** The game and input being drawn (set when a game starts). */
+  game: Game | null;
+  readonly view: BabylonView;
+  input: Input | null;
+  /** Reused projection result. */
+  private readonly pt: ScreenPoint;
+  private dpr = 1;
+
+  constructor(canvas: HTMLCanvasElement, game: Game | null, view: BabylonView, input: Input | null) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d')!;
     this.game = game;
     this.view = view;
     this.input = input;
     this.pt = { x: 0, y: 0, behind: false };
   }
 
-  resize() {
+  resize(): void {
     const dpr = Math.min(window.devicePixelRatio, 2);
     this.canvas.width = Math.round(this.view.width * dpr);
     this.canvas.height = Math.round(this.view.height * dpr);
     this.dpr = dpr;
   }
 
-  hpColor(r) {
+  hpColor(r: number): string {
     if (r > 0.66) return '#2fd12f';
     if (r > 0.33) return '#e8d22a';
     return '#e8352a';
   }
 
-  draw() {
+  draw(): void {
     const ctx = this.ctx;
-    const g = this.game;
+    const g = this.game!;
+    const input = this.input!;
     const v = this.view;
     const dpr = this.dpr || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, v.width, v.height);
-    const showAll = this.input.altDown;
+    const showAll = input.altDown;
     const maxY = v.height * 0.79;
 
     for (const u of g.units) {
@@ -107,10 +122,11 @@ export class Overlay {
     }
 
     // Axe markers above the trees the selected Peasants are cutting.
-    const marked = new Set();
-    for (const u of this.input.selection) {
+    const marked = new Set<Tree>();
+    for (const u of input.selection) {
       if (u.dead || !u.def.worker || u.owner !== g.human) continue;
-      const tr = u.harvest?.kind === 'lumber' ? u.harvest.tree : u.order.type === 'harvest' && u.order.target?.lumber !== undefined ? u.order.target : null;
+      const o = u.order;
+      const tr = u.harvest?.kind === 'lumber' ? u.harvest.tree : o.type === 'harvest' && o.target && 'lumber' in o.target ? o.target : null;
       if (!tr || !tr.alive || marked.has(tr)) continue;
       marked.add(tr);
       const p = v.project(tr.x, g.terrain.heightAt(tr.x, tr.z) + 3.2 * tr.scale, tr.z, this.pt);
@@ -140,7 +156,7 @@ export class Overlay {
     ctx.globalAlpha = 1;
 
     // Drag rectangle
-    const d = this.input.dragRect;
+    const d = input.dragRect;
     if (d) {
       const x0 = Math.min(d.x0, d.x1);
       const y0 = Math.min(d.y0, d.y1);

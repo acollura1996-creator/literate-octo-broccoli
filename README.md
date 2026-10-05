@@ -236,9 +236,10 @@ WC3's attack-type/armor-type damage table and armor formula.
 
 ```
 src/
-  main.js              title screen, game setup, main loop
-  input.js             selection, smart orders, targeting, building placement, hotkeys
-  audio.js             synthesized sound effects, unit acknowledgements, ambience and music (Web Audio)
+  main.ts              title screen, game setup, main loop
+  input.ts             selection, smart orders, targeting, building placement, hotkeys
+  audio.ts             synthesized sound effects, unit acknowledgements, ambience and music (Web Audio)
+  globals.d.ts         the desktop bridge and the debug handles on `window`
   data/                units, buildings, heroes, items (types.ts: UnitDef, ItemDef, ...)
   game/                simulation: Game, Unit, orders/behaviour, abilities, fog of war, roads,
                        empire economy (citizens, taxes, ages, hiring, nukes) and random events;
@@ -258,9 +259,11 @@ tools/
   headless-sim.mjs     npm run sim: the simulation without any renderer
 ```
 
-The simulation (`data/`, `world/`, `game/`, `ai/`) is strict TypeScript and never imports an
-engine; renderers read its state and implement `SimHooks`. It sticks to erasable TypeScript syntax
-(checked by `tsconfig.sim.json`), so Node runs it directly for the model bake and `npm run sim`.
+Everything in `src/` is strict TypeScript. The simulation (`data/`, `world/`, `game/`, `ai/`)
+never imports an engine; renderers read its state and implement `SimHooks`. It sticks to erasable
+TypeScript syntax (checked by `tsconfig.sim.json`), so Node runs it directly for the model bake and
+`npm run sim`. The model builders in `tools/models/` stay JavaScript on three.js geometry: they run
+only at build time, and three.js is a build tool here, not part of the game.
 
 Testing helpers (dev server only): `?autostart=hero:paladin` or `?autostart=empire` skips the
 title screen, and `&rivals=hero-ranger-ally,empire,random` sets the computer generals

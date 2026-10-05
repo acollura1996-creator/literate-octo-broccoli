@@ -12,6 +12,8 @@
 //   music notes ─► musicBus ─► musicGain ─► musicDuck ─┬──► compressor ─► masterGain ─► out
 //                                                      └──(wet)──► reverb
 
+import type { UnitDef } from './data/types.ts';
+
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
@@ -22,18 +24,88 @@ const MIN_GAP = 0.04; // seconds between two starts of the same effect
 const START_DELAY = 0.005; // tiny scheduling offset so envelopes start cleanly
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** A unit acknowledging the player, Warcraft III style. */
+export type BarkKind = 'select' | 'move' | 'attack';
+
+/** Where a node's output goes: another node, or a parameter it modulates. */
+type Dest = AudioNode | AudioParam;
+
+/** Per-name throttle state: voices playing and the last start time. */
+interface NameStats {
+  count: number;
+  last: number;
+}
+
+/** One playing sound: every node it created, so all of them can be disconnected when its sources end. */
+interface Voice {
+  name: string;
+  prio: number;
+  /** The sound's output gain (null for music notes, which write straight to the music bus). */
+  out: GainNode | null;
+  stats: NameStats | null;
+  start: number;
+  nodes: AudioNode[];
+  sources: AudioScheduledSourceNode[];
+  /** Sources that haven't ended yet. */
+  pending: number;
+  /** When the last source stops (context time). */
+  end: number;
+  /** Counted in `voices` and its name's stats. */
+  counted: boolean;
+  done: boolean;
+  timer: ReturnType<typeof setTimeout> | 0;
+}
+
+/** A sound: schedules its nodes on voice `v` from time `t` into `out`. */
+type SfxFn = (v: Voice, t: number, out: GainNode) => void;
+/** A sound rendered offline: an SfxFn, or an ambient loop filling `dur` seconds (0 for one-shots). */
+type RenderFn = (v: Voice, t: number, out: GainNode, dur: number) => void;
+
+/** Voice-pool priority and per-name limits (see startVoice). */
+interface Throttle {
+  prio: number;
+  max?: number;
+  gap?: number;
+  gain?: number;
+}
+
+interface SfxDef extends Throttle {
+  fn: SfxFn;
+  /** Seconds to lower the music for (fanfares). */
+  duck?: number;
+}
+
+/** Options of noiseBurst. */
+interface BurstOptions {
+  type?: BiquadFilterType;
+  freq: number;
+  Q?: number;
+  freqTo?: number;
+  sweep?: number;
+  a?: number;
+  peak?: number;
+  d?: number;
+  dest: Dest | null;
+  rate?: number;
+}
+
+// ---------------------------------------------------------------------------
 // Module state
 // ---------------------------------------------------------------------------
 
-let ctx = null;
-let compressor = null;
-let masterGain = null;
-let sfxGain = null;
-let musicGain = null;
-let musicDuck = null;
-let reverbIn = null;
-let noiseBuf = null;
-let distCurve = null;
+/** The live context, or an OfflineAudioContext while a sound is rendered (see buildOffline). */
+let ctx: AudioContext | OfflineAudioContext | null = null;
+let compressor: DynamicsCompressorNode | null = null;
+let masterGain: GainNode | null = null;
+let sfxGain: GainNode | null = null;
+let musicGain: GainNode | null = null;
+let musicDuck: GainNode | null = null;
+let reverbIn: GainNode | null = null;
+let noiseBuf: AudioBuffer | null = null;
+let distCurve: Float32Array<ArrayBuffer> | null = null;
 
 let muted = false;
 let masterVolume = 0.6;
@@ -43,9 +115,8 @@ let resumeRequestedAt = -1e9;
 let wetUsed = false;
 
 /** Active, counted sfx voices in start order (oldest first). */
-const voices = [];
-/** name -> { count, last } */
-const nameStats = new Map();
+const voices: Voice[] = [];
+const nameStats = new Map<string, NameStats>();
 
 // ---------------------------------------------------------------------------
 // Small utilities
@@ -57,13 +128,13 @@ const nameStats = new Map();
  */
 let rnd = Math.random;
 
-const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
-const rand = (a, b) => a + rnd() * (b - a);
-const pick = (arr) => arr[(rnd() * arr.length) | 0];
-const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
-const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+const rand = (a: number, b: number): number => a + rnd() * (b - a);
+const pick = <T>(arr: readonly T[]): T => arr[(rnd() * arr.length) | 0]!;
+const mtof = (m: number): number => 440 * Math.pow(2, (m - 69) / 12);
+const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
-function toUnit(v, fallback) {
+function toUnit(v: unknown, fallback: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? clamp01(n) : fallback;
 }
@@ -72,20 +143,22 @@ function toUnit(v, fallback) {
 // Context / graph setup
 // ---------------------------------------------------------------------------
 
-function makeNoiseBuffer(seconds) {
-  const len = Math.floor(ctx.sampleRate * seconds);
-  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+function makeNoiseBuffer(seconds: number): AudioBuffer {
+  const ac = ctx!;
+  const len = Math.floor(ac.sampleRate * seconds);
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < len; i++) d[i] = rnd() * 2 - 1;
   return buf;
 }
 
 /** Stereo, slightly darkening, exponentially decaying noise = cheap hall reverb. */
-function makeImpulse(seconds, decay) {
-  const sr = ctx.sampleRate;
+function makeImpulse(seconds: number, decay: number): AudioBuffer {
+  const ac = ctx!;
+  const sr = ac.sampleRate;
   const len = Math.floor(sr * seconds);
   const pre = Math.floor(sr * 0.012);
-  const buf = ctx.createBuffer(2, len, sr);
+  const buf = ac.createBuffer(2, len, sr);
   for (let ch = 0; ch < 2; ch++) {
     const d = buf.getChannelData(ch);
     let lp = 0;
@@ -103,7 +176,7 @@ function makeImpulse(seconds, decay) {
   return buf;
 }
 
-function makeDistCurve(amount) {
+function makeDistCurve(amount: number): Float32Array<ArrayBuffer> {
   const n = 1024;
   const c = new Float32Array(n);
   const norm = Math.tanh(amount);
@@ -114,38 +187,39 @@ function makeDistCurve(amount) {
   return c;
 }
 
-function buildGraph() {
-  compressor = ctx.createDynamicsCompressor();
+function buildGraph(): void {
+  const ac = ctx!;
+  compressor = ac.createDynamicsCompressor();
   compressor.threshold.value = -16;
   compressor.knee.value = 12;
   compressor.ratio.value = 6;
   compressor.attack.value = 0.004;
   compressor.release.value = 0.2;
 
-  masterGain = ctx.createGain();
+  masterGain = ac.createGain();
   masterGain.gain.value = muted ? 0 : masterVolume;
   compressor.connect(masterGain);
-  masterGain.connect(ctx.destination);
+  masterGain.connect(ac.destination);
 
-  sfxGain = ctx.createGain();
+  sfxGain = ac.createGain();
   sfxGain.gain.value = 0.9;
   sfxGain.connect(compressor);
 
-  reverbIn = ctx.createGain();
-  const conv = ctx.createConvolver();
+  reverbIn = ac.createGain();
+  const conv = ac.createConvolver();
   conv.buffer = makeImpulse(1.8, 2.6);
-  const revOut = ctx.createGain();
+  const revOut = ac.createGain();
   revOut.gain.value = 0.55;
   reverbIn.connect(conv);
   conv.connect(revOut);
   revOut.connect(compressor);
 
-  musicGain = ctx.createGain();
+  musicGain = ac.createGain();
   musicGain.gain.value = musicVolume;
-  musicDuck = ctx.createGain();
+  musicDuck = ac.createGain();
   musicGain.connect(musicDuck);
   musicDuck.connect(compressor);
-  const musicWet = ctx.createGain();
+  const musicWet = ac.createGain();
   musicWet.gain.value = 0.45;
   musicDuck.connect(musicWet);
   musicWet.connect(reverbIn);
@@ -155,9 +229,9 @@ function buildGraph() {
 
   // Older iOS only unlocks output once something is played inside a gesture.
   try {
-    const s = ctx.createBufferSource();
-    s.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
-    s.connect(ctx.destination);
+    const s = ac.createBufferSource();
+    s.buffer = ac.createBuffer(1, 1, ac.sampleRate);
+    s.connect(ac.destination);
     s.onended = () => s.disconnect();
     s.start(0);
   } catch {
@@ -169,7 +243,7 @@ function buildGraph() {
  * Create (once) and resume the AudioContext. Safe to call many times; call it
  * from a user gesture (pointerdown / keydown) so browsers allow playback.
  */
-export function initAudio() {
+export function initAudio(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     if (ctx && ctx.state === 'closed') ctx = null;
@@ -197,7 +271,7 @@ export function initAudio() {
 }
 
 /** True when sounds can be scheduled (running, or a resume was just requested). */
-function canPlay() {
+function canPlay(): boolean {
   if (!ctx) return false;
   if (ctx.state === 'running') return true;
   return ctx.state === 'suspended' && nowMs() - resumeRequestedAt < 600;
@@ -207,31 +281,31 @@ function canPlay() {
 // Volume / mute
 // ---------------------------------------------------------------------------
 
-export function setMuted(m) {
+export function setMuted(m: boolean): void {
   muted = !!m;
   if (ctx && masterGain) {
     masterGain.gain.setTargetAtTime(muted ? 0 : masterVolume, ctx.currentTime, 0.015);
   }
 }
 
-export function isMuted() {
+export function isMuted(): boolean {
   return muted;
 }
 
-export function setMasterVolume(v) {
+export function setMasterVolume(v: number): void {
   masterVolume = toUnit(v, masterVolume);
   if (ctx && masterGain && !muted) {
     masterGain.gain.setTargetAtTime(masterVolume, ctx.currentTime, 0.02);
   }
 }
 
-export function setMusicVolume(v) {
+export function setMusicVolume(v: number): void {
   musicVolume = toUnit(v, musicVolume);
   if (ctx && musicGain) musicGain.gain.setTargetAtTime(musicVolume, ctx.currentTime, 0.05);
 }
 
 /** Temporarily lower the music (victory / defeat stingers). */
-function duckMusic(t, dur, level = 0.25) {
+function duckMusic(t: number, dur: number, level = 0.25): void {
   if (!musicDuck) return;
   const p = musicDuck.gain;
   p.cancelScheduledValues(t);
@@ -246,7 +320,7 @@ function duckMusic(t, dur, level = 0.25) {
 // all of its sources have ended (or the voice is stolen).
 // ---------------------------------------------------------------------------
 
-function makeVoice(name, prio, out, stats) {
+function makeVoice(name: string, prio: number, out: GainNode | null, stats: NameStats | null): Voice {
   return {
     name,
     prio,
@@ -263,7 +337,7 @@ function makeVoice(name, prio, out, stats) {
   };
 }
 
-function releaseCounts(v) {
+function releaseCounts(v: Voice): void {
   if (!v.counted) return;
   v.counted = false;
   if (v.stats) v.stats.count--;
@@ -271,7 +345,7 @@ function releaseCounts(v) {
   if (i >= 0) voices.splice(i, 1);
 }
 
-function finishVoice(v) {
+function finishVoice(v: Voice): void {
   if (v.done) return;
   v.done = true;
   releaseCounts(v);
@@ -289,13 +363,13 @@ function finishVoice(v) {
 }
 
 /** Quickly fade a voice out and stop its sources (voice stealing). */
-function killVoice(v) {
+function killVoice(v: Voice): void {
   releaseCounts(v);
   if (!ctx || v.done) return;
   const t = ctx.currentTime;
   try {
-    v.out.gain.cancelScheduledValues(t);
-    v.out.gain.setTargetAtTime(0, t, 0.01);
+    v.out!.gain.cancelScheduledValues(t);
+    v.out!.gain.setTargetAtTime(0, t, 0.01);
   } catch {
     /* ignore */
   }
@@ -313,8 +387,9 @@ function killVoice(v) {
  * Lower-priority voices go first (oldest first); a voice of equal priority is
  * only stolen once it is past its attack, so a burst of hits doesn't churn.
  */
-function stealVoice(prio) {
-  const now = ctx.currentTime;
+function stealVoice(prio: number): boolean {
+  const ac = ctx!;
+  const now = ac.currentTime;
   let victim = null;
   for (const v of voices) {
     const ok = v.prio < prio || (v.prio === prio && now - v.start > 0.12);
@@ -327,78 +402,89 @@ function stealVoice(prio) {
 
 // --- node helpers (all register the node on the voice) ---------------------
 
-function track(v, n) {
+/** Connect `src` to a node, or let it modulate a parameter. */
+function connectTo(src: AudioNode, dest: Dest): void {
+  if (dest instanceof AudioParam) src.connect(dest);
+  else src.connect(dest);
+}
+
+function track<T extends AudioNode>(v: Voice, n: T): T {
   v.nodes.push(n);
   return n;
 }
 
-function gainNode(v, value, dest) {
-  const g = ctx.createGain();
+function gainNode(v: Voice, value: number, dest: Dest | null): GainNode {
+  const ac = ctx!;
+  const g = ac.createGain();
   g.gain.value = value;
-  if (dest) g.connect(dest);
+  if (dest) connectTo(g, dest);
   return track(v, g);
 }
 
-function biquad(v, type, freq, Q, dest) {
-  const f = ctx.createBiquadFilter();
+function biquad(v: Voice, type: BiquadFilterType, freq: number, Q: number | null | undefined, dest: Dest | null): BiquadFilterNode {
+  const ac = ctx!;
+  const f = ac.createBiquadFilter();
   f.type = type;
   f.frequency.value = freq;
   if (Q != null) f.Q.value = Q;
-  if (dest) f.connect(dest);
+  if (dest) connectTo(f, dest);
   return track(v, f);
 }
 
-function shaper(v, dest) {
-  const ws = ctx.createWaveShaper();
+function shaper(v: Voice, dest: AudioNode): WaveShaperNode {
+  const ac = ctx!;
+  const ws = ac.createWaveShaper();
   ws.curve = distCurve;
   ws.oversample = 'none';
   ws.connect(dest);
   return track(v, ws);
 }
 
-function runSource(v, src, t0, t1, offset) {
+function runSource<T extends AudioScheduledSourceNode>(v: Voice, src: T, t0: number, t1: number, offset?: number): T {
   v.pending++;
   v.sources.push(src);
   src.onended = () => {
     v.pending--;
     if (v.pending <= 0) finishVoice(v);
   };
-  if (offset != null) src.start(t0, offset);
+  if (offset != null && src instanceof AudioBufferSourceNode) src.start(t0, offset);
   else src.start(t0);
   src.stop(t1);
   if (t1 > v.end) v.end = t1;
   return track(v, src);
 }
 
-function oscNode(v, type, freq, t0, t1, dest) {
-  const o = ctx.createOscillator();
+function oscNode(v: Voice, type: OscillatorType, freq: number, t0: number, t1: number, dest: Dest | null): OscillatorNode {
+  const ac = ctx!;
+  const o = ac.createOscillator();
   o.type = type;
   o.frequency.value = freq;
-  if (dest) o.connect(dest);
+  if (dest) connectTo(o, dest);
   return runSource(v, o, t0, t1);
 }
 
-function noiseNode(v, t0, t1, dest, rate = 1) {
-  const s = ctx.createBufferSource();
+function noiseNode(v: Voice, t0: number, t1: number, dest: AudioNode, rate = 1): AudioBufferSourceNode {
+  const ac = ctx!;
+  const s = ac.createBufferSource();
   s.buffer = noiseBuf;
   s.loop = true;
   if (rate !== 1) s.playbackRate.value = rate;
   s.connect(dest);
-  return runSource(v, s, t0, t1, rnd() * (noiseBuf.duration - 0.05));
+  return runSource(v, s, t0, t1, rnd() * (noiseBuf!.duration - 0.05));
 }
 
 /** Send part of a voice to the shared reverb. */
-function wet(v, amount) {
+function wet(v: Voice, amount: number): void {
   wetUsed = true;
   if (!reverbIn) return;
   const g = gainNode(v, amount, reverbIn);
-  v.out.connect(g);
+  v.out!.connect(g);
 }
 
 // --- envelope helpers -------------------------------------------------------
 
 /** 0 -> peak (linear, `a` s) -> ~0 (exponential, `d` s). */
-function perc(param, t, a, peak, d) {
+function perc(param: AudioParam, t: number, a: number, peak: number, d: number): number {
   param.setValueAtTime(0, t);
   param.linearRampToValueAtTime(peak, t + a);
   param.exponentialRampToValueAtTime(0.0001, t + a + d);
@@ -406,7 +492,7 @@ function perc(param, t, a, peak, d) {
 }
 
 /** 0 -> peak (linear, `a`), hold, -> ~0 (exponential, `r`). */
-function swell(param, t, a, peak, hold, r) {
+function swell(param: AudioParam, t: number, a: number, peak: number, hold: number, r: number): number {
   const h = t + a + Math.max(0, hold);
   param.setValueAtTime(0, t);
   param.linearRampToValueAtTime(peak, t + a);
@@ -415,7 +501,7 @@ function swell(param, t, a, peak, hold, r) {
   return h + r;
 }
 
-function sweep(param, t, from, to, dur) {
+function sweep(param: AudioParam, t: number, from: number, to: number, dur: number): void {
   param.setValueAtTime(from, t);
   param.exponentialRampToValueAtTime(to, t + dur);
 }
@@ -423,7 +509,7 @@ function sweep(param, t, from, to, dur) {
 // --- building blocks --------------------------------------------------------
 
 /** Filtered white-noise burst. o: {type,freq,Q,freqTo,sweep,a,peak,d,dest,rate} */
-function noiseBurst(v, t, o) {
+function noiseBurst(v: Voice, t: number, o: BurstOptions): { f: BiquadFilterNode; g: GainNode } {
   const a = o.a != null ? o.a : 0.002;
   const d = o.d != null ? o.d : 0.1;
   const g = gainNode(v, 0, o.dest);
@@ -435,21 +521,21 @@ function noiseBurst(v, t, o) {
 }
 
 /** Single decaying partial. */
-function ping(v, t, f, peak, decay, dest, type = 'sine', attack = 0.002) {
+function ping(v: Voice, t: number, f: number, peak: number, decay: number, dest: Dest | null, type: OscillatorType = 'sine', attack = 0.002): OscillatorNode {
   const g = gainNode(v, 0, dest);
   perc(g.gain, t, attack, peak, decay);
   return oscNode(v, type, f, t, t + attack + decay + 0.01, g);
 }
 
 /** Inharmonic struck-metal partials. */
-function metal(v, t, base, ratios, amps, decays, dest) {
+function metal(v: Voice, t: number, base: number, ratios: number[], amps: number[], decays: number[], dest: Dest): void {
   for (let i = 0; i < ratios.length; i++) {
-    ping(v, t, base * ratios[i] * rand(0.995, 1.005), amps[i], decays[i], dest, 'sine', 0.0008);
+    ping(v, t, base * ratios[i]! * rand(0.995, 1.005), amps[i]!, decays[i]!, dest, 'sine', 0.0008);
   }
 }
 
 /** Two-operator FM bell. */
-function fmBell(v, t, f, ratio, index, peak, decay, dest) {
+function fmBell(v: Voice, t: number, f: number, ratio: number, index: number, peak: number, decay: number, dest: Dest): void {
   const g = gainNode(v, 0, dest);
   perc(g.gain, t, 0.002, peak, decay);
   const car = oscNode(v, 'sine', f, t, t + decay + 0.02, g);
@@ -459,14 +545,14 @@ function fmBell(v, t, f, ratio, index, peak, decay, dest) {
 }
 
 /** Soft harmonic chime (fundamental + octave + 3rd harmonic). */
-function chime(v, t, f, peak, decay, dest) {
+function chime(v: Voice, t: number, f: number, peak: number, decay: number, dest: Dest): void {
   ping(v, t, f, peak, decay, dest);
   ping(v, t, f * 2, peak * 0.3, decay * 0.5, dest);
   ping(v, t, f * 3.01, peak * 0.12, decay * 0.3, dest);
 }
 
 /** Two detuned saws through an enveloped low-pass: a cheap brass note. */
-function brass(v, t, f, dur, peak, dest, vib = false, bright = 1) {
+function brass(v: Voice, t: number, f: number, dur: number, peak: number, dest: Dest, vib = false, bright = 1): void {
   const end = t + dur;
   const g = gainNode(v, 0, dest);
   const lp = biquad(v, 'lowpass', f, 1.1, g);
@@ -502,7 +588,7 @@ function brass(v, t, f, dur, peak, dest, vib = false, bright = 1) {
 }
 
 /** Sustained saw chord through a dark low-pass. */
-function pad(v, t, midis, dur, peak, dest) {
+function pad(v: Voice, t: number, midis: number[], dur: number, peak: number, dest: Dest): void {
   const g = gainNode(v, 0, dest);
   const lp = biquad(v, 'lowpass', 900, 0.7, g);
   swell(g.gain, t, 0.12, peak, dur - 0.12, 0.5);
@@ -512,7 +598,7 @@ function pad(v, t, midis, dur, peak, dest) {
   }
 }
 
-function timpani(v, t, f, peak, dest) {
+function timpani(v: Voice, t: number, f: number, peak: number, dest: Dest): void {
   const g = gainNode(v, 0, dest);
   perc(g.gain, t, 0.003, peak, 0.9);
   const o = oscNode(v, 'sine', f, t, t + 0.95, g);
@@ -522,7 +608,7 @@ function timpani(v, t, f, peak, dest) {
 }
 
 /** Random tiny clicks from one noise source (fire / debris crackle). */
-function crackle(v, t, dur, count, peak, hp, dest) {
+function crackle(v: Voice, t: number, dur: number, count: number, peak: number, hp: number, dest: Dest): void {
   const g = gainNode(v, 0, dest);
   const f = biquad(v, 'highpass', hp, 0.8, g);
   const times = [];
@@ -536,7 +622,7 @@ function crackle(v, t, dur, count, peak, hp, dest) {
   noiseNode(v, t, t + dur + 0.05, f);
 }
 
-function thump(v, t, from, to, peak, decay, dest, type = 'sine') {
+function thump(v: Voice, t: number, from: number, to: number, peak: number, decay: number, dest: Dest | null, type: OscillatorType = 'sine'): OscillatorNode {
   const g = gainNode(v, 0, dest);
   perc(g.gain, t, 0.002, peak, decay);
   const o = oscNode(v, type, from, t, t + decay + 0.03, g);
@@ -544,7 +630,7 @@ function thump(v, t, from, to, peak, decay, dest, type = 'sine') {
   return o;
 }
 
-function coin(v, t, p, peak, dest) {
+function coin(v: Voice, t: number, p: number, peak: number, dest: Dest): void {
   const base = 2350 * p;
   ping(v, t, base, peak, 0.25, dest, 'sine', 0.0008);
   ping(v, t, base * 2.32, peak * 0.5, 0.18, dest, 'sine', 0.0008);
@@ -552,7 +638,7 @@ function coin(v, t, p, peak, dest) {
   noiseBurst(v, t, { type: 'highpass', freq: 5000, a: 0.0005, peak: peak * 0.6, d: 0.015, dest });
 }
 
-function knock(v, t, p, dest) {
+function knock(v: Voice, t: number, p: number, dest: Dest): void {
   noiseBurst(v, t, { type: 'bandpass', freq: 1100 * p, Q: 3, a: 0.001, peak: 0.8, d: 0.07, dest });
   thump(v, t, 240 * p, 140 * p, 0.5, 0.09, dest);
   noiseBurst(v, t, { type: 'bandpass', freq: 3800 * p, Q: 5, a: 0.0005, peak: 0.35, d: 0.025, dest });
@@ -562,7 +648,7 @@ function knock(v, t, p, dest) {
 // Sound effects. Each takes (voice, startTime, outputNode).
 // ---------------------------------------------------------------------------
 
-function sSwordHit(v, t, out) {
+function sSwordHit(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.9, 1.12);
   noiseBurst(v, t, { type: 'bandpass', freq: 3800 * p, Q: 1.2, a: 0.001, peak: 0.7, d: 0.07, dest: out });
   metal(
@@ -577,7 +663,7 @@ function sSwordHit(v, t, out) {
   thump(v, t, 420 * p, 180 * p, 0.3, 0.06, out, 'triangle');
 }
 
-function sHeavyHit(v, t, out) {
+function sHeavyHit(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.9, 1.1);
   thump(v, t, 150 * p, 42 * p, 0.9, 0.3, out);
   noiseBurst(v, t, { type: 'lowpass', freq: 700, Q: 0.7, a: 0.001, peak: 0.7, d: 0.12, dest: out });
@@ -593,7 +679,7 @@ function sHeavyHit(v, t, out) {
   );
 }
 
-function sArrowShoot(v, t, out) {
+function sArrowShoot(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.92, 1.08);
   // bowstring twang: resonant low-pass closing on a saw
   const g = gainNode(v, 0, out);
@@ -615,14 +701,14 @@ function sArrowShoot(v, t, out) {
   });
 }
 
-function sArrowHit(v, t, out) {
+function sArrowHit(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.9, 1.15);
   thump(v, t, 300 * p, 90 * p, 0.6, 0.07, out);
   noiseBurst(v, t, { type: 'bandpass', freq: 1300 * p, Q: 2.5, a: 0.0005, peak: 0.6, d: 0.045, dest: out });
   noiseBurst(v, t, { type: 'lowpass', freq: 500, a: 0.001, peak: 0.4, d: 0.06, dest: out });
 }
 
-function sMagicCast(v, t, out) {
+function sMagicCast(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.45);
   const p = rand(0.95, 1.05);
   const g = gainNode(v, 0, out);
@@ -635,7 +721,7 @@ function sMagicCast(v, t, out) {
   noiseBurst(v, t, { type: 'bandpass', freq: 1500, freqTo: 7000, Q: 3, a: 0.3, peak: 0.15, d: 0.3, dest: out });
 }
 
-function sMagicHit(v, t, out) {
+function sMagicHit(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.35);
   const p = rand(0.92, 1.1);
   noiseBurst(v, t, { type: 'bandpass', freq: 3200 * p, Q: 0.9, a: 0.001, peak: 0.5, d: 0.12, dest: out });
@@ -646,7 +732,7 @@ function sMagicHit(v, t, out) {
   }
 }
 
-function sHeal(v, t, out) {
+function sHeal(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.5);
   [72, 76, 79, 84, 88].forEach((m, i) => {
     const tt = t + i * 0.075;
@@ -656,7 +742,7 @@ function sHeal(v, t, out) {
   noiseBurst(v, t, { type: 'highpass', freq: 6000, a: 0.25, peak: 0.05, d: 0.5, dest: out });
 }
 
-function sExplosion(v, t, out) {
+function sExplosion(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.2);
   const p = rand(0.85, 1.1);
   noiseBurst(v, t, {
@@ -675,7 +761,7 @@ function sExplosion(v, t, out) {
   crackle(v, t + 0.08, 0.6, 8, 0.25, 2500, out);
 }
 
-function sFire(v, t, out) {
+function sFire(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.9, 1.1);
   noiseBurst(v, t, {
     type: 'bandpass',
@@ -691,7 +777,7 @@ function sFire(v, t, out) {
   crackle(v, t + 0.03, 0.6, 12, 0.35, 1800, out);
 }
 
-function sFrost(v, t, out) {
+function sFrost(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.5);
   const scale = [88, 91, 93, 95, 98, 100, 103];
   for (let i = 0; i < 7; i++) {
@@ -705,7 +791,7 @@ function sFrost(v, t, out) {
   noiseBurst(v, t, { type: 'bandpass', freq: 4500, Q: 2, a: 0.001, peak: 0.25, d: 0.05, dest: out });
 }
 
-function sThunder(v, t, out) {
+function sThunder(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.3);
   // crack
   noiseBurst(v, t, { type: 'highpass', freq: 1200, a: 0.002, peak: 0.8, d: 0.18, dest: out });
@@ -726,7 +812,7 @@ function sThunder(v, t, out) {
   noiseNode(v, t, t + 1.85, lp, 0.5);
 }
 
-function sStun(v, t, out) {
+function sStun(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.25);
   const p = rand(0.95, 1.05);
   thump(v, t, 750 * p, 180 * p, 0.55, 0.14, out, 'triangle');
@@ -737,11 +823,11 @@ function sStun(v, t, out) {
   ping(v, t + 0.02, 1568 * 2.42 * p, 0.03, 0.4, out);
 }
 
-function sBuild(v, t, out) {
+function sBuild(v: Voice, t: number, out: GainNode): void {
   for (let i = 0; i < 3; i++) knock(v, t + i * 0.2 + rand(0, 0.03), rand(0.9, 1.1), out);
 }
 
-function sBuildComplete(v, t, out) {
+function sBuildComplete(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.3);
   brass(v, t, mtof(67), 0.11, 0.22, out); // G4
   brass(v, t + 0.13, mtof(72), 0.11, 0.22, out); // C5
@@ -749,25 +835,25 @@ function sBuildComplete(v, t, out) {
   brass(v, t + 0.26, mtof(60), 0.55, 0.12, out); // C4 under it
 }
 
-function sUnitReady(v, t, out) {
+function sUnitReady(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.35);
   chime(v, t, mtof(76), 0.2, 0.6, out); // E5
   chime(v, t + 0.13, mtof(81), 0.2, 0.8, out); // A5
 }
 
-function sSelect(v, t, out) {
+function sSelect(v: Voice, t: number, out: GainNode): void {
   const g = gainNode(v, 0, out);
   perc(g.gain, t, 0.002, 0.18, 0.06);
   const o = oscNode(v, 'sine', 820, t, t + 0.08, g);
   sweep(o.frequency, t, 820, 1250, 0.04);
 }
 
-function sClick(v, t, out) {
+function sClick(v: Voice, t: number, out: GainNode): void {
   noiseBurst(v, t, { type: 'bandpass', freq: 3000, Q: 1.2, a: 0.0005, peak: 0.35, d: 0.018, dest: out });
   thump(v, t, 1800, 1100, 0.25, 0.03, out, 'triangle');
 }
 
-function sError(v, t, out) {
+function sError(v: Voice, t: number, out: GainNode): void {
   const g = gainNode(v, 0, out);
   const lp = biquad(v, 'lowpass', 520, 1, g);
   const G = g.gain;
@@ -782,7 +868,7 @@ function sError(v, t, out) {
   oscNode(v, 'square', 97.5, t, t + 0.38, lp);
 }
 
-function sLevelUp(v, t, out) {
+function sLevelUp(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.45);
   [67, 72, 76, 79].forEach((m, i) => brass(v, t + i * 0.085, mtof(m), 0.08, 0.17, out));
   brass(v, t + 0.34, mtof(84), 0.6, 0.2, out, true); // C6
@@ -794,7 +880,7 @@ function sLevelUp(v, t, out) {
   noiseBurst(v, t + 0.2, { type: 'bandpass', freq: 2000, freqTo: 9000, Q: 2, a: 0.3, peak: 0.1, d: 0.6, dest: out });
 }
 
-function sDeath(v, t, out) {
+function sDeath(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.8, 1.2);
   const g = gainNode(v, 0, out);
   const lp = biquad(v, 'lowpass', 1400 * p, 2, g);
@@ -814,27 +900,27 @@ function sDeath(v, t, out) {
   thump(v, t + 0.3, 120, 50, 0.3, 0.12, out); // body hits the ground
 }
 
-function sGold(v, t, out) {
+function sGold(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.95, 1.08);
   coin(v, t, p, 0.18, out);
   coin(v, t + 0.07, p * 1.06, 0.14, out);
 }
 
-function sBuy(v, t, out) {
+function sBuy(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.2);
   for (let i = 0; i < 5; i++) coin(v, t + i * 0.045 + rand(0, 0.02), rand(0.85, 1.15), 0.12, out);
   chime(v, t + 0.25, mtof(93), 0.13, 0.7, out); // "ka-ching"
   chime(v, t + 0.25, mtof(88), 0.08, 0.6, out);
 }
 
-function sChop(v, t, out) {
+function sChop(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.88, 1.12);
   noiseBurst(v, t, { type: 'bandpass', freq: 750 * p, Q: 1.8, a: 0.001, peak: 0.8, d: 0.09, dest: out });
   noiseBurst(v, t, { type: 'bandpass', freq: 2600 * p, Q: 2, a: 0.0005, peak: 0.35, d: 0.025, dest: out });
   thump(v, t, 200 * p, 95 * p, 0.55, 0.1, out);
 }
 
-function sTeleport(v, t, out) {
+function sTeleport(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.5);
   const g = gainNode(v, 0, out);
   const bp = biquad(v, 'bandpass', 250, 5, g);
@@ -856,7 +942,7 @@ function sTeleport(v, t, out) {
   for (let i = 0; i < 3; i++) ping(v, t + 0.38 + i * 0.06, mtof(pick([88, 91, 95, 100])), 0.06, 0.3, out);
 }
 
-function sHorn(v, t, out) {
+function sHorn(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.45);
   const f0 = 98; // G2
   const end = t + 1.2;
@@ -873,7 +959,7 @@ function sHorn(v, t, out) {
   lp.frequency.exponentialRampToValueAtTime(800, t + 0.9);
   lp.frequency.setValueAtTime(800, end);
   lp.frequency.exponentialRampToValueAtTime(250, t + 1.55);
-  const mk = (mult, det, lvl) => {
+  const mk = (mult: number, det: number, lvl: number): OscillatorNode => {
     const f = f0 * mult;
     const o = oscNode(v, 'sawtooth', f, t, stop, gainNode(v, lvl, lp));
     o.detune.value = det;
@@ -896,7 +982,7 @@ function sHorn(v, t, out) {
   noiseNode(v, t, t + 1.5, biquad(v, 'bandpass', 600, 0.8, ng));
 }
 
-function sWarning(v, t, out) {
+function sWarning(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.4);
   // alarm bell rung three times
   for (let i = 0; i < 3; i++) {
@@ -906,10 +992,10 @@ function sWarning(v, t, out) {
   }
 }
 
-function sVictory(v, t, out) {
+function sVictory(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.35);
   duckMusic(t, 3.4);
-  const B = (dt, m, dur, pk, vib) => brass(v, t + dt, mtof(m), dur, pk, out, vib);
+  const B = (dt: number, m: number, dur: number, pk: number, vib?: boolean): void => brass(v, t + dt, mtof(m), dur, pk, out, vib);
   B(0.0, 67, 0.13, 0.2);
   B(0.15, 72, 0.13, 0.2);
   B(0.3, 76, 0.13, 0.2);
@@ -930,10 +1016,10 @@ function sVictory(v, t, out) {
   noiseBurst(v, t + 1.25, { type: 'highpass', freq: 5000, a: 0.005, peak: 0.18, d: 1.6, dest: out });
 }
 
-function sDefeat(v, t, out) {
+function sDefeat(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.45);
   duckMusic(t, 3.4);
-  const L = (dt, m, dur, pk) => brass(v, t + dt, mtof(m), dur, pk, out, true, 0.45);
+  const L = (dt: number, m: number, dur: number, pk: number): void => brass(v, t + dt, mtof(m), dur, pk, out, true, 0.45);
   L(0.0, 69, 0.4, 0.17); // A4
   L(0.45, 67, 0.4, 0.17); // G4
   L(0.9, 65, 0.4, 0.17); // F4
@@ -948,7 +1034,7 @@ function sDefeat(v, t, out) {
   fmBell(v, t + 2.0, 110, 1.4, 90, 0.12, 1.4, out); // distant gong
 }
 
-function sBladestorm(v, t, out) {
+function sBladestorm(v: Voice, t: number, out: GainNode): void {
   const dur = 1.1;
   const stop = t + dur + 0.05;
   const rate = rand(6.5, 8);
@@ -967,7 +1053,7 @@ function sBladestorm(v, t, out) {
   oscNode(v, 'sine', 3710, t, stop, rg);
 }
 
-function sRoar(v, t, out) {
+function sRoar(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.35);
   const p = rand(0.92, 1.06);
   const stop = t + 1.65;
@@ -985,7 +1071,7 @@ function sRoar(v, t, out) {
   const am = gainNode(v, 0.65, lp); // growl amplitude modulation
   const drive = gainNode(v, 1.6, shaper(v, am));
   const f0 = 68 * p;
-  const voice = (type, m, det) => {
+  const voice = (type: OscillatorType, m: number, det: number): OscillatorNode => {
     const o = oscNode(v, type, f0 * m, t, stop, drive);
     o.detune.value = det;
     o.frequency.setValueAtTime(f0 * m * 0.75, t);
@@ -1004,14 +1090,14 @@ function sRoar(v, t, out) {
   noiseNode(v, t, stop, biquad(v, 'bandpass', 700, 0.8, gainNode(v, 0.9, drive)));
 }
 
-function sGunshot(v, t, out) {
+function sGunshot(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.85, 1.15);
   noiseBurst(v, t, { type: 'highpass', freq: 900 * p, Q: 0.7, a: 0.0005, peak: 0.9, d: 0.07, dest: out });
   noiseBurst(v, t, { type: 'lowpass', freq: 1400 * p, freqTo: 200, sweep: 0.12, Q: 0.7, a: 0.001, peak: 0.6, d: 0.18, dest: out });
   thump(v, t, 160 * p, 60, 0.5, 0.06, out);
 }
 
-function sCannon(v, t, out) {
+function sCannon(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.25);
   const p = rand(0.85, 1.05);
   thump(v, t, 90 * p, 28, 1.0, 0.45, out);
@@ -1019,7 +1105,7 @@ function sCannon(v, t, out) {
   noiseBurst(v, t, { type: 'bandpass', freq: 2600, Q: 0.9, a: 0.0005, peak: 0.4, d: 0.06, dest: out });
 }
 
-function sLaser(v, t, out) {
+function sLaser(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.9, 1.1);
   const g = gainNode(v, 0, out);
   perc(g.gain, t, 0.002, 0.28, 0.2);
@@ -1029,13 +1115,13 @@ function sLaser(v, t, out) {
   sweep(o2.frequency, t, 950 * p, 180 * p, 0.17);
 }
 
-function sRocket(v, t, out) {
+function sRocket(v: Voice, t: number, out: GainNode): void {
   const p = rand(0.9, 1.1);
   noiseBurst(v, t, { type: 'bandpass', freq: 700 * p, freqTo: 2400 * p, sweep: 0.5, Q: 1.2, a: 0.02, peak: 0.7, d: 0.6, dest: out });
   thump(v, t, 120 * p, 50, 0.5, 0.12, out);
 }
 
-function sNukeSiren(v, t, out) {
+function sNukeSiren(v: Voice, t: number, out: GainNode): void {
   const g = gainNode(v, 0, out);
   perc(g.gain, t, 0.15, 0.35, 2.6);
   const o = oscNode(v, 'sawtooth', 440, t, t + 2.8, biquad(v, 'lowpass', 1800, 1, g));
@@ -1045,7 +1131,7 @@ function sNukeSiren(v, t, out) {
   }
 }
 
-function sNukeBlast(v, t, out) {
+function sNukeBlast(v: Voice, t: number, out: GainNode): void {
   wet(v, 0.5);
   thump(v, t, 70, 18, 1.0, 1.6, out);
   noiseBurst(v, t, { type: 'lowpass', freq: 2000, freqTo: 60, sweep: 2.5, Q: 0.6, a: 0.005, peak: 1.0, d: 3.0, dest: out });
@@ -1058,7 +1144,7 @@ function sNukeBlast(v, t, out) {
  * voice pool is full). max / gap override the per-name throttle. gain scales
  * the whole effect.
  */
-const SFX = {
+const SFX: Record<string, SfxDef> = {
   swordHit: { fn: sSwordHit, prio: 0 },
   heavyHit: { fn: sHeavyHit, prio: 0 },
   arrowShoot: { fn: sArrowShoot, prio: 0, gain: 1.2 },
@@ -1102,18 +1188,19 @@ const SFX = {
  * attenuation from the game. Unknown names, a muted / uninitialized context
  * and throttled calls are silently ignored.
  */
-export function playSfx(name, volume = 1) {
+export function playSfx(name: string, volume = 1): void {
   const def = Object.prototype.hasOwnProperty.call(SFX, name) ? SFX[name] : null;
   if (def) startVoice(name, def, volume, def.fn);
 }
 
 /** Start one synthesized voice, subject to the per-name limits and voice stealing. */
-function startVoice(name, def, volume, fn) {
+function startVoice(name: string, def: Throttle, volume: number, fn: SfxFn): void {
   if (muted || !canPlay()) return;
+  const ac = ctx!;
   const vol = toUnit(volume, 1);
   if (vol < 0.01) return;
 
-  const now = ctx.currentTime;
+  const now = ac.currentTime;
   let st = nameStats.get(name);
   if (!st) {
     st = { count: 0, last: -1e9 };
@@ -1123,9 +1210,9 @@ function startVoice(name, def, volume, fn) {
   if (st.count >= (def.max != null ? def.max : MAX_PER_NAME)) return;
   if (voices.length >= MAX_VOICES && !stealVoice(def.prio)) return;
 
-  const out = ctx.createGain();
+  const out = ac.createGain();
   out.gain.value = vol * (def.gain != null ? def.gain : 1);
-  out.connect(sfxGain);
+  out.connect(sfxGain!);
   const v = makeVoice(name, def.prio, out, st);
   v.counted = true;
   st.count++;
@@ -1169,7 +1256,7 @@ const SCALE = [0, 2, 3, 5, 7, 9, 10]; // dorian
 const TONIC = 62; // D4
 
 /** Root scale degrees (0 = D). Triads are [r, r+2, r+4] within the mode. */
-const PROGS = [
+const PROGS: number[][] = [
   [0, -1, 3, 0], // Dm  C  G  Dm
   [2, -1, 0, 0], // F   C  Dm Dm
   [0, 3, 0, -1], // Dm  G  Dm C
@@ -1178,7 +1265,7 @@ const PROGS = [
 ];
 
 /** Lute arpeggio patterns, degree offsets from the chord root (null = rest). */
-const ARPS = [
+const ARPS: (number | null)[][] = [
   [-7, -3, 0, 2, 4, 2],
   [-7, 0, 2, 4, 7, 4],
   [-7, -3, 0, -3, 2, 0],
@@ -1188,7 +1275,7 @@ const ARPS = [
 const ARP_VEL = [1, 0.55, 0.7, 0.55, 0.65, 0.5];
 
 /** Melody rhythms over two bars: [onset step, length in steps]. */
-const RHYTHMS = [
+const RHYTHMS: [onset: number, len: number][][] = [
   [[0, 3], [3, 1], [4, 2], [6, 4], [10, 2]],
   [[0, 2], [2, 2], [4, 2], [6, 6]],
   [[0, 4], [4, 1], [5, 1], [6, 3], [9, 3]],
@@ -1199,53 +1286,84 @@ const RHYTHMS = [
 const MEL_LO = 3; // G4
 const MEL_HI = 12; // B5
 
-function degMidi(d) {
+function degMidi(d: number): number {
   const o = Math.floor(d / 7);
-  return TONIC + o * 12 + SCALE[d - o * 7];
+  return TONIC + o * 12 + SCALE[d - o * 7]!;
 }
 
-const music = {
+/** A melody note: scale degree and length in steps. */
+interface MelodyNote {
+  deg: number;
+  len: number;
+}
+
+/** What a progression cycle plays (picked by newCycle). */
+interface MusicFlags {
+  melody: boolean;
+  drums: boolean;
+  /** Arpeggio pattern of each bar of a chord. */
+  arp: (number | null)[][];
+  density: number;
+}
+
+const music: {
+  /** startMusic() was called (the music starts once there is a context). */
+  wanted: boolean;
+  on: boolean;
+  bus: GainNode | null;
+  timer: ReturnType<typeof setInterval> | null;
+  step: number;
+  nextTime: number;
+  /** The drone's nodes, which play for as long as the music. */
+  persistent: { nodes: AudioNode[]; srcs: AudioScheduledSourceNode[] } | null;
+  cycle: number;
+  lastProg: number;
+  prog: number[];
+  flags: MusicFlags | null;
+  /** Step within the cycle -> note. */
+  melody: Map<number, MelodyNote> | null;
+} = {
   wanted: false,
   on: false,
   bus: null,
   timer: null,
   step: 0,
   nextTime: 0,
-  persistent: [],
+  persistent: null,
   cycle: -1,
   lastProg: -1,
-  prog: PROGS[0],
+  prog: PROGS[0]!,
   flags: null,
   melody: null,
 };
 
-function isChordTone(d, root) {
+function isChordTone(d: number, root: number): boolean {
   const r = (((d - root) % 7) + 7) % 7;
   return r === 0 || r === 2 || r === 4;
 }
 
-function genMelody(prog) {
-  const ev = new Map();
+function genMelody(prog: number[]): Map<number, MelodyNote> {
+  const ev = new Map<number, MelodyNote>();
   const rA = pick(RHYTHMS);
   const rB = pick(RHYTHMS);
   const plan = [rA, rB, rA, pick(RHYTHMS)];
   let prev = 7 + pick([0, 2, 4]);
   for (let c = 0; c < 4; c++) {
-    const root = prog[c];
-    const rh = plan[c];
+    const root = prog[c]!;
+    const rh = plan[c]!;
     rh.forEach(([on, len], k) => {
       const last = c === 3 && k === rh.length - 1;
-      let deg;
+      let deg: number;
       // 3/4: downbeats always land on a chord tone, other quarter beats often do
       const strong = on % STEPS_PER_BAR === 0 || (on % 2 === 0 && rnd() < 0.5);
       if (last || strong) {
         // nearest chord tone (or the root to end the phrase)
-        const cands = [];
+        const cands: number[] = [];
         for (let d = MEL_LO; d <= MEL_HI; d++) {
           if (last ? (((d - root) % 7) + 7) % 7 === 0 : isChordTone(d, root)) cands.push(d);
         }
         cands.sort((x, y) => Math.abs(x - prev) - Math.abs(y - prev));
-        deg = cands.length > 1 && !last && rnd() < 0.3 ? cands[1] : cands[0];
+        deg = (cands.length > 1 && !last && rnd() < 0.3 ? cands[1] : cands[0])!;
       } else {
         deg = prev + pick([-1, 1, 1, -1, 2, -2]);
         if (deg < MEL_LO) deg = MEL_LO + 1;
@@ -1258,7 +1376,7 @@ function genMelody(prog) {
   return ev;
 }
 
-function newCycle(cyc) {
+function newCycle(cyc: number): void {
   music.cycle = cyc;
   let pi = 0;
   if (cyc > 0) {
@@ -1266,22 +1384,23 @@ function newCycle(cyc) {
     while (pi === music.lastProg);
   }
   music.lastProg = pi;
-  music.prog = PROGS[pi];
+  music.prog = PROGS[pi]!;
   const intro = cyc === 0;
-  music.flags = {
+  const flags: MusicFlags = {
     melody: !intro && rnd() < 0.7,
     drums: !intro && rnd() < 0.65,
     arp: [pick(ARPS), pick(ARPS)],
     density: intro ? 0.75 : rand(0.8, 1),
   };
-  music.melody = music.flags.melody ? genMelody(music.prog) : null;
+  music.flags = flags;
+  music.melody = flags.melody ? genMelody(music.prog) : null;
 }
 
-function musicVoice() {
+function musicVoice(): Voice {
   return makeVoice('music', 0, null, null);
 }
 
-function mPluck(t, midi, vel) {
+function mPluck(t: number, midi: number, vel: number): void {
   const v = musicVoice();
   const f = mtof(midi);
   const dur = 1.1;
@@ -1294,7 +1413,7 @@ function mPluck(t, midi, vel) {
   oscNode(v, 'sawtooth', f, t, t + dur + 0.01, lp).detune.value = 5;
 }
 
-function mFlute(t, midi, len) {
+function mFlute(t: number, midi: number, len: number): void {
   const v = musicVoice();
   const f = mtof(midi);
   const dur = len * STEP * 0.95;
@@ -1320,7 +1439,7 @@ function mFlute(t, midi, len) {
   }
 }
 
-function mPad(t, midis, dur) {
+function mPad(t: number, midis: number[], dur: number): void {
   const v = musicVoice();
   const g = gainNode(v, 0, music.bus);
   swell(g.gain, t, 0.9, 0.035, dur - 0.9, 1.2);
@@ -1328,35 +1447,35 @@ function mPad(t, midis, dur) {
   for (const m of midis) oscNode(v, 'triangle', mtof(m), t, t + dur + 1.25, lp);
 }
 
-function mDoum(t, vel) {
+function mDoum(t: number, vel: number): void {
   const v = musicVoice();
   thump(v, t, 120, 62, 0.22 * vel, 0.3, music.bus);
   noiseBurst(v, t, { type: 'lowpass', freq: 350, a: 0.002, peak: 0.08 * vel, d: 0.08, dest: music.bus });
 }
 
-function mTek(t, vel) {
+function mTek(t: number, vel: number): void {
   const v = musicVoice();
   noiseBurst(v, t, { type: 'bandpass', freq: 2600, Q: 1.4, a: 0.001, peak: 0.07 * vel, d: 0.045, dest: music.bus });
   ping(v, t, 520, 0.03 * vel, 0.03, music.bus);
 }
 
-function scheduleStep(step, t, silent) {
+function scheduleStep(step: number, t: number, silent: boolean): void {
   const cyc = Math.floor(step / STEPS_PER_CYCLE);
   if (cyc !== music.cycle) newCycle(cyc);
   if (silent) return;
   const s = step % STEPS_PER_CYCLE;
-  const root = music.prog[Math.floor(s / STEPS_PER_CHORD)];
+  const root = music.prog[Math.floor(s / STEPS_PER_CHORD)]!;
   const inChord = s % STEPS_PER_CHORD;
   const bar = Math.floor(inChord / STEPS_PER_BAR);
   const sb = s % STEPS_PER_BAR;
-  const f = music.flags;
+  const f = music.flags!;
   const hum = () => (rnd() - 0.5) * 0.012;
 
   if (inChord === 0) mPad(t, [root - 7, root - 5, root - 3].map(degMidi), STEPS_PER_CHORD * STEP);
 
-  const off = f.arp[bar][sb];
+  const off = f.arp[bar]![sb]!;
   if (off !== null && (sb === 0 || rnd() < f.density)) {
-    mPluck(t + (sb === 0 ? 0 : hum()), degMidi(root + off), ARP_VEL[sb] * rand(0.85, 1.1));
+    mPluck(t + (sb === 0 ? 0 : hum()), degMidi(root + off), ARP_VEL[sb]! * rand(0.85, 1.1));
   }
 
   if (music.melody) {
@@ -1372,7 +1491,7 @@ function scheduleStep(step, t, silent) {
   }
 }
 
-function musicTick() {
+function musicTick(): void {
   if (!ctx || !music.on) return;
   const now = ctx.currentTime;
   // If we fell behind (throttled background tab), skip the missed steps
@@ -1395,37 +1514,38 @@ function musicTick() {
   }
 }
 
-function beginMusic() {
+function beginMusic(): void {
+  const ac = ctx!;
   music.on = true;
-  const t = ctx.currentTime + 0.05;
-  const bus = ctx.createGain();
+  const t = ac.currentTime + 0.05;
+  const bus = ac.createGain();
   bus.gain.setValueAtTime(0, t);
   bus.gain.linearRampToValueAtTime(1, t + 3);
-  bus.connect(musicGain);
+  bus.connect(musicGain!);
   music.bus = bus;
 
   // Drone: low D + A fifth, like a hurdy-gurdy, with a slowly breathing filter.
-  const dg = ctx.createGain();
+  const dg = ac.createGain();
   dg.gain.value = 0.05;
-  const lp = ctx.createBiquadFilter();
+  const lp = ac.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 280;
   lp.Q.value = 0.8;
   lp.connect(dg);
   dg.connect(bus);
-  const nodes = [dg, lp];
-  const srcs = [];
-  for (const [midi, det] of [[38, -4], [38, 5], [45, 0]]) {
-    const o = ctx.createOscillator();
+  const nodes: AudioNode[] = [dg, lp];
+  const srcs: OscillatorNode[] = [];
+  for (const [midi, det] of [[38, -4], [38, 5], [45, 0]] as const) {
+    const o = ac.createOscillator();
     o.type = 'sawtooth';
     o.frequency.value = mtof(midi);
     o.detune.value = det;
     o.connect(lp);
     srcs.push(o);
   }
-  const lfo = ctx.createOscillator();
+  const lfo = ac.createOscillator();
   lfo.frequency.value = 0.07;
-  const lfoGain = ctx.createGain();
+  const lfoGain = ac.createGain();
   lfoGain.gain.value = 90;
   lfo.connect(lfoGain);
   lfoGain.connect(lp.frequency);
@@ -1442,14 +1562,14 @@ function beginMusic() {
 }
 
 /** Start the endless procedural background music (deferred until initAudio). */
-export function startMusic() {
+export function startMusic(): void {
   music.wanted = true;
   if (!ctx || music.on) return;
   beginMusic();
 }
 
 /** Stop scheduling new notes and fade the music out. */
-export function stopMusic() {
+export function stopMusic(): void {
   music.wanted = false;
   if (!music.on) return;
   music.on = false;
@@ -1458,14 +1578,14 @@ export function stopMusic() {
   const bus = music.bus;
   const pers = music.persistent;
   music.bus = null;
-  music.persistent = [];
+  music.persistent = null;
   if (!ctx || !bus) return;
   const t = ctx.currentTime;
   const fade = 1.5;
   bus.gain.cancelScheduledValues(t);
   bus.gain.setValueAtTime(bus.gain.value, t);
   bus.gain.linearRampToValueAtTime(0, t + fade);
-  for (const s of pers.srcs || []) {
+  for (const s of pers?.srcs ?? []) {
     try {
       s.stop(t + fade + 0.05);
     } catch {
@@ -1473,7 +1593,7 @@ export function stopMusic() {
     }
   }
   setTimeout(() => {
-    for (const n of (pers.nodes || []).concat(bus)) {
+    for (const n of (pers?.nodes ?? []).concat(bus)) {
       try {
         n.disconnect();
       } catch {
@@ -1493,8 +1613,20 @@ export function stopMusic() {
 // engines, bleeps, a trumpet or bubbles instead.
 // ---------------------------------------------------------------------------
 
+/** F1, F2 and F3 (Hz). */
+type Formants = [number, number, number];
+type ConsonantClass = 'h' | 'fric' | 'vfric' | 'stop' | 'vstop' | 'nasal' | 'glide';
+/** One syllable of a phrase: consonant units (see consUnit), up to two vowels, and stress. */
+interface Syllable {
+  onset: string;
+  glide: string;
+  vowels: string;
+  coda: string;
+  stress: boolean;
+}
+
 /** Formant frequencies (Hz) of an adult male voice; scaled by the voice's `size`. */
-const VOWELS = {
+const VOWELS: Record<string, Formants> = {
   a: [740, 1180, 2500],
   e: [480, 1850, 2550],
   i: [310, 2250, 2950],
@@ -1504,7 +1636,7 @@ const VOWELS = {
 const FORMANT_AMP = [1, 0.6, 0.3];
 const FORMANT_Q = [7, 10, 14];
 /** Where the formants start for a consonant (F1, F2, F3) before gliding to the vowel. */
-const LOCUS = {
+const LOCUS: Record<string, Formants | null> = {
   b: [250, 800, 2300], p: [250, 800, 2300], m: [250, 900, 2300], w: [300, 700, 2200], f: [300, 1000, 2400],
   v: [300, 1000, 2400], d: [300, 1700, 2600], t: [300, 1700, 2600], n: [260, 1600, 2600], l: [350, 1100, 2700],
   th: [300, 1500, 2600], s: [300, 1600, 2600], z: [300, 1600, 2600], g: [300, 2000, 2400], k: [300, 2000, 2400],
@@ -1512,24 +1644,24 @@ const LOCUS = {
   h: null,
 };
 /** Consonant class and duration (s). */
-const CONS = {
+const CONS: Record<string, [ConsonantClass, number]> = {
   h: ['h', 0.06], s: ['fric', 0.08], sh: ['fric', 0.08], f: ['fric', 0.06], th: ['fric', 0.06], ch: ['fric', 0.07],
   z: ['vfric', 0.06], v: ['vfric', 0.05], p: ['stop', 0.06], t: ['stop', 0.06], k: ['stop', 0.065],
   b: ['vstop', 0.045], d: ['vstop', 0.045], g: ['vstop', 0.05], j: ['vstop', 0.06],
   m: ['nasal', 0.06], n: ['nasal', 0.055], l: ['glide', 0.05], r: ['glide', 0.05], w: ['glide', 0.05], y: ['glide', 0.045],
 };
 /** Noise of fricatives: [band centre, Q, level]. */
-const HISS = {
+const HISS: Record<string, [freq: number, Q: number, level: number]> = {
   s: [6200, 1.8, 0.22], sh: [3000, 1.6, 0.3], ch: [3000, 1.6, 0.3], f: [4500, 0.5, 0.08], th: [5000, 0.5, 0.07],
   z: [5800, 1.8, 0.12], v: [4000, 0.5, 0.05],
 };
 /** Release burst of stops: [band centre, Q, level]. */
-const BURST = {
+const BURST: Record<string, [freq: number, Q: number, level: number]> = {
   p: [900, 1, 0.25], b: [800, 1, 0.12], t: [4200, 1.2, 0.3], d: [3600, 1.2, 0.15], k: [2300, 2, 0.3],
   g: [2100, 2, 0.15], j: [3000, 1.5, 0.12],
 };
 
-const PHRASES = {
+const PHRASES: Record<string, Record<BarkKind, string[]>> = {
   soldier: {
     select: ['YE-es?', 'RE-dy?', 'mi-LORD?', 'WHA-at?', 'SIR?', 'hm-MM?'],
     move: ['MO-ving.', 'rai-ta-WEI.', 'o-KEI.', 'YES sir.', 'on-mai-WEI.', 'az-yu-WISH.'],
@@ -1571,7 +1703,23 @@ const PHRASES = {
  * Voices. Speakers: f0 (Hz), size (formant scale: <1 bigger, >1 smaller vocal tract), rough (growl),
  * tempo, breath, wet (reverb), vib (vibrato), fx ('radio' | 'robot') and level. Others: `type`.
  */
-const VOICES = {
+interface Speaker {
+  type?: undefined;
+  f0: number;
+  size: number;
+  rough: number;
+  tempo?: number;
+  breath?: number;
+  wet?: number;
+  vib?: number;
+  level?: number;
+  /** Key of PHRASES. */
+  words: string;
+  fx?: 'radio' | 'robot';
+}
+type VoiceDef = Speaker | { type: 'engine' } | { type: 'droid' } | { type: 'trumpet' } | { type: 'bubbles' };
+
+const VOICES: Record<string, VoiceDef> = {
   man: { f0: 118, size: 1, rough: 0.08, words: 'soldier' },
   heavy: { f0: 98, size: 0.93, rough: 0.2, tempo: 0.92, words: 'soldier' },
   worker: { f0: 138, size: 1.04, rough: 0.04, tempo: 1.1, words: 'worker' },
@@ -1592,7 +1740,7 @@ const VOICES = {
 };
 
 /** Which voice a unit type answers with (null: it doesn't). */
-export function barkVoice(def) {
+export function barkVoice(def: UnitDef | null | undefined): string | null {
   if (!def || def.kind === 'building') return null;
   if (def.hero) return VOICES[def.id] ? def.id : 'paladin';
   if (def.id === 'water_elemental') return 'bubbles';
@@ -1609,19 +1757,19 @@ export function barkVoice(def) {
   return 'man';
 }
 
-function parsePhrase(text) {
+function parsePhrase(text: string): { tone: 'ask' | 'shout' | 'say'; syl: Syllable[] } {
   const last = text.trim().slice(-1);
   const tone = last === '?' ? 'ask' : last === '!' ? 'shout' : 'say';
-  const syl = [];
+  const syl: Syllable[] = [];
   for (const word of text.replace(/[?!.,]/g, '').split(/[-\s]+/)) {
     if (!word) continue;
     const stress = word !== word.toLowerCase();
     let w = word.toLowerCase();
     while (w) {
-      const m = /^([^aeiou]*)([aeiou]*)([^aeiou]*)/.exec(w);
-      const onset = m[1];
-      const vowels = m[2];
-      let coda = m[3];
+      const m = /^([^aeiou]*)([aeiou]*)([^aeiou]*)/.exec(w)!; // matches any string
+      const onset = m[1]!;
+      const vowels = m[2]!;
+      let coda = m[3]!;
       w = w.slice(m[0].length);
       if (w && coda) {
         // Consonants between two vowels start the next syllable (all but the first of a cluster).
@@ -1635,21 +1783,22 @@ function parsePhrase(text) {
   return { tone, syl };
 }
 
-function consUnit(cluster) {
+function consUnit(cluster: string): string {
   if (!cluster) return '';
   const two = cluster.slice(0, 2);
   if (two === 'ch' || two === 'sh' || two === 'th') return two;
-  return CONS[cluster[0]] ? cluster[0] : '';
+  const c = cluster.charAt(0);
+  return CONS[c] ? c : '';
 }
 
 /** A liquid after the first consonant of an onset ("gr", "pl"): its locus colours the transition. */
-function liquidIn(cluster) {
-  for (let i = 1; i < cluster.length; i++) if ('rlwy'.includes(cluster[i])) return cluster[i];
+function liquidIn(cluster: string): string {
+  for (let i = 1; i < cluster.length; i++) if ('rlwy'.includes(cluster.charAt(i))) return cluster.charAt(i);
   return '';
 }
 
 /** Speak `text` with voice `vc`. */
-function speak(v, t, vc, text, out) {
+function speak(v: Voice, t: number, vc: Speaker, text: string, out: GainNode): GainNode {
   const { tone, syl } = parsePhrase(text);
   const shout = tone === 'shout';
   const tempo = vc.tempo || 1;
@@ -1664,9 +1813,9 @@ function speak(v, t, vc, text, out) {
     const on = s.onset ? CONS[s.onset] : null;
     const co = s.coda ? CONS[s.coda] : null;
     const vlen = ((s.stress ? 0.2 : 0.13) * (lastSyl ? 1.3 : 1) * (shout ? 1.1 : 1)) / tempo;
-    const p = { s, i, t0: cur, v0: cur + (on ? on[1] : 0.02), on, co, last: lastSyl };
-    p.v1 = p.v0 + vlen;
-    p.end = p.v1 + (co ? co[1] : 0);
+    const v0 = cur + (on ? on[1] : 0.02);
+    const v1 = v0 + vlen;
+    const p = { s, i, t0: cur, v0, v1, end: v1 + (co ? co[1] : 0), on, co, last: lastSyl };
     cur = p.end + 0.015;
     return p;
   });
@@ -1679,8 +1828,8 @@ function speak(v, t, vc, text, out) {
   const vox = gainNode(v, 0, null);
   const asp = gainNode(v, breath, null);
   const filters = [0, 1, 2].map((k) => {
-    const g = gainNode(v, FORMANT_AMP[k], bank);
-    const f = biquad(v, 'bandpass', VOWELS.e[k] * size, FORMANT_Q[k], g);
+    const g = gainNode(v, FORMANT_AMP[k]!, bank);
+    const f = biquad(v, 'bandpass', VOWELS.e![k]! * size, FORMANT_Q[k], g);
     vox.connect(f);
     asp.connect(f);
     return f;
@@ -1688,7 +1837,7 @@ function speak(v, t, vc, text, out) {
   noiseNode(v, t, end, asp);
 
   const f0 = vc.f0 * (shout ? 1.3 : 1);
-  const oscs = [[oscNode(v, vc.fx === 'robot' ? 'square' : 'sawtooth', f0, t, end, vox), 1]];
+  const oscs: [OscillatorNode, number][] = [[oscNode(v, vc.fx === 'robot' ? 'square' : 'sawtooth', f0, t, end, vox), 1]];
   const o2 = oscNode(v, 'sawtooth', f0, t, end, gainNode(v, 0.5, vox));
   o2.detune.value = 7;
   oscs.push([o2, 1]);
@@ -1698,22 +1847,22 @@ function speak(v, t, vc, text, out) {
   lfo.connect(lg);
   for (const [o] of oscs) lg.connect(o.detune);
 
-  const setPitch = (time, k, ramp) => {
+  const setPitch = (time: number, k: number, ramp: boolean): void => {
     for (const [o, r] of oscs) {
       if (ramp) o.frequency.linearRampToValueAtTime(f0 * k * r, time);
       else o.frequency.setValueAtTime(f0 * k * r, time);
     }
   };
-  const setForm = (time, freqs, ramp) => {
+  const setForm = (time: number, freqs: Formants, ramp: boolean): void => {
     filters.forEach((f, k) => {
-      const hz = freqs[k] * size;
+      const hz = freqs[k]! * size;
       if (ramp) f.frequency.linearRampToValueAtTime(hz, time);
       else f.frequency.setValueAtTime(hz, time);
     });
   };
 
-  const first = plan[0];
-  setForm(t, LOCUS[first.s.onset] || VOWELS[first.s.vowels[0]] || LOCUS.m, false);
+  const first = plan[0]!;
+  setForm(t, LOCUS[first.s.onset] || VOWELS[first.s.vowels.charAt(0)] || LOCUS.m!, false);
   setPitch(t, shout ? 1.1 : 1.06, false);
   vox.gain.setValueAtTime(0, t);
   const G = vox.gain;
@@ -1724,7 +1873,7 @@ function speak(v, t, vc, text, out) {
     const k = n > 1 ? p.i / (n - 1) : 0;
     const peak = (s.stress ? 1 : 0.72) * (shout ? 1.25 : 1);
     const pitch = tone === 'shout' ? 1 + (s.stress ? 0.15 : 0) - 0.1 * k : tone === 'ask' ? 1 + (s.stress ? 0.08 : 0) : 1.06 - 0.18 * k + (s.stress ? 0.1 : 0);
-    const vowel = s.vowels ? VOWELS[s.vowels[0]] : LOCUS.m;
+    const vowel = s.vowels ? VOWELS[s.vowels.charAt(0)]! : LOCUS.m!;
     const kind = on ? on[0] : 'none';
 
     // Onset: formants start at the consonant's locus (or the liquid's in a cluster) and glide to the vowel.
@@ -1746,12 +1895,14 @@ function speak(v, t, vc, text, out) {
     } else {
       G.linearRampToValueAtTime(0.4 * peak, p.t0 + 0.012);
     }
-    if (HISS[s.onset]) {
-      const [freq, Q, lvl] = HISS[s.onset];
+    const onsetHiss = HISS[s.onset];
+    if (onsetHiss) {
+      const [freq, Q, lvl] = onsetHiss;
       noiseBurst(v, p.t0, { type: 'bandpass', freq, Q, a: 0.015, peak: lvl * peak, d: Math.max(0.02, p.v0 - p.t0 - 0.01), dest: mix });
     }
-    if (BURST[s.onset]) {
-      const [freq, Q, lvl] = BURST[s.onset];
+    const onsetBurst = BURST[s.onset];
+    if (onsetBurst) {
+      const [freq, Q, lvl] = onsetBurst;
       noiseBurst(v, p.v0 - 0.025, { type: 'bandpass', freq, Q, a: 0.001, peak: lvl * peak, d: 0.02, dest: mix });
     }
     if (kind === 'h' || kind === 'stop') {
@@ -1768,7 +1919,7 @@ function speak(v, t, vc, text, out) {
     G.linearRampToValueAtTime(peak * (s.vowels ? 1 : 0.5), p.v0 + 0.025);
     if (s.vowels.length > 1) {
       setForm(p.v0 + (p.v1 - p.v0) * 0.45, vowel, true);
-      setForm(p.v0 + (p.v1 - p.v0) * 0.9, VOWELS[s.vowels[1]], true);
+      setForm(p.v0 + (p.v1 - p.v0) * 0.9, VOWELS[s.vowels.charAt(1)]!, true);
     }
     G.linearRampToValueAtTime(peak * (s.vowels ? 0.85 : 0.45), p.v1);
     if (p.last) {
@@ -1778,7 +1929,8 @@ function speak(v, t, vc, text, out) {
 
     // Coda.
     const ck = co ? co[0] : 'none';
-    if (LOCUS[s.coda]) setForm(p.end, LOCUS[s.coda], true);
+    const codaLocus = LOCUS[s.coda];
+    if (codaLocus) setForm(p.end, codaLocus, true);
     if (ck === 'nasal' || ck === 'glide') {
       G.linearRampToValueAtTime(0.3 * peak, p.v1 + 0.02);
       G.linearRampToValueAtTime(p.last ? 0 : 0.25 * peak, p.end + 0.01);
@@ -1790,22 +1942,24 @@ function speak(v, t, vc, text, out) {
     } else {
       G.linearRampToValueAtTime(p.last ? 0 : 0.35 * peak, p.end + (p.last ? 0.06 : 0.015));
     }
-    if (HISS[s.coda]) {
-      const [freq, Q, lvl] = HISS[s.coda];
+    const codaHiss = HISS[s.coda];
+    if (codaHiss) {
+      const [freq, Q, lvl] = codaHiss;
       noiseBurst(v, p.v1, { type: 'bandpass', freq, Q, a: 0.012, peak: lvl * peak, d: Math.max(0.03, p.end - p.v1), dest: mix });
     }
-    if (BURST[s.coda]) {
-      const [freq, Q, lvl] = BURST[s.coda];
+    const codaBurst = BURST[s.coda];
+    if (codaBurst) {
+      const [freq, Q, lvl] = codaBurst;
       noiseBurst(v, p.end - 0.015, { type: 'bandpass', freq, Q, a: 0.001, peak: lvl * peak * 0.8, d: 0.025, dest: mix });
     }
   }
-  G.linearRampToValueAtTime(0, plan[n - 1].end + 0.08);
+  G.linearRampToValueAtTime(0, plan[n - 1]!.end + 0.08);
   if (vc.wet) wet(v, vc.wet);
   return fxOut;
 }
 
 /** The voice's effect from `mix` to `out`: shout drive, a radio, or a robot's ring modulator. */
-function voiceFx(v, t, end, vc, shout, mix, out) {
+function voiceFx(v: Voice, t: number, end: number, vc: Speaker, shout: boolean, mix: GainNode, out: GainNode): GainNode {
   if (vc.fx === 'radio') {
     const hp = biquad(v, 'highpass', 500, 0.8, null);
     const lp = biquad(v, 'lowpass', 2800, 1.2, null);
@@ -1835,7 +1989,7 @@ function voiceFx(v, t, end, vc, shout, mix, out) {
 }
 
 /** Vehicles before the Digital Age: an engine revving (move), idling (select) or roaring (attack). */
-function engineBark(v, t, kind, out) {
+function engineBark(v: Voice, t: number, kind: BarkKind, out: GainNode): void {
   const dur = kind === 'select' ? 0.55 : kind === 'move' ? 0.9 : 0.8;
   const stop = t + dur + 0.05;
   const g = gainNode(v, 0, out);
@@ -1845,7 +1999,7 @@ function engineBark(v, t, kind, out) {
   const o = oscNode(v, 'sawtooth', 42, t, stop, drive);
   const o2 = oscNode(v, 'square', 21, t, stop, gainNode(v, 0.5, drive));
   const [f1, f2] = kind === 'select' ? [42, 52] : kind === 'move' ? [40, 85] : [48, 105];
-  for (const [osc, r] of [[o, 1], [o2, 0.5]]) {
+  for (const [osc, r] of [[o, 1], [o2, 0.5]] as const) {
     osc.frequency.setValueAtTime(f1 * r, t);
     if (kind === 'select') {
       osc.frequency.linearRampToValueAtTime(f2 * r, t + 0.12);
@@ -1858,9 +2012,9 @@ function engineBark(v, t, kind, out) {
 }
 
 /** Digital Age vehicles and later: droid bleeps. */
-function droidBark(v, t, kind, out) {
+function droidBark(v: Voice, t: number, kind: BarkKind, out: GainNode): void {
   const r = rand(0.85, 1.15);
-  const notes =
+  const notes: [dt: number, from: number, to: number, dur: number][] =
     kind === 'select'
       ? [[0, 1300, 1900, 0.07], [0.09, 1900, 1500, 0.06]]
       : kind === 'move'
@@ -1883,7 +2037,7 @@ function droidBark(v, t, kind, out) {
 }
 
 /** The war elephant's trumpet. */
-function trumpetBark(v, t, kind, out) {
+function trumpetBark(v: Voice, t: number, kind: BarkKind, out: GainNode): void {
   const dur = kind === 'attack' ? 1 : kind === 'move' ? 0.5 : 0.65;
   const f = rand(330, 380) * (kind === 'attack' ? 1.15 : 1);
   const g = gainNode(v, 0, out);
@@ -1898,7 +2052,7 @@ function trumpetBark(v, t, kind, out) {
 }
 
 /** The water elemental: bubbles and a wash. */
-function bubbleBark(v, t, kind, out) {
+function bubbleBark(v: Voice, t: number, kind: BarkKind, out: GainNode): void {
   const count = kind === 'attack' ? 10 : 6;
   const spread = kind === 'attack' ? 0.5 : 0.4;
   for (let i = 0; i < count; i++) {
@@ -1914,27 +2068,28 @@ function bubbleBark(v, t, kind, out) {
 }
 
 /** Number of distinct lines a voice has for `kind`. */
-export function barkLines(voiceId, kind) {
+export function barkLines(voiceId: string, kind: BarkKind): number {
   const vc = VOICES[voiceId];
   if (!vc) return 0;
-  return vc.type ? 3 : PHRASES[vc.words][kind].length;
+  return vc.type ? 3 : PHRASES[vc.words]![kind].length;
 }
 
-function sBark(v, t, out, voiceId, kind, line) {
-  const vc = VOICES[voiceId] || VOICES.man;
+function sBark(v: Voice, t: number, out: GainNode, voiceId: string, kind: BarkKind, line?: number): void {
+  const vc = VOICES[voiceId] || VOICES.man!;
   if (vc.type === 'engine') return engineBark(v, t, kind, out);
   if (vc.type === 'droid') return droidBark(v, t, kind, out);
   if (vc.type === 'trumpet') return trumpetBark(v, t, kind, out);
   if (vc.type === 'bubbles') return bubbleBark(v, t, kind, out);
-  const lines = PHRASES[vc.words][kind] || PHRASES[vc.words].select;
-  speak(v, t, vc, line != null ? lines[line % lines.length] : pick(lines), out);
+  const words = PHRASES[vc.words]!;
+  const lines = words[kind] || words.select;
+  speak(v, t, vc, line != null ? lines[line % lines.length]! : pick(lines), out);
 }
 
 /** Barks share one voice slot: a unit doesn't talk over another. */
 export const BARK = { prio: 3, max: 1, gap: 0.3 };
 
 /** A unit acknowledges a selection or an order (kind: 'select' | 'move' | 'attack'). */
-export function playBark(voiceId, kind, volume = 0.8) {
+export function playBark(voiceId: string, kind: BarkKind, volume = 0.8): void {
   if (!VOICES[voiceId]) return;
   startVoice('bark', BARK, volume, (v, t, out) => sBark(v, t, out, voiceId, kind));
 }
@@ -1945,23 +2100,24 @@ export function playBark(voiceId, kind, volume = 0.8) {
 // ---------------------------------------------------------------------------
 
 /** Noise from a buffer as long as the sound itself (the shared 2 s buffer would repeat audibly). */
-function longNoise(v, t, dur, dest) {
-  const len = Math.ceil(ctx.sampleRate * (dur + 0.1));
-  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+function longNoise(v: Voice, t: number, dur: number, dest: AudioNode): AudioBufferSourceNode {
+  const ac = ctx!;
+  const len = Math.ceil(ac.sampleRate * (dur + 0.1));
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < len; i++) d[i] = rnd() * 2 - 1;
-  const s = ctx.createBufferSource();
+  const s = ac.createBufferSource();
   s.buffer = buf;
   s.connect(dest);
   return runSource(v, s, t, t + dur);
 }
 
-function aWind(v, t, out, dur) {
+function aWind(v: Voice, t: number, out: GainNode, dur: number): void {
   for (const [freq, Q, lvl] of [
     [380, 0.7, 0.55],
     [900, 4, 0.12],
     [160, 0.7, 0.4],
-  ]) {
+  ] as const) {
     const g = gainNode(v, lvl * 0.6, out);
     const f = biquad(v, 'bandpass', freq, Q, g);
     longNoise(v, t, dur, f);
@@ -1973,7 +2129,7 @@ function aWind(v, t, out, dur) {
   }
 }
 
-function aCrickets(v, t, out, dur) {
+function aCrickets(v: Voice, t: number, out: GainNode, dur: number): void {
   for (let c = 0; c < 4; c++) {
     const g = gainNode(v, 0, out);
     oscNode(v, 'sine', rand(4200, 5200), t, t + dur, g);
@@ -1997,7 +2153,7 @@ function aCrickets(v, t, out, dur) {
   oscNode(v, 'sine', 9, t, t + dur, gainNode(v, 0.03, g.gain));
 }
 
-function aDrone(v, t, out, dur) {
+function aDrone(v: Voice, t: number, out: GainNode, dur: number): void {
   const g = gainNode(v, 0.45, out);
   const lp = biquad(v, 'lowpass', 320, 1.5, g);
   for (const f of [55, 55.25, 82.5, 110.1]) oscNode(v, 'sawtooth', f, t, t + dur, lp);
@@ -2005,7 +2161,7 @@ function aDrone(v, t, out, dur) {
   // An eerie choir: an "oo" on A3 with slow vibrato.
   const cg = gainNode(v, 1.4, out);
   const src = gainNode(v, 1, null);
-  for (const [k, f] of VOWELS.u.entries()) src.connect(biquad(v, 'bandpass', f * 1.1, FORMANT_Q[k], gainNode(v, FORMANT_AMP[k] * 0.12, cg)));
+  for (const [k, f] of VOWELS.u!.entries()) src.connect(biquad(v, 'bandpass', f * 1.1, FORMANT_Q[k], gainNode(v, FORMANT_AMP[k]! * 0.12, cg)));
   const o = oscNode(v, 'sawtooth', 220, t, t + dur, src);
   oscNode(v, 'sine', 0.25, t, t + dur, gainNode(v, 12, o.detune));
   oscNode(v, 'sine', 0.0625, t, t + dur, gainNode(v, 0.6, cg.gain));
@@ -2013,7 +2169,7 @@ function aDrone(v, t, out, dur) {
   longNoise(v, t, dur, biquad(v, 'lowpass', 90, 0.7, gainNode(v, 0.5, out)));
 }
 
-function aBird(v, t, out) {
+function aBird(v: Voice, t: number, out: GainNode): void {
   const type = (rnd() * 3) | 0;
   if (type === 0) {
     // Tweets: a few quick downward sweeps.
@@ -2044,7 +2200,7 @@ function aBird(v, t, out) {
     for (const [dt, a, b] of [
       [0, f, f * 0.98],
       [0.32, f * 0.8, f * 0.78],
-    ]) {
+    ] as const) {
       const tt = t + dt;
       const g = gainNode(v, 0, out);
       swell(g.gain, tt, 0.02, 0.2, 0.18, 0.06);
@@ -2054,7 +2210,7 @@ function aBird(v, t, out) {
   }
 }
 
-const AMBIENT = {
+const AMBIENT: Record<string, { fn: RenderFn; loop?: number }> = {
   wind: { fn: aWind, loop: 16 },
   crickets: { fn: aCrickets, loop: 8 },
   drone: { fn: aDrone, loop: 16 },
@@ -2071,9 +2227,9 @@ const AMBIENT = {
 
 /** 32 kHz keeps the buffers small (Warcraft III itself shipped 22 kHz sounds); playback resamples. */
 export const OFFLINE_RATE = 32000;
-let offlineShared = null;
+let offlineShared: { noise: AudioBuffer; impulse: AudioBuffer } | null = null;
 
-function mulberry32(seed) {
+function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -2084,7 +2240,7 @@ function mulberry32(seed) {
   };
 }
 
-function hashString(str) {
+function hashString(str: string): number {
   let h = 2166136261;
   for (let i = 0; i < str.length; i++) {
     h ^= str.charCodeAt(i);
@@ -2093,8 +2249,8 @@ function hashString(str) {
   return h >>> 0;
 }
 
-/** Build `fn` into the offline context `oac`; returns when its last source stops and whether it used the reverb. */
-function buildOffline(oac, fn, seed, reverb) {
+/** Build `fn` (`dur` seconds long) into the offline context `oac`; returns when its last source stops and whether it used the reverb. */
+function buildOffline(oac: OfflineAudioContext, fn: RenderFn, seed: number, reverb: boolean, dur: number): { end: number; wet: boolean } {
   const saved = { ctx, noiseBuf, reverbIn, musicDuck, rnd };
   try {
     ctx = oac;
@@ -2116,36 +2272,36 @@ function buildOffline(oac, fn, seed, reverb) {
       ret.connect(oac.destination);
     }
     const v = makeVoice('offline', 0, out, null);
-    fn(v, 0, out);
+    fn(v, 0, out, dur);
     return { end: v.end, wet: wetUsed };
   } finally {
     ({ ctx, noiseBuf, reverbIn, musicDuck, rnd } = saved);
   }
 }
 
-function monoBuffer(data, sampleRate) {
+function monoBuffer(data: Float32Array<ArrayBuffer>, sampleRate: number): AudioBuffer {
   const buf = new AudioBuffer({ length: Math.max(1, data.length), numberOfChannels: 1, sampleRate });
   buf.copyToChannel(data, 0);
   return buf;
 }
 
 /** Drop the silent tail; optionally scale to a peak level. */
-function trimTail(buf, normalize) {
+function trimTail(buf: AudioBuffer, normalize: number): AudioBuffer {
   const d = buf.getChannelData(0);
   let last = d.length - 1;
   let peak = 0;
-  while (last > 0 && Math.abs(d[last]) < 1e-4) last--;
-  for (let i = 0; i <= last; i++) peak = Math.max(peak, Math.abs(d[i]));
+  while (last > 0 && Math.abs(d[last]!) < 1e-4) last--;
+  for (let i = 0; i <= last; i++) peak = Math.max(peak, Math.abs(d[i]!));
   const out = d.slice(0, Math.min(d.length, last + Math.ceil(buf.sampleRate * 0.02)));
   if (normalize && peak > 0) {
     const k = normalize / peak;
-    for (let i = 0; i < out.length; i++) out[i] *= k;
+    for (let i = 0; i < out.length; i++) out[i] = out[i]! * k;
   }
   return monoBuffer(out, buf.sampleRate);
 }
 
 /** Cut a seamless loop of `len` s after `pre` s, cross-fading the following `fold` s into its start. */
-function foldLoop(buf, pre, len, fold) {
+function foldLoop(buf: AudioBuffer, pre: number, len: number, fold: number): AudioBuffer {
   const sr = buf.sampleRate;
   const a = buf.getChannelData(0);
   const n = Math.round(len * sr);
@@ -2154,53 +2310,51 @@ function foldLoop(buf, pre, len, fold) {
   const out = a.slice(p, p + n);
   for (let i = 0; i < x; i++) {
     const k = i / x;
-    out[i] = a[p + i] * Math.sqrt(k) + a[p + n + i] * Math.sqrt(1 - k);
+    out[i] = a[p + i]! * Math.sqrt(k) + a[p + n + i]! * Math.sqrt(1 - k);
   }
   return monoBuffer(out, sr);
 }
 
 /**
- * Render `fn(v, t, out[, duration])` into a mono AudioBuffer (null where offline rendering is
+ * Render `fn(v, t, out, duration)` into a mono AudioBuffer (null where offline rendering is
  * unavailable). `seed` makes the render repeatable; `loop` renders a seamless loop of that many
  * seconds; `normalize` scales the result to that peak.
  */
-export async function renderOffline(fn, { seed = 1, loop = 0, normalize = 0 } = {}) {
+export async function renderOffline(fn: RenderFn, { seed = 1, loop = 0, normalize = 0 } = {}): Promise<AudioBuffer | null> {
   const OAC = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
   if (!OAC) return null;
   const rate = OFFLINE_RATE;
   const PRE = 0.5;
   const FOLD = 1;
-  let seconds;
+  let seconds: number;
   let reverb = false;
-  let build = fn;
   if (loop) {
     seconds = PRE + loop + FOLD;
-    build = (v, t, out) => fn(v, t, out, seconds);
   } else {
     // A cheap first pass (never rendered) finds the length and whether the reverb is used.
-    const probe = buildOffline(new OAC(1, 1, rate), fn, seed, false);
+    const probe = buildOffline(new OAC(1, 1, rate), fn, seed, false, 0);
     reverb = probe.wet;
     seconds = probe.end + (reverb ? 1.9 : 0.05);
   }
   const oac = new OAC(1, Math.ceil(seconds * rate), rate);
-  buildOffline(oac, build, seed, reverb);
+  buildOffline(oac, fn, seed, reverb, loop ? seconds : 0);
   const rendered = await oac.startRendering();
   return loop ? foldLoop(rendered, PRE, loop, FOLD) : trimTail(rendered, normalize);
 }
 
 /** Variant `variant` of a sound effect. */
-export function renderSfx(name, variant = 0) {
+export function renderSfx(name: string, variant = 0): Promise<AudioBuffer | null> {
   const def = SFX[name];
   return def ? renderOffline(def.fn, { seed: hashString(name) + variant * 7919 }) : Promise.resolve(null);
 }
 
 /** Line `line` of a voice's barks for `kind`, normalized to a common peak level (0: as synthesized). */
-export function renderBark(voiceId, kind, line = 0, normalize = 0.5) {
+export function renderBark(voiceId: string, kind: BarkKind, line = 0, normalize = 0.5): Promise<AudioBuffer | null> {
   return renderOffline((v, t, out) => sBark(v, t, out, voiceId, kind, line), { seed: hashString(voiceId + kind) + line * 7919, normalize });
 }
 
 /** An ambient loop ('wind', 'crickets', 'drone') or a one-shot ('bird', with variants). */
-export function renderAmbient(name, variant = 0) {
+export function renderAmbient(name: string, variant = 0): Promise<AudioBuffer | null> {
   const a = AMBIENT[name];
   if (!a) return Promise.resolve(null);
   return renderOffline(a.fn, { seed: hashString(name) + variant * 7919, loop: a.loop || 0 });
@@ -2209,7 +2363,7 @@ export function renderAmbient(name, variant = 0) {
 export const SFX_NAMES = Object.keys(SFX);
 
 /** Limits and level of a sound effect (used by the Babylon.js backend). */
-export function sfxInfo(name) {
+export function sfxInfo(name: string): { prio: number; max: number; gap: number; gain: number; duck: number } | null {
   const d = Object.prototype.hasOwnProperty.call(SFX, name) ? SFX[name] : null;
   if (!d) return null;
   return { prio: d.prio, max: d.max ?? MAX_PER_NAME, gap: d.gap ?? MIN_GAP, gain: d.gain ?? 1, duck: d.duck ?? 0 };
@@ -2218,21 +2372,21 @@ export function sfxInfo(name) {
 export const MAX_SFX_VOICES = MAX_VOICES;
 
 /** The live AudioContext (null until initAudio). */
-export function getAudioContext() {
+export function getAudioContext(): AudioContext | OfflineAudioContext | null {
   return ctx;
 }
 
 /** Where other engines' sound effects join the mix (before the compressor and the master volume). */
-export function getSfxInput() {
+export function getSfxInput(): GainNode | null {
   return sfxGain;
 }
 
 /** True when sound can be heard now (not muted, context running or just resumed). */
-export function canPlayNow() {
+export function canPlayNow(): boolean {
   return !muted && canPlay();
 }
 
 /** Lower the music for a fanfare played by another engine. */
-export function duckMusicFor(seconds) {
+export function duckMusicFor(seconds: number): void {
   if (ctx) duckMusic(ctx.currentTime + START_DELAY, seconds);
 }

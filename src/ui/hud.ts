@@ -3,12 +3,21 @@
 import { moodOf } from '../game/empire.ts';
 import { UNITS, UPGRADES, AGE_NAMES, ECONOMY } from '../data/units.ts';
 import { ITEMS } from '../data/items.ts';
-import { getCommands } from './commands.js';
-import { Minimap } from './minimap.js';
+import { getCommands } from './commands.ts';
+import { Minimap } from './minimap.ts';
+import { isEmpire } from '../game/types.ts';
+import type { Game } from '../game/game.ts';
+import type { Unit } from '../game/unit.ts';
+import type { InventoryItem } from '../game/types.ts';
+import type { Input } from '../input.ts';
+import type { BabylonView } from '../babylon/BabylonView.ts';
+import type { Portrait } from '../babylon/UiRenderer.ts';
+import type { ButtonEvent, CommandButton } from './commands.ts';
 
-const $ = (id) => document.getElementById(id);
+/** An element of index.html (always present). */
+const $ = (id: string): HTMLElement => document.getElementById(id)!;
 
-function fmtTime(s) {
+function fmtTime(s: number): string {
   s = Math.max(0, Math.floor(s)); // the game clock starts slightly below zero
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
@@ -16,17 +25,40 @@ function fmtTime(s) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+function esc(s: unknown): string {
+  return String(s).replace(/[&<>"]/g, (c) => ESCAPES[c]!);
 }
 
 export class Hud {
-  constructor(game, view, input) {
+  readonly view: BabylonView;
+  readonly input: Input;
+  readonly el: HTMLElement;
+  readonly portrait: Portrait;
+  readonly minimap: Minimap;
+  game!: Game;
+  // Signatures of what is on screen, to rebuild DOM only when something changed.
+  private cardSig = '';
+  private infoSig = '';
+  private invSig = '';
+  private heroSig = '';
+  private msgHtml = '';
+  private sbHtml = '';
+  private offerSig = '';
+  private sbTimer = 0;
+  private timer = 0;
+  private tooltipBtn: string | null = null;
+  private invTip: string | null = null;
+  private invHover: number | null = null;
+  private idleIndex?: number;
+  private lastHeroClick?: number;
+
+  constructor(game: Game, view: BabylonView, input: Input) {
     this.view = view;
     this.input = input;
     this.el = $('hud');
     this.portrait = view.createPortrait($('portrait'));
-    this.minimap = new Minimap($('minimap'), game, view, input);
+    this.minimap = new Minimap($('minimap') as HTMLCanvasElement, game, view, input);
     this.input.onInventoryClick = (slot, e) => this.inventoryClick(slot, e);
     this.buildInventory();
     this.bindTopbar();
@@ -34,13 +66,13 @@ export class Hud {
     this.attach(game);
   }
 
-  toggleScoreboard() {
+  toggleScoreboard(): void {
     $('scoreboard').classList.toggle('collapsed');
     this.sbHtml = '';
   }
 
   /** Point the HUD at a (new) game. */
-  attach(game) {
+  attach(game: Game): void {
     this.game = game;
     this.minimap.attach(game);
     this.portrait.show(null);
@@ -57,23 +89,23 @@ export class Hud {
     $('r-mode').textContent = game.human.mode === 'hero' ? 'Hero Path' : 'Empire Path';
   }
 
-  icon(modelId, color, isBuilding) {
+  icon(modelId: string, color: number, isBuilding = false): string {
     return this.view.icon(modelId, color, isBuilding);
   }
 
-  bindTopbar() {
+  bindTopbar(): void {
     $('idleworkers').addEventListener('click', () => {
       const idle = this.game.human.units.filter((u) => !u.dead && u.def.worker && u.order.type === 'idle');
       if (!idle.length) return;
       this.idleIndex = ((this.idleIndex ?? -1) + 1) % idle.length;
-      const u = idle[this.idleIndex];
+      const u = idle[this.idleIndex]!;
       this.input.setSelection([u]);
       this.input.centerOn(u.x, u.z);
     });
   }
 
   // ---------------------------------------------------------------- frame
-  update(dt) {
+  update(dt: number): void {
     const g = this.game;
     const p = g.human;
     this.timer -= dt;
@@ -83,13 +115,13 @@ export class Hud {
     if (this.timer > 0) return;
     this.timer = 0.1;
 
-    $('r-gold').textContent = Math.floor(p.gold);
-    $('r-lumber').textContent = Math.floor(p.lumber);
+    $('r-gold').textContent = String(Math.floor(p.gold));
+    $('r-lumber').textContent = String(Math.floor(p.lumber));
     $('r-food').textContent = `${p.foodUsed}/${p.foodCap}`;
-    if (p.mode === 'empire') {
-      const age = AGE_NAMES[p.tier] || 'No Town Center';
+    if (isEmpire(p)) {
+      const age = AGE_NAMES[p.tier]! || 'No Town Center';
       if ($('r-mode').textContent !== age) $('r-mode').textContent = age;
-      $('r-grain').textContent = Math.floor(p.food);
+      $('r-grain').textContent = String(Math.floor(p.food));
       const fr = Math.round(p.foodRate * 60);
       const rate = $('r-grain-rate');
       rate.textContent = `${fr >= 0 ? '+' : ''}${fr}/m`;
@@ -100,7 +132,7 @@ export class Hud {
       $('r-mood-ico').textContent = mood.icon;
       $('r-mood').textContent = mood.name;
       $('r-mood').style.color = mood.color;
-      $('res-mood').title = `Mood ${Math.round(p.happiness)}/100 (heading to ${Math.round(p.happinessTarget)}). Tax ${p.tax}, rations ${p.rations}, roads ${p.roadBonus >= 0 ? '+' : ''}${Math.round(p.roadBonus ?? 0)}${p.crowding >= 1 ? `, crowding -${Math.round(p.crowding)}` : ''}${p.starving ? ', STARVING' : ''}. Income ${Math.round(p.taxRate * 60)} gold/min from taxes.`;
+      $('res-mood').title = `Mood ${Math.round(p.happiness)}/100 (heading to ${Math.round(p.happinessTarget)}). Tax ${p.tax}, rations ${p.rations}, roads ${p.roadBonus! >= 0 ? '+' : ''}${Math.round(p.roadBonus ?? 0)}${p.crowding! >= 1 ? `, crowding -${Math.round(p.crowding!)}` : ''}${p.starving ? ', STARVING' : ''}. Income ${Math.round(p.taxRate * 60)} gold/min from taxes.`;
     }
     document.body.classList.toggle('mode-empire', p.mode === 'empire');
     $('r-food').classList.toggle('warn', p.foodUsed >= p.foodCap && p.mode === 'empire');
@@ -112,7 +144,7 @@ export class Hud {
     const idle = p.units.filter((u) => !u.dead && u.def.worker && u.order.type === 'idle').length;
     const iw = $('idleworkers');
     iw.classList.toggle('hidden', idle === 0);
-    if (idle) $('idle-count').textContent = idle;
+    if (idle) $('idle-count').textContent = String(idle);
 
     this.updateHeroBar();
     this.sbTimer = (this.sbTimer ?? 0) - 1;
@@ -129,7 +161,7 @@ export class Hud {
   }
 
   /** Contract offers from empires that want to hire the player's Hero. */
-  updateOffers() {
+  updateOffers(): void {
     const g = this.game;
     const offers = (g.empires?.offers ?? []).filter((o) => o.to === g.human);
     const box = $('offers');
@@ -138,7 +170,8 @@ export class Hud {
     const sig = offers.map((o) => `${o.from.index}:${o.fee}:${o.expires}`).join('|');
     if (sig === this.offerSig) {
       box.querySelectorAll('.of-left').forEach((el, i) => {
-        if (offers[i]) el.textContent = `(${Math.ceil(offers[i].expires - g.time)}s)`;
+        const o = offers[i];
+        if (o) el.textContent = `(${Math.ceil(o.expires - g.time)}s)`;
       });
       return;
     }
@@ -152,25 +185,25 @@ export class Hud {
         </div>`,
       )
       .join('');
-    box.querySelectorAll('.offer').forEach((el) => {
-      const o = offers[Number(el.dataset.i)];
-      el.querySelector('.of-yes').addEventListener('click', () => {
+    box.querySelectorAll<HTMLElement>('.offer').forEach((el) => {
+      const o = offers[Number(el.dataset['i'])]!;
+      el.querySelector('.of-yes')!.addEventListener('click', () => {
         g.empires.acceptOffer(o);
         this.offerSig = '';
       });
-      el.querySelector('.of-no').addEventListener('click', () => {
+      el.querySelector('.of-no')!.addEventListener('click', () => {
         g.empires.declineOffer(o);
         this.offerSig = '';
       });
     });
   }
 
-  renderPortrait(time) {
+  renderPortrait(time: number): void {
     this.portrait.render(time);
   }
 
   // -------------------------------------------------------------- heroes
-  updateHeroBar() {
+  updateHeroBar(): void {
     const g = this.game;
     const h = g.human.hero;
     const bar = $('herobar');
@@ -185,11 +218,11 @@ export class Hud {
         <div class="herobtn ${h.dead ? 'dead' : ''}" title="${esc(h.def.name)} (F1)">
           <img src="${this.icon(h.def.model, g.human.color)}" alt="">
           <div class="lvl">${h.level}</div>
-          ${h.skillPoints > 0 && !h.dead ? '<div class="plus">+</div>' : ''}
+          ${h.skillPoints! > 0 && !h.dead ? '<div class="plus">+</div>' : ''}
           <div class="bars"><div class="hp"><i></i></div><div class="mp"><i></i></div></div>
           <div class="revive"></div>
         </div>`;
-      const btn = bar.querySelector('.herobtn');
+      const btn = bar.querySelector('.herobtn')!;
       btn.addEventListener('click', () => {
         if (h.dead) return;
         const now = performance.now();
@@ -200,20 +233,20 @@ export class Hud {
     }
     const btn = bar.querySelector('.herobtn');
     if (!btn) return;
-    btn.querySelector('.hp i').style.width = `${h.dead ? 0 : (h.hp / h.maxHp) * 100}%`;
-    btn.querySelector('.mp i').style.width = `${h.dead || !h.maxMana ? 0 : (h.mana / h.maxMana) * 100}%`;
-    btn.querySelector('.revive').textContent = h.dead && h.reviveAt ? Math.max(0, Math.ceil(h.reviveAt - g.time)) : '';
+    btn.querySelector<HTMLElement>('.hp i')!.style.width = `${h.dead ? 0 : (h.hp / h.maxHp) * 100}%`;
+    btn.querySelector<HTMLElement>('.mp i')!.style.width = `${h.dead || !h.maxMana ? 0 : (h.mana / h.maxMana) * 100}%`;
+    btn.querySelector('.revive')!.textContent = h.dead && h.reviveAt ? String(Math.max(0, Math.ceil(h.reviveAt - g.time))) : '';
   }
 
   // ---------------------------------------------------------- scoreboard
-  updateScoreboard() {
+  updateScoreboard(): void {
     const g = this.game;
     if ($('scoreboard').classList.contains('collapsed')) return;
     const rows = g.generals
       .map((p) => {
         const side = p.isHuman ? 'You' : p.hiredBy ? (p.hiredBy === g.human ? 'Hired' : 'Mercenary') : g.isAlliedToHuman(p) ? 'Ally' : 'Rival';
         const alive = p.units.filter((u) => !u.dead && !u.isIllusion && !u.summoned);
-        let line2;
+        let line2: string;
         if (p.mode === 'hero') {
           const h = p.hero;
           const mercs = alive.filter((u) => !u.isHero).length;
@@ -223,12 +256,12 @@ export class Hud {
         } else {
           const army = alive.filter((u) => !u.def.worker).length;
           const workers = alive.length - army;
-          line2 = `${AGE_NAMES[Math.max(1, p.tier)]} · ${army} soldiers · ${workers} peasants · ${Math.floor(p.citizens ?? 0)} citizens`;
+          line2 = `${AGE_NAMES[Math.max(1, p.tier)]!} · ${army} soldiers · ${workers} peasants · ${Math.floor(p.citizens ?? 0)} citizens`;
         }
         let status = '';
         if (p.defeated) status = 'Defeated';
         else if (p.ai) status = p.ai.status ?? '';
-        if (p.hiredBy && !p.defeated) status = `Hired by ${p.hiredBy.isHuman ? 'you' : p.hiredBy.name} (${Math.max(0, Math.ceil((p.contractEnds - g.time) / 60))} min left)${status ? ` · ${status}` : ''}`;
+        if (p.hiredBy && !p.defeated) status = `Hired by ${p.hiredBy.isHuman ? 'you' : p.hiredBy.name} (${Math.max(0, Math.ceil((p.contractEnds! - g.time) / 60))} min left)${status ? ` · ${status}` : ''}`;
         return `<div class="sb-row ${side.toLowerCase()}${p.defeated ? ' out' : ''}">
           <span class="swatch" style="background:#${p.color.toString(16).padStart(6, '0')}"></span>
           <div class="sb-main">
@@ -254,7 +287,7 @@ export class Hud {
   }
 
   // -------------------------------------------------------- command card
-  updateCommandCard() {
+  updateCommandCard(): void {
     const buttons = getCommands(this.game, this.input);
     this.input.buttons = buttons;
     const sig = buttons
@@ -264,9 +297,9 @@ export class Hud {
     this.cardSig = sig;
     const card = $('commandcard');
     card.innerHTML = '';
-    const grid = Array.from({ length: 12 }, () => null);
+    const grid = Array.from({ length: 12 }, (): CommandButton | null => null);
     for (const b of buttons) grid[b.y * 4 + b.x] = b;
-    grid.forEach((b, i) => {
+    grid.forEach((b) => {
       const cell = document.createElement('div');
       cell.className = 'cmd';
       if (!b) {
@@ -302,7 +335,7 @@ export class Hud {
           this.game.sound('error');
           return;
         }
-        b.onClick(e);
+        b.onClick?.(e);
         this.game.sound('click', undefined, undefined, 0.4);
         this.cardSig = '';
       });
@@ -317,7 +350,7 @@ export class Hud {
     });
   }
 
-  updateTooltip() {
+  updateTooltip(): void {
     const tip = $('tooltip');
     const id = this.tooltipBtn;
     const b = id && this.input.buttons.find((x) => x.id === id);
@@ -335,7 +368,7 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- info
-  updateInfo(unit) {
+  updateInfo(unit: Unit | null): void {
     const g = this.game;
     const info = $('info');
     const sel = this.input.selection.filter((u) => !u.dead);
@@ -364,11 +397,11 @@ export class Hud {
           </div>`,
         )
         .join('')}</div>`;
-      info.querySelectorAll('.mu').forEach((el) => {
+      info.querySelectorAll<HTMLElement>('.mu').forEach((el) => {
         el.addEventListener('mousedown', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          const u = g.unitById.get(Number(el.dataset.id));
+          const u = g.unitById.get(Number(el.dataset['id']));
           if (!u) return;
           if (e.shiftKey) {
             u.selected = false;
@@ -383,12 +416,12 @@ export class Hud {
 
     // Single unit.
     const u = unit;
-    const parts = [];
-    let title = u.name;
+    const parts: string[] = [];
+    const title = u.name;
     let sub = '';
     if (u.isHero) {
       sub = `Level ${u.level} ${u.def.title ?? ''}${u.isIllusion ? ' (Illusion)' : ''}`;
-    } else if (u.def.boss) sub = u.def.title;
+    } else if (u.def.boss) sub = u.def.title!;
     else if (u.isBuilding) sub = u.owner.general ? `${u.owner.name}` : '';
     else sub = u.owner.general ? u.owner.name : u.owner === g.creeps ? `Level ${u.def.level} Creep` : u.owner === g.legion ? "Kalenden's Legion" : '';
 
@@ -396,26 +429,26 @@ export class Hud {
       parts.push(`<div class="progress"><div class="pl">Constructing</div><div class="bar"><i style="width:${u.buildProgress * 100}%"></i></div></div>`);
     } else if (u.isBuilding && (u.trainQueue.length || u.upgrading || u.researching)) {
       if (u.upgrading) {
-        const what = u.upgrading.age ? `Advancing to the ${AGE_NAMES[u.upgrading.age]}` : `Upgrading to ${UNITS[u.upgrading.to].name}`;
+        const what = u.upgrading.age ? `Advancing to the ${AGE_NAMES[u.upgrading.age]!}` : `Upgrading to ${UNITS[u.upgrading.to!]!.name}`;
         parts.push(`<div class="progress"><div class="pl">${what}</div><div class="bar"><i style="width:${(u.upgrading.time / u.upgrading.total) * 100}%"></i></div></div>`);
       }
       if (u.researching) {
-        const up = UPGRADES[u.researching.upg];
+        const up = UPGRADES[u.researching.upg]!;
         parts.push(`<div class="progress"><div class="pl">Researching ${up.name} level ${(u.owner.upgrades[u.researching.upg] ?? 0) + 1}</div><div class="bar"><i style="width:${(u.researching.time / u.researching.total) * 100}%"></i></div></div>`);
       }
       if (u.trainQueue.length) {
-        const q0 = u.trainQueue[0];
+        const q0 = u.trainQueue[0]!;
         parts.push(`<div class="queue">${u.trainQueue
-          .map((q, i) => `<div class="qi" data-i="${i}"><img src="${this.icon(UNITS[q.type].model, u.owner.color)}" alt=""></div>`)
+          .map((q, i) => `<div class="qi" data-i="${i}"><img src="${this.icon(UNITS[q.type]!.model, u.owner.color)}" alt=""></div>`)
           .join('')}</div><div class="progress small"><div class="bar"><i style="width:${(q0.time / q0.total) * 100}%"></i></div></div>`);
       }
     } else {
-      const stats = [];
+      const stats: string[] = [];
       const dmg = u.damageRange;
       if (dmg) stats.push(`<div class="stat"><span class="si">⚔</span>Damage: <b>${dmg[0]} - ${dmg[1]}</b></div>`);
       if (!u.def.invulnerable) stats.push(`<div class="stat"><span class="si">🛡</span>Armor: <b>${Math.round(u.armor * 10) / 10}</b> <span class="dim">(${u.def.armorType})</span></div>`);
       if (u.isHero) {
-        const pr = u.heroDef.primary;
+        const pr = u.heroDef!.primary;
         stats.push(`<div class="attrs">
           <span class="${pr === 'str' ? 'prim' : ''}">Str ${u.str}</span>
           <span class="${pr === 'agi' ? 'prim' : ''}">Agi ${u.agi}</span>
@@ -423,7 +456,8 @@ export class Hud {
         if (!u.isIllusion) {
           const next = u.xpForNext;
           const cur = u.xpForCurrent;
-          stats.push(`<div class="xp"><div class="bar"><i style="width:${next ? ((u.xp - cur) / (next - cur)) * 100 : 100}%"></i></div><span>${next ? `XP ${Math.floor(u.xp)} / ${next}` : 'Max level'}</span></div>`);
+          const xp = u.xp!;
+          stats.push(`<div class="xp"><div class="bar"><i style="width:${next ? ((xp - cur) / (next - cur)) * 100 : 100}%"></i></div><span>${next ? `XP ${Math.floor(xp)} / ${next}` : 'Max level'}</span></div>`);
         }
       }
       if (u.type === 'goldmine') stats.push(`<div class="stat"><span class="si">◉</span>Gold: <b>${u.goldLeft}</b></div>`);
@@ -437,11 +471,11 @@ export class Hud {
         );
       }
       if (u.def.foodRateByAge && !u.underConstruction) {
-        stats.push(`<div class="stat ok">Grows ${Math.round(u.def.foodRateByAge[u.ageLevel - 1] * 60 * (g.events?.harvestMult(u.owner) ?? 1))} food per minute</div>`);
+        stats.push(`<div class="stat ok">Grows ${Math.round(u.def.foodRateByAge[u.ageLevel - 1]! * 60 * (g.events?.harvestMult(u.owner) ?? 1))} food per minute</div>`);
       }
-      if (u.def.tier && u.owner.mode === 'empire') {
+      if (u.def.tier && isEmpire(u.owner)) {
         const o = u.owner;
-        stats.push(`<div class="stat">Age: <b>${AGE_NAMES[Math.max(1, o.tier)]}</b></div>`);
+        stats.push(`<div class="stat">Age: <b>${AGE_NAMES[Math.max(1, o.tier)]!}</b></div>`);
         if (o === g.human) {
           const mood = moodOf(o.happiness);
           stats.push(`<div class="stat">Citizens: <b>${Math.floor(o.citizens)}/${o.housing}</b> · Mood: <b style="color:${mood.color}">${mood.icon} ${mood.name}</b></div>`);
@@ -450,7 +484,7 @@ export class Hud {
         }
       }
       if (u.def.researches && !u.underConstruction && u.owner === g.human) {
-        const lv = u.def.researches.map((id) => `<span title="${UPGRADES[id].name}: ${UPGRADES[id].effect}">${UPGRADES[id].icon}${u.owner.upgrades[id] ?? 0}</span>`).join(' ');
+        const lv = u.def.researches.map((id) => `<span title="${UPGRADES[id]!.name}: ${UPGRADES[id]!.effect}">${UPGRADES[id]!.icon}${u.owner.upgrades[id] ?? 0}</span>`).join(' ');
         stats.push(`<div class="stat research-levels">${lv}</div>`);
       }
       if (u.def.nukes && !u.underConstruction) {
@@ -468,7 +502,7 @@ export class Hud {
       if (u.lifetime !== null && u.lifetime !== undefined) stats.push(`<div class="stat dim">Expires in ${Math.ceil(u.lifetime)}s</div>`);
       const buffs = [...u.buffs.values()].filter((b) => !b.aura || true).map((b) => b.id);
       if (buffs.length) {
-        const names = {
+        const names: Record<string, string> = {
           stun: 'Stunned', slow: 'Slowed', thunder_slow: 'Thunder Clap', divine_shield: 'Divine Shield', wind_walk: 'Wind Walk',
           avatar: 'Avatar', entangle: 'Entangled', bladestorm: 'Bladestorm', aura_devotion_aura: 'Devotion Aura',
           aura_brilliance_aura: 'Brilliance Aura', aura_trueshot_aura: 'Trueshot Aura', elemental_power: '', tyrant_might: '', veteran: 'Veteran', dominion: "Kalenden's Dominion",
@@ -482,24 +516,24 @@ export class Hud {
     if (html === this.infoSig) return;
     this.infoSig = html;
     info.innerHTML = html;
-    info.querySelectorAll('.qi').forEach((el) => {
+    info.querySelectorAll<HTMLElement>('.qi').forEach((el) => {
       el.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (u.owner === g.human) g.cancelTrain(u, Number(el.dataset.i));
+        if (u.owner === g.human) g.cancelTrain(u, Number(el.dataset['i']));
         this.infoSig = '';
       });
     });
   }
 
   // ----------------------------------------------------------- inventory
-  buildInventory() {
+  buildInventory(): void {
     const grid = $('inv-grid');
     grid.innerHTML = '';
     for (let i = 0; i < 6; i++) {
       const s = document.createElement('div');
       s.className = 'slot';
-      s.dataset.i = i;
+      s.dataset['i'] = String(i);
       s.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -514,36 +548,36 @@ export class Hud {
     }
   }
 
-  inventoryClick(slot, e) {
+  inventoryClick(slot: number, e?: ButtonEvent): void {
     const g = this.game;
     const u = this.input.activeUnit();
     if (!u || !u.isHero || u.owner !== g.human || u.isIllusion) return;
-    if (e?.shiftKey || e?.button === 2) {
+    if (e?.shiftKey || (e && 'button' in e && e.button === 2)) {
       g.sellItem(u, slot);
     } else if (!g.useItem(u, slot)) {
-      const it = u.inventory[slot];
-      if (it && !ITEMS[it.id].use) g.message('That item is passive.', '#ccc');
+      const it = u.inventory![slot];
+      if (it && !ITEMS[it.id]!.use) g.message('That item is passive.', '#ccc');
     }
     this.invSig = '';
   }
 
-  updateInventory(unit) {
+  updateInventory(unit: Unit | null): void {
     const inv = $('inventory');
     const show = unit && unit.isHero;
     inv.classList.toggle('inactive', !show);
-    const items = show ? unit.inventory : [null, null, null, null, null, null];
+    const items: (InventoryItem | null)[] = show ? unit.inventory! : [null, null, null, null, null, null];
     const sig = items.map((it) => (it ? `${it.id}:${it.charges}` : '-')).join(',');
     if (sig !== this.invSig) {
       this.invSig = sig;
       const slots = inv.querySelectorAll('.slot');
       items.forEach((it, i) => {
-        const s = slots[i];
+        const s = slots[i]!;
         if (!it) {
           s.innerHTML = `<span class="hk">${['7', '8', '4', '5', '1', '2'][i]}</span>`;
           s.classList.remove('full');
           return;
         }
-        const d = ITEMS[it.id];
+        const d = ITEMS[it.id]!;
         s.classList.add('full');
         s.innerHTML = `<div class="glyph" style="background:radial-gradient(circle at 35% 30%, ${d.color}, #111 85%)">${d.icon}</div>${d.use && it.charges > 1 ? `<span class="cnt">${it.charges}</span>` : ''}`;
       });
@@ -552,14 +586,14 @@ export class Hud {
     if (this.invHover !== null && this.invHover !== undefined && show) {
       const it = items[this.invHover];
       if (it) {
-        const d = ITEMS[it.id];
+        const d = ITEMS[it.id]!;
         this.invTip = `<div class="tt-name">${esc(d.name)}</div><div class="tt-body">${d.description}${d.use ? '<br><span class="dim">Click to use.</span>' : ''}<br><span class="dim">Shift-click near a shop to sell.</span></div>`;
       } else this.invTip = null;
     } else this.invTip = null;
   }
 
   // ------------------------------------------------------------ messages
-  updateMessages() {
+  updateMessages(): void {
     const now = performance.now();
     const list = this.game.messages.filter((m) => now - m.time < 9000);
     const html = list.map((m) => `<div class="msg" style="color:${m.color};opacity:${Math.min(1, (9000 - (now - m.time)) / 1500)}">${esc(m.text)}</div>`).join('');

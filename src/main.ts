@@ -2,22 +2,34 @@
 import '@fontsource/cinzel/500.css';
 import '@fontsource/cinzel/700.css';
 import '@fontsource/cinzel/900.css';
-import { Overlay } from './ui/overlay.js';
+import { Overlay } from './ui/overlay.ts';
 import { Game } from './game/game.ts';
-import { Input } from './input.js';
-import { Hud } from './ui/hud.js';
+import { Input } from './input.ts';
+import { Hud } from './ui/hud.ts';
 import { HEROES, HERO_IDS } from './data/heroes.ts';
 import { UNITS } from './data/units.ts';
 import { ABILITIES } from './game/abilities.ts';
 import { TEAM_COLORS } from './data/colors.ts';
-import { initAudio, playSfx, playBark, barkVoice, startMusic, stopMusic, setMuted, isMuted } from './audio.js';
+import { initAudio, playSfx, playBark, barkVoice, startMusic, stopMusic, setMuted, isMuted } from './audio.ts';
 import { GeneralAI } from './ai/general.ts';
 import { Roads } from './game/roads.ts';
+import type { GameOptions, RivalSpec } from './game/game.ts';
+import type { SimHooks } from './game/hooks.ts';
+import type { Unit } from './game/unit.ts';
+import type { GameOver, GeneralMode, Player } from './game/types.ts';
+import type { BarkKind } from './audio.ts';
+import type { BabylonView } from './babylon/BabylonView.ts';
+import type { Quality } from './babylon/Graphics.ts';
+import type { SpatialAudio } from './babylon/SpatialAudio.ts';
+import type { PerfStats } from './globals.d.ts';
 
-const $ = (id) => document.getElementById(id);
+/** An element of index.html (always present), as the element type the caller expects. */
+const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
 
-const settings = {
+/** The title screen's choices (kept across page updates in the Artifact viewer). */
+type Settings = Required<Pick<GameOptions, 'mode' | 'heroId' | 'rivals' | 'difficulty'>>;
+const settings: Settings = {
   mode: 'hero',
   heroId: 'paladin',
   // Computer generals. By default a mix of AI heroes and AI empires, all rivals.
@@ -29,22 +41,24 @@ const settings = {
   difficulty: 'normal',
 };
 
-const RIVAL_COLORS = [
+const ATTRIBUTE_NAMES = { str: 'Strength', agi: 'Agility', int: 'Intelligence' };
+
+const RIVAL_COLORS: [string, string][] = [
   ['Blue', '#0042ff'],
   ['Teal', '#1ce6b9'],
   ['Purple', '#8a3ad0'],
 ];
 
 /** Editable rows for the computer generals on the title screen. */
-function renderRivalRows() {
+function renderRivalRows(): void {
   const box = $('rival-rows');
   box.innerHTML = '';
   settings.rivals.forEach((r, i) => {
-    const [cname, ccol] = RIVAL_COLORS[i];
+    const [cname, ccol] = RIVAL_COLORS[i]!;
     const row = document.createElement('div');
     row.className = 'rival-row';
     const heroOpts = ['random', ...HERO_IDS]
-      .map((h) => `<option value="${h}"${r.hero === h ? ' selected' : ''}>${h === 'random' ? 'Random' : UNITS[h].name}</option>`)
+      .map((h) => `<option value="${h}"${r.hero === h ? ' selected' : ''}>${h === 'random' ? 'Random' : UNITS[h]!.name}</option>`)
       .join('');
     row.innerHTML = `
       <div class="rr-head">
@@ -66,8 +80,9 @@ function renderRivalRows() {
       </div>`;
     row.querySelectorAll('select').forEach((sel) => {
       sel.addEventListener('change', () => {
-        r[sel.dataset.k] = sel.value;
-        if (sel.dataset.k === 'mode') renderRivalRows();
+        const k = sel.dataset['k'] as keyof RivalSpec;
+        (r as Record<keyof RivalSpec, string>)[k] = sel.value;
+        if (k === 'mode') renderRivalRows();
       });
     });
     row.querySelector('.rr-remove')?.addEventListener('click', () => {
@@ -79,11 +94,12 @@ function renderRivalRows() {
   $('btn-add-rival').classList.toggle('hidden', settings.rivals.length >= 3);
 }
 
-let view = null;
-let overlay = null;
-let game = null;
-let input = null;
-let hud = null;
+// The view and overlay exist from the first screen on; the rest while a game is set up.
+let view!: BabylonView;
+let overlay!: Overlay;
+let game: Game | null = null;
+let input: Input | null = null;
+let hud: Hud | null = null;
 let paused = false;
 let speed = Number(params.get('speed')) || 1;
 let running = false;
@@ -91,14 +107,14 @@ let lastFrame = 0;
 let endShown = false;
 
 // The Babylon.js renderer and audio backend, loaded before boot (src/babylon/).
-let ViewClass = null;
+let ViewClass: typeof BabylonView | null = null;
 /** Spatial sound effects and ambience (src/babylon/SpatialAudio.ts). */
-let spatial = null;
+let spatial: SpatialAudio | null = null;
 
-function ensureView() {
+function ensureView(): void {
   if (view) return;
-  view = new ViewClass($('gl'));
-  overlay = new Overlay($('overlay'), null, view, null);
+  view = new ViewClass!($<HTMLCanvasElement>('gl'));
+  overlay = new Overlay($<HTMLCanvasElement>('overlay'), null, view, null);
   window.addEventListener('resize', () => {
     view.resize();
     overlay.resize();
@@ -106,16 +122,16 @@ function ensureView() {
 }
 
 // ------------------------------------------------------------- title screen
-function buildTitle() {
+function buildTitle(): void {
   ensureView();
   const list = $('hero-list');
   list.innerHTML = '';
   for (const id of HERO_IDS) {
-    const h = HEROES[id];
-    const d = UNITS[id];
+    const h = HEROES[id]!;
+    const d = UNITS[id]!;
     const btn = document.createElement('button');
     btn.className = `heroc${id === settings.heroId ? ' selected' : ''}`;
-    btn.dataset.hero = id;
+    btn.dataset['hero'] = id;
     let img = '';
     try {
       img = view.icon(d.model, TEAM_COLORS.red, false);
@@ -126,20 +142,20 @@ function buildTitle() {
       <img src="${img}" alt="">
       <div class="hn">${d.name}</div>
       <div class="ht">${d.title}</div>
-      <div class="hp">Primary: ${{ str: 'Strength', agi: 'Agility', int: 'Intelligence' }[h.primary]}</div>
+      <div class="hp">Primary: ${ATTRIBUTE_NAMES[h.primary]}</div>
       <div class="hb">${h.blurb}</div>
-      <div class="ht" style="margin-top:4px">${h.abilities.map((a) => `${ABILITIES[a].icon} ${ABILITIES[a].name}`).join('<br>')}</div>`;
+      <div class="ht" style="margin-top:4px">${h.abilities.map((a) => `${ABILITIES[a]!.icon} ${ABILITIES[a]!.name}`).join('<br>')}</div>`;
     btn.addEventListener('click', () => {
       settings.heroId = id;
-      list.querySelectorAll('.heroc').forEach((b) => b.classList.toggle('selected', b.dataset.hero === id));
+      list.querySelectorAll<HTMLElement>('.heroc').forEach((b) => b.classList.toggle('selected', b.dataset['hero'] === id));
       initSound();
       sfx('click', 0.6);
     });
     list.appendChild(btn);
   }
-  document.querySelectorAll('.path').forEach((b) => {
+  document.querySelectorAll<HTMLElement>('.path').forEach((b) => {
     b.addEventListener('click', () => {
-      settings.mode = b.dataset.mode;
+      settings.mode = b.dataset['mode'] as GeneralMode;
       document.querySelectorAll('.path').forEach((x) => x.classList.toggle('selected', x === b));
       $('hero-pick').classList.toggle('hidden', settings.mode !== 'hero');
       initSound();
@@ -154,15 +170,15 @@ function buildTitle() {
     renderRivalRows();
   });
   $('btn-start').addEventListener('click', () => {
-    settings.difficulty = $('opt-difficulty').value;
+    settings.difficulty = $<HTMLSelectElement>('opt-difficulty').value as Settings['difficulty'];
     initSound();
     startGame();
   });
   $('btn-help').addEventListener('click', () => openModal('modal-help'));
-  document.querySelectorAll('.path').forEach((x) => x.classList.toggle('selected', x.dataset.mode === settings.mode));
+  document.querySelectorAll<HTMLElement>('.path').forEach((x) => x.classList.toggle('selected', x.dataset['mode'] === settings.mode));
   $('hero-pick').classList.toggle('hidden', settings.mode !== 'hero');
   renderRivalRows();
-  $('opt-difficulty').value = settings.difficulty;
+  $<HTMLSelectElement>('opt-difficulty').value = settings.difficulty;
   if (matchMedia('(pointer: coarse)').matches) {
     const n = document.createElement('div');
     n.className = 'touch-note';
@@ -172,21 +188,24 @@ function buildTitle() {
 }
 
 // --------------------------------------------------------------- modals
-function openModal(id) {
+function openModal(id: string): void {
   $(id).classList.remove('hidden');
 }
-function closeModal(id) {
+function closeModal(id: string): void {
   $(id).classList.add('hidden');
 }
 
-function setPaused(p) {
+function setPaused(p: boolean): void {
   paused = p;
   $('pause-banner').classList.toggle('hidden', !p || !$('modal-menu').classList.contains('hidden'));
 }
 
-function bindModals() {
+/** The `data-act` of a clicked element. */
+const actOf = (e: Event): string | undefined => (e.target as HTMLElement).dataset?.['act'];
+
+function bindModals(): void {
   $('modal-menu').addEventListener('click', (e) => {
-    const act = e.target.dataset?.act;
+    const act = actOf(e);
     if (!act) return;
     sfx('click', 0.6);
     if (act === 'resume') {
@@ -201,14 +220,14 @@ function bindModals() {
   });
   for (const id of ['modal-help', 'modal-quests']) {
     $(id).addEventListener('click', (e) => {
-      if (e.target.dataset?.act === 'close' || e.target.id === id) {
+      if (actOf(e) === 'close' || (e.target as HTMLElement).id === id) {
         closeModal(id);
         if (id === 'modal-quests' && $('modal-menu').classList.contains('hidden') && !game?.over) setPaused(false);
       }
     });
   }
   $('modal-end').addEventListener('click', (e) => {
-    const act = e.target.dataset?.act;
+    const act = actOf(e);
     if (act === 'observe') closeModal('modal-end');
     else if (act === 'restart') {
       closeModal('modal-end');
@@ -259,42 +278,44 @@ function bindModals() {
 }
 
 /** The desktop app toggles the window itself (as F11 does there); browsers use the page API. */
-function toggleFullscreen() {
+function toggleFullscreen(): void {
   if (window.desktop?.toggleFullscreen) {
-    window.desktop.toggleFullscreen();
+    void window.desktop.toggleFullscreen();
     return;
   }
   if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   else document.documentElement.requestFullscreen?.().catch(() => game?.message('Fullscreen is not available here.', '#ccc'));
 }
 
-function bindCameraOptions() {
+function bindCameraOptions(input: Input): void {
   const s = input.settings;
-  $('opt-scroll').value = String(s.scrollSpeed);
-  if (!$('opt-scroll').value) $('opt-scroll').value = '1';
-  $('opt-wheel').value = s.wheelMode;
-  $('opt-edge').checked = !!s.edgeScroll;
-  $('opt-scroll').addEventListener('change', () => {
-    s.scrollSpeed = Number($('opt-scroll').value);
+  const scroll = $<HTMLSelectElement>('opt-scroll');
+  const wheel = $<HTMLSelectElement>('opt-wheel');
+  const edge = $<HTMLInputElement>('opt-edge');
+  const quality = $<HTMLSelectElement>('opt-quality');
+  scroll.value = String(s.scrollSpeed);
+  if (!scroll.value) scroll.value = '1';
+  wheel.value = s.wheelMode;
+  edge.checked = !!s.edgeScroll;
+  scroll.addEventListener('change', () => {
+    s.scrollSpeed = Number(scroll.value);
     input.saveSettings();
   });
-  $('opt-wheel').addEventListener('change', () => {
-    s.wheelMode = $('opt-wheel').value;
+  wheel.addEventListener('change', () => {
+    s.wheelMode = wheel.value as typeof s.wheelMode;
     input.saveSettings();
   });
-  $('opt-edge').addEventListener('change', () => {
-    s.edgeScroll = $('opt-edge').checked;
+  edge.addEventListener('change', () => {
+    s.edgeScroll = edge.checked;
     input.saveSettings();
   });
-  // Graphics presets (Babylon renderer only).
-  if (typeof view.setQuality === 'function') {
-    $('opt-quality-row').classList.remove('hidden');
-    $('opt-quality').value = view.quality;
-    $('opt-quality').addEventListener('change', () => view.setQuality($('opt-quality').value));
-  }
+  // Graphics presets.
+  $('opt-quality-row').classList.remove('hidden');
+  quality.value = view.quality;
+  quality.addEventListener('change', () => view.setQuality(quality.value as Quality));
 }
 
-function toggleMenu() {
+function toggleMenu(): void {
   const m = $('modal-menu');
   if (m.classList.contains('hidden')) {
     openModal('modal-menu');
@@ -305,13 +326,14 @@ function toggleMenu() {
   }
 }
 
-function showQuests() {
-  if (!game) return;
-  const others = game.generals.filter((p) => !p.isHuman);
-  const describe = (p) =>
-    `<span style="color:${game.nameColor(p)}">${p.name}</span> (${p.mode === 'hero' ? UNITS[p.heroType].name : 'Empire'})${p.defeated ? ' — <b>defeated</b>' : ''}`;
-  const allies = others.filter((p) => game.isAlliedToHuman(p));
-  const rivals = others.filter((p) => !game.isAlliedToHuman(p));
+function showQuests(): void {
+  const g = game;
+  if (!g) return;
+  const others = g.generals.filter((p) => !p.isHuman);
+  const describe = (p: Player): string =>
+    `<span style="color:${g.nameColor(p)}">${p.name}</span> (${p.mode === 'hero' ? UNITS[p.heroType!]!.name : 'Empire'})${p.defeated ? ' — <b>defeated</b>' : ''}`;
+  const allies = others.filter((p) => g.isAlliedToHuman(p));
+  const rivals = others.filter((p) => !g.isAlliedToHuman(p));
   $('quest-rivals').innerHTML = [
     allies.length ? `Your allies: ${allies.map(describe).join(', ')}. They defend your base and join your assault on Kalenden.` : '',
     rivals.length ? `Rival generals: ${rivals.map(describe).join(', ')}. Defeat them all, or slay Kalenden before they do.` : 'Every general is on your side. Bring the tyrant down together.',
@@ -323,17 +345,17 @@ function showQuests() {
 }
 
 // ------------------------------------------------------------- game setup
-function teardown() {
+function teardown(): void {
   if (!game) return;
   running = false;
-  input.enabled = false;
-  input.cancelPlacement();
-  input.cancelLine();
+  input!.enabled = false;
+  input!.cancelPlacement();
+  input!.cancelLine();
   view.clearWorld();
   game = null;
 }
 
-function startGame() {
+function startGame(): void {
   ensureView();
   teardown();
   endShown = false;
@@ -346,21 +368,21 @@ function startGame() {
     .then(createGame)
     .catch((e) => {
       console.error(e);
-      $('screen-loading').querySelector('.loading-text').textContent = `Failed to start: ${e.message}`;
+      $('screen-loading').querySelector('.loading-text')!.textContent = `Failed to start: ${(e as Error).message}`;
     });
 }
 
 /** Create or resume the audio (call from user gestures). */
-function initSound() {
+function initSound(): void {
   if (initAudio()) spatial?.start();
 }
 
 /** Play a sound effect, at a map position when given (fading with distance from the camera target). */
-function sfx(name, vol = 1, x, z) {
+function sfx(name: string, vol = 1, x?: number, z?: number): void {
   if (spatial?.play(name, vol, x, z)) return;
   if (x !== undefined && view) {
     const t = view.cam.target;
-    const d = Math.hypot(t.x - x, t.z - z);
+    const d = Math.hypot(t.x - x, t.z - z!);
     vol *= Math.max(0, Math.min(1, 1 - (d - 14) / 36));
     if (vol < 0.03) return;
   }
@@ -368,14 +390,13 @@ function sfx(name, vol = 1, x, z) {
 }
 
 /** A unit acknowledges a selection or an order ('select' | 'move' | 'attack'). */
-function bark(u, kind) {
+function bark(u: Unit, kind: BarkKind): void {
   const voice = barkVoice(u?.def);
   if (voice && !spatial?.bark(voice, kind)) playBark(voice, kind);
 }
 
-function createGame() {
-  /** @type {import('./game/hooks').SimHooks} */
-  const hooks = {
+function createGame(): void {
+  const hooks: SimHooks = {
     onUnitAdded: (u) => view.addUnit(u),
     onUnitRemoved: (u) => view.removeUnit(u),
     onUnitChanged: (u, modelChanged) => view.changeUnit(u, modelChanged),
@@ -388,14 +409,15 @@ function createGame() {
       setTimeout(() => showEnd(over), 2500);
     },
   };
-  game = new Game({ ...settings }, hooks);
-  view.attachGame(game);
-  hooks.fx = view.fx;
-  game.fx = view.fx;
-  game.setup();
-  if (params.get('reveal') === '1') game.fog.reveal();
+  const game_ = new Game({ ...settings }, hooks);
+  game = game_;
+  view.attachGame(game_);
+  hooks.fx = view.fx!;
+  game_.fx = view.fx!;
+  game_.setup();
+  if (params.get('reveal') === '1') game_.fog.reveal();
   // Test helper: let the computer play for the human too.
-  if (params.get('aiplayer') === '1') game.human.ai = new GeneralAI(game, game.human);
+  if (params.get('aiplayer') === '1') game_.human.ai = new GeneralAI(game_, game_.human);
 
   if (input) {
     input.game = game;
@@ -405,26 +427,26 @@ function createGame() {
     input.targetMode = null;
     input.cardMenu = null;
   } else {
-    input = new Input(game, view, $('gl'));
+    input = new Input(game_, view, $<HTMLCanvasElement>('gl'));
     input.onBark = bark;
     view.onQualityLowered = (q) => {
       game?.message(`Graphics set to ${q === 'low' ? 'Low' : 'Medium'} for a smoother frame rate (change it in the Menu).`, '#d8ccaa');
-      if ($('opt-quality')) $('opt-quality').value = q;
+      if ($('opt-quality')) $<HTMLSelectElement>('opt-quality').value = q;
     };
-    bindCameraOptions();
+    bindCameraOptions(input);
   }
-  overlay.game = game;
+  overlay.game = game_;
   overlay.input = input;
   overlay.resize();
-  if (hud) hud.attach(game);
-  else hud = new Hud(game, view, input);
+  if (hud) hud.attach(game_);
+  else hud = new Hud(game_, view, input);
 
-  const home = game.homeOf(game.human);
+  const home = game_.homeOf(game_.human);
   if (home) input.centerOn(home.x, home.z + 4);
-  const h = game.human.hero;
+  const h = game_.human.hero;
   if (h) input.setSelection([h], false);
-  game.message('Welcome, General. Slay Kalenden and claim his lands!', '#ffe680');
-  game.message(
+  game_.message('Welcome, General. Slay Kalenden and claim his lands!', '#ffe680');
+  game_.message(
     settings.mode === 'hero'
       ? 'Hero path: slay creeps to gain levels, buy items and hire mercenaries. Press F1 to select your Hero.'
       : 'Empire path: you begin in the Stone Age. Build Houses along roads for citizens who pay taxes, Farms to feed them, and advance through the ages at your town center.',
@@ -432,7 +454,7 @@ function createGame() {
   );
   $('screen-loading').classList.add('hidden');
   $('hud').classList.remove('hidden');
-  window.__game = game;
+  window.__game = game_;
   window.__input = input;
   window.__view = view;
   window.__U = UNITS;
@@ -442,15 +464,15 @@ function createGame() {
   if (params.get('bench')) benchmark(Math.max(2, Math.min(600, Number(params.get('bench')) || 200)));
   startMusic();
   if (spatial) {
-    spatial.startAmbience(game);
-    const own = new Set(['worker', game.human.hero ? barkVoice(game.human.hero.def) : 'caveman']);
+    spatial.startAmbience(game_);
+    const own = new Set(['worker', game_.human.hero ? barkVoice(game_.human.hero.def)! : 'caveman']);
     spatial.prepareBarks([...own]);
   }
   running = true;
   lastFrame = performance.now();
 }
 
-function quitToTitle() {
+function quitToTitle(): void {
   closeModal('modal-menu');
   closeModal('modal-end');
   teardown();
@@ -460,19 +482,20 @@ function quitToTitle() {
   $('screen-title').classList.remove('hidden');
 }
 
-function showEnd(over) {
-  if (endShown || !game) return;
+function showEnd(over: GameOver): void {
+  const g = game;
+  if (endShown || !g) return;
   endShown = true;
-  game.fog.reveal();
+  g.fog.reveal();
   const t = $('end-title');
   t.textContent = over.victory ? 'Victory!' : 'Defeat';
   t.className = over.victory ? 'victory' : 'defeat';
   $('end-text').textContent = over.text;
-  const rows = game.generals
+  const rows = g.generals
     .map((p) => {
       const col = `#${p.color.toString(16).padStart(6, '0')}`;
-      const side = p.isHuman ? ' (you)' : game.isAlliedToHuman(p) ? ' (ally)' : '';
-      return `<tr><td style="color:${col}">${p.name}${side}</td><td>${p.mode === 'hero' ? `${UNITS[p.heroType].name} ${p.hero ? `L${p.hero.level}` : ''}` : 'Empire'}</td>
+      const side = p.isHuman ? ' (you)' : g.isAlliedToHuman(p) ? ' (ally)' : '';
+      return `<tr><td style="color:${col}">${p.name}${side}</td><td>${p.mode === 'hero' ? `${UNITS[p.heroType!]!.name} ${p.hero ? `L${p.hero.level}` : ''}` : 'Empire'}</td>
       <td>${p.stats.kills}</td><td>${p.stats.creepsKilled}</td><td>${p.stats.unitsLost}</td><td>${p.stats.goldMined}</td><td>${p.stats.unitsTrained}</td><td>${p.defeated ? 'Defeated' : 'Alive'}</td></tr>`;
     })
     .join('');
@@ -482,10 +505,18 @@ function showEnd(over) {
 
 // -------------------------------------------------------------- main loop
 // Performance readout (?fps=1, or ?bench=N): frame rate and where the frame time goes.
-const perf = { on: params.has('fps') || params.has('bench'), frames: 0, t0: 0, sim: 0, render: 0, ui: 0, el: null };
+const perf: { on: boolean; frames: number; t0: number; sim: number; render: number; ui: number; el: HTMLElement | null } = {
+  on: params.has('fps') || params.has('bench'),
+  frames: 0,
+  t0: 0,
+  sim: 0,
+  render: 0,
+  ui: 0,
+  el: null,
+};
 window.__perf = null;
 
-function frame(now) {
+function frame(now: number): void {
   requestAnimationFrame(frame);
   if (!running || !game) {
     lastFrame = now;
@@ -501,20 +532,20 @@ function frame(now) {
       for (let i = 0; i < steps; i++) game.update(dt / steps);
     }
     const t1 = performance.now();
-    input.update(realDt);
+    input!.update(realDt);
     view.render(paused ? 0 : realDt * speed);
     spatial?.update(view.cam);
     const t2 = performance.now();
     overlay.draw();
-    hud.update(realDt);
-    hud.renderPortrait(now / 1000);
+    hud!.update(realDt);
+    hud!.renderPortrait(now / 1000);
     if (perf.on) perfTick(now, t1 - t0, t2 - t1, performance.now() - t2);
   } catch (e) {
     console.error(e);
   }
 }
 
-function perfTick(now, simMs, renderMs, uiMs) {
+function perfTick(now: number, simMs: number, renderMs: number, uiMs: number): void {
   perf.frames++;
   perf.sim += simMs;
   perf.render += renderMs;
@@ -522,9 +553,10 @@ function perfTick(now, simMs, renderMs, uiMs) {
   if (!perf.t0) perf.t0 = now;
   if (now - perf.t0 < 500) return;
   const n = perf.frames;
-  const stats = typeof view.perfStats === 'function' ? view.perfStats() : {};
-  const units = game.units.filter((u) => !u.isBuilding && !u.dead).length;
-  window.__perf = { ...stats, fps: (n * 1000) / (now - perf.t0), simMs: perf.sim / n, viewMs: perf.render / n, uiMs: perf.ui / n, units };
+  const stats = view.perfStats();
+  const units = game!.units.filter((u) => !u.isBuilding && !u.dead).length;
+  const p: PerfStats = { ...stats, fps: (n * 1000) / (now - perf.t0), simMs: perf.sim / n, viewMs: perf.render / n, uiMs: perf.ui / n, units };
+  window.__perf = p;
   perf.frames = 0;
   perf.sim = perf.render = perf.ui = 0;
   perf.t0 = now;
@@ -534,16 +566,15 @@ function perfTick(now, simMs, renderMs, uiMs) {
     perf.el.style.cssText = 'position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:50;font:12px/1.3 monospace;color:#e8ffd0;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:4px;pointer-events:none;white-space:pre';
     document.body.appendChild(perf.el);
   }
-  const p = window.__perf;
   perf.el.textContent = `${p.fps.toFixed(0)} fps · sim ${p.simMs.toFixed(1)} ms · view ${p.viewMs.toFixed(1)} ms · ui ${p.uiMs.toFixed(1)} ms · ${units} units` + (p.drawCalls !== undefined ? ` · ${p.drawCalls} draws · ${p.activeMeshes} active` : '');
 }
 
 /** ?bench=N: two armies of mixed units (ancient to galactic) meet between your base and the citadel. */
-function benchmark(n) {
-  const g = game;
+function benchmark(n: number): void {
+  const g = game!;
   const foe = g.generals.find((p) => p !== g.human && g.isEnemy(g.human, p));
   if (!foe) return;
-  const home = g.homeOf(g.human);
+  const home = g.homeOf(g.human)!;
   const dx = 128 - home.x;
   const dz = 128 - home.z;
   const len = Math.hypot(dx, dz) || 1;
@@ -558,14 +589,14 @@ function benchmark(n) {
     const col = k % perRow;
     const x = cx + (col - (perRow - 1) / 2) * 1.4;
     const z = cz + (side ? -1 : 1) * (5 + row * 1.4);
-    const u = g.spawnUnit(types[k % types.length], side ? foe : g.human, x, z);
+    const u = g.spawnUnit(types[k % types.length]!, side ? foe : g.human, x, z);
     g.issueOrder(u, { type: 'attackMove', point: { x: cx, z: cz + (side ? 6 : -6) } });
   }
-  input.centerOn(cx, cz);
+  input!.centerOn(cx, cz);
   view.cam.distance = view.cam.zoomTarget = 46;
 }
 
-function boot(data) {
+function boot(data: { settings?: Partial<Settings> } | undefined): void {
   if (data?.settings) Object.assign(settings, data.settings);
   if (!Array.isArray(settings.rivals) || !settings.rivals.length) settings.rivals = [{ mode: 'random', hero: 'random', team: 'rival' }];
   buildTitle();
@@ -573,11 +604,11 @@ function boot(data) {
   requestAnimationFrame(frame);
 }
 // When hosted in the Artifact viewer, keep the chosen settings across page updates.
-const hot = window.claude?.hot;
+const hot = window.claude?.hot as import('./globals.d.ts').ArtifactHot<{ settings?: Partial<Settings> }> | undefined;
 hot?.snapshot?.(() => ({ settings: { ...settings, rivals: settings.rivals.map((r) => ({ ...r })) } }));
 
 // Test/debug helpers: ?autostart=hero:paladin or ?autostart=empire
-function autostart() {
+function autostart(): void {
   const auto = params.get('autostart');
   if (!auto) return;
   const [mode, heroId] = auto.split(':');
@@ -586,26 +617,26 @@ function autostart() {
   // ?rivals=hero-ranger-ally,empire,random  (mode[-hero][-team] per computer general)
   if (params.get('rivals')) {
     settings.rivals = params
-      .get('rivals')
+      .get('rivals')!
       .split(',')
       .slice(0, 3)
-      .map((tok) => {
+      .map((tok): RivalSpec => {
         const [mode = 'random', hero = 'random', team = 'rival'] = tok.split('-');
-        return { mode, hero: HEROES[hero] ? hero : 'random', team: team === 'ally' ? 'ally' : 'rival' };
+        return { mode: mode as RivalSpec['mode'], hero: HEROES[hero] ? hero : 'random', team: team === 'ally' ? 'ally' : 'rival' };
       });
   } else if (params.get('opponents') || params.get('diplomacy')) {
     const n = Math.max(1, Math.min(3, Number(params.get('opponents') || 3)));
     const team = params.get('diplomacy') === 'allied' ? 'ally' : 'rival';
-    settings.rivals = Array.from({ length: n }, () => ({ mode: 'random', hero: 'random', team }));
+    settings.rivals = Array.from({ length: n }, (): RivalSpec => ({ mode: 'random', hero: 'random', team }));
   }
-  if (params.get('difficulty')) settings.difficulty = params.get('difficulty');
+  if (params.get('difficulty')) settings.difficulty = params.get('difficulty') as Settings['difficulty'];
   startGame();
 }
 
-function launch() {
+function launch(): void {
   // The view loads its models first (view.ready).
   ensureView();
-  Promise.resolve(view.ready).then(() => {
+  void Promise.resolve(view.ready).then(() => {
     spatial?.prerender();
     if (hot?.ready) hot.ready(boot);
     else boot(hot?.data ?? {});
@@ -613,11 +644,11 @@ function launch() {
   });
 }
 
-Promise.all([import('./babylon/BabylonView.ts'), import('./babylon/SpatialAudio.ts')]).then(([m, a]) => {
+void Promise.all([import('./babylon/BabylonView.ts'), import('./babylon/SpatialAudio.ts')]).then(([m, a]) => {
   ViewClass = m.BabylonView;
   spatial = new a.SpatialAudio();
   launch();
 });
-window.__setSpeed = (s) => (speed = s);
+window.__setSpeed = (s: number) => (speed = s);
 window.__initSound = initSound;
 window.__audio = () => spatial;

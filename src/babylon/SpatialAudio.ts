@@ -1,23 +1,23 @@
 // Babylon.js audio for Heroes & Empires.
 //
-// The sound effects are still synthesized by src/audio.js, but rendered offline into buffers (a few
+// The sound effects are still synthesized by src/audio.ts, but rendered offline into buffers (a few
 // variants each) and played as AudioEngineV2 spatial sounds: they pan with their place on screen and
 // fade with distance from the camera target over the same 14 -> 50 unit range as before. The engine
-// shares audio.js's AudioContext, and its output joins the mix ahead of audio.js's compressor and
+// shares audio.ts's AudioContext, and its output joins the mix ahead of audio.ts's compressor and
 // master volume, so mute and volume cover everything. The procedural music stays on the raw Web Audio
-// scheduler in audio.js.
+// scheduler in audio.ts.
 //
 // New with Babylon: unit acknowledgements (barks) and an ambient bed (wind, birds by day, crickets
 // by night and the drone of Kalenden's citadel).
 //
 // Until the engine exists (it needs the first user gesture) or a sound's buffers are rendered,
-// play() and bark() return false and the caller falls back to audio.js's live synth.
+// play() and bark() return false and the caller falls back to audio.ts's live synth.
 import { CreateAudioEngineAsync } from '@babylonjs/core/AudioV2/webAudio/webAudioEngine';
 import type { AudioEngineV2 } from '@babylonjs/core/AudioV2/abstractAudio/audioEngineV2';
 import type { AudioBus } from '@babylonjs/core/AudioV2/abstractAudio/audioBus';
 import type { StaticSound, IStaticSoundOptions } from '@babylonjs/core/AudioV2/abstractAudio/staticSound';
 import { Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
-import * as synth from '../audio.js';
+import * as synth from '../audio.ts';
 import { CENTER } from '../world/layout.ts';
 
 /** Full volume within this ground distance of the camera target, silent beyond FAR (as before). */
@@ -96,7 +96,7 @@ function listenerRotation(yaw: number, out: Quaternion): void {
 }
 
 /**
- * Send the engine's output into `node` (audio.js's effects input, ahead of its compressor and
+ * Send the engine's output into `node` (audio.ts's effects input, ahead of its compressor and
  * master volume) instead of straight to the speakers. AudioEngineV2 has no public option for this,
  * so this re-wires the main output's gain node; should that ever change, the engine keeps its own
  * output and SpatialAudio.setMuted() mirrors the mute button instead.
@@ -157,7 +157,7 @@ export class SpatialAudio {
     return this.rendering;
   }
 
-  /** Create the audio engine on audio.js's context. Call after initAudio(), from a user gesture. */
+  /** Create the audio engine on audio.ts's context. Call after initAudio(), from a user gesture. */
   start(): Promise<void> {
     const ctx = synth.getAudioContext() as AudioContext | null;
     if (!ctx) return Promise.resolve();
@@ -166,7 +166,7 @@ export class SpatialAudio {
         audioContext: ctx,
         disableDefaultUI: true,
         disableIOSRingerSwitchWorkaround: true,
-        resumeOnInteraction: false, // audio.js resumes the context on gestures
+        resumeOnInteraction: false, // audio.ts resumes the context on gestures
         listenerEnabled: true,
         listenerAutoUpdate: false,
         // Parameter changes apply at once: a pooled sound must not glide from its last position.
@@ -192,7 +192,7 @@ export class SpatialAudio {
     return this.engine !== null;
   }
 
-  /** Mirror the mute button when the engine's output couldn't be routed through audio.js's master. */
+  /** Mirror the mute button when the engine's output couldn't be routed through audio.ts's master. */
   setMuted(muted: boolean): void {
     if (this.engine && !this.routed) this.engine.volume = muted ? 0 : 0.6;
   }
@@ -240,7 +240,7 @@ export class SpatialAudio {
   }
 
   /**
-   * Free a slot for a sound of priority `prio`, as audio.js does: lower priorities go first, and a
+   * Free a slot for a sound of priority `prio`, as audio.ts does: lower priorities go first, and a
    * sound of the same priority only once it is past its attack.
    */
   private steal(prio: number, now: number): boolean {
@@ -304,7 +304,7 @@ export class SpatialAudio {
    * A unit acknowledges a selection or an order. Returns false while that voice's lines are still
    * being rendered (the caller plays the live synth meanwhile).
    */
-  bark(voiceId: string, kind: string, volume = 0.8): boolean {
+  bark(voiceId: string, kind: synth.BarkKind, volume = 0.8): boolean {
     const engine = this.engine;
     if (!engine) return false;
     const lines = this.barks.get(`${voiceId}:${kind}`);
@@ -333,7 +333,7 @@ export class SpatialAudio {
       if (this.barksRequested.has(id)) continue;
       this.barksRequested.add(id);
       void (async () => {
-        for (const kind of ['select', 'move', 'attack']) {
+        for (const kind of ['select', 'move', 'attack'] as const) {
           const sounds: StaticSound[] = [];
           for (let line = 0; line < synth.barkLines(id, kind); line++) {
             const b = await synth.renderBark(id, kind, line);

@@ -1,10 +1,29 @@
 // The minimap: terrain, fog of war, unit dots, camera frustum and pings.
 import { MAP_SIZE } from '../world/layout.ts';
+import type { Game } from '../game/game.ts';
+import type { Input } from '../input.ts';
+import type { BabylonView } from '../babylon/BabylonView.ts';
 
 export class Minimap {
-  constructor(canvas, game, view, input) {
+  readonly canvas: HTMLCanvasElement;
+  readonly ctx: CanvasRenderingContext2D;
+  game: Game;
+  readonly view: BabylonView;
+  readonly input: Input;
+  /** Canvas size in pixels (square). */
+  readonly size: number;
+  private timer: number;
+  private readonly fogCanvas: HTMLCanvasElement;
+  private readonly fogCtx: CanvasRenderingContext2D;
+  private readonly fogImg: ImageData;
+  /** Terrain and water, drawn once per game. */
+  private bg!: HTMLCanvasElement;
+  private treeLayer!: HTMLCanvasElement;
+  private treeCount = 0;
+
+  constructor(canvas: HTMLCanvasElement, game: Game, view: BabylonView, input: Input) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d')!;
     this.game = game;
     this.view = view;
     this.input = input;
@@ -13,25 +32,25 @@ export class Minimap {
     this.fogCanvas = document.createElement('canvas');
     this.fogCanvas.width = MAP_SIZE;
     this.fogCanvas.height = MAP_SIZE;
-    this.fogCtx = this.fogCanvas.getContext('2d');
+    this.fogCtx = this.fogCanvas.getContext('2d')!;
     this.fogImg = this.fogCtx.createImageData(MAP_SIZE, MAP_SIZE);
     this.bindEvents();
     this.attach(game);
   }
 
-  attach(game) {
+  attach(game: Game): void {
     this.game = game;
     this.timer = 0;
     this.buildBackground();
   }
 
-  buildBackground() {
+  buildBackground(): void {
     const S = this.size;
     const bg = document.createElement('canvas');
     bg.width = S;
     bg.height = S;
-    const c = bg.getContext('2d');
-    c.drawImage(this.game.terrain.textureCanvas, 0, 0, S, S);
+    const c = bg.getContext('2d')!;
+    c.drawImage(this.game.terrain.textureCanvas!, 0, 0, S, S);
     // Darken a touch and add the water.
     const k = S / MAP_SIZE;
     const t = this.game.terrain;
@@ -51,10 +70,10 @@ export class Minimap {
     this.drawTrees();
   }
 
-  drawTrees() {
+  drawTrees(): void {
     const S = this.size;
     const k = S / MAP_SIZE;
-    const c = this.treeLayer.getContext('2d');
+    const c = this.treeLayer.getContext('2d')!;
     c.clearRect(0, 0, S, S);
     c.fillStyle = '#1f4a17';
     for (const tr of this.game.terrain.trees) {
@@ -64,14 +83,14 @@ export class Minimap {
     this.treeCount = this.game.terrain.trees.filter((t) => t.alive).length;
   }
 
-  toWorld(e) {
+  toWorld(e: MouseEvent): { x: number; z: number } {
     const r = this.canvas.getBoundingClientRect();
     const x = ((e.clientX - r.left) / r.width) * MAP_SIZE;
     const z = ((e.clientY - r.top) / r.height) * MAP_SIZE;
     return { x: Math.max(0, Math.min(MAP_SIZE, x)), z: Math.max(0, Math.min(MAP_SIZE, z)) };
   }
 
-  bindEvents() {
+  bindEvents(): void {
     let dragging = false;
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     this.canvas.addEventListener('mousedown', (e) => {
@@ -99,7 +118,7 @@ export class Minimap {
     });
   }
 
-  update(dt) {
+  update(dt: number): void {
     this.timer -= dt;
     if (this.timer > 0) return;
     this.timer = 0.1;
@@ -117,14 +136,14 @@ export class Minimap {
     // Units
     for (const u of g.units) {
       if (u.dead || u.removed || !u.view?.visibleNow) continue;
-      let col;
+      let col: string;
       if (u.owner.general) col = `#${u.owner.color.toString(16).padStart(6, '0')}`;
       else if (u.type === 'goldmine') col = '#ffd700';
       else if (u.owner === g.passive) col = '#e0e0e0';
       else if (u.owner === g.legion) col = '#7a2a2a';
       else col = '#8a8a8a';
       if (u.isBuilding) {
-        const s = Math.max(3, u.def.footprint * k);
+        const s = Math.max(3, u.def.footprint! * k);
         ctx.fillStyle = '#000';
         ctx.fillRect(u.x * k - s / 2 - 1, u.z * k - s / 2 - 1, s + 2, s + 2);
         ctx.fillStyle = col;
