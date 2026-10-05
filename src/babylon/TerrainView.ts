@@ -1,6 +1,6 @@
-// Babylon meshes for the terrain data (src/world/terrain.ts), matching the three.js TerrainView:
-// the heightfield with the painted ground map and detail map, the moat water, trees and doodads as
-// thin instances (one draw call per species per 32×32-cell chunk), and the road surface.
+// Babylon meshes for the terrain data (src/world/terrain.ts): the heightfield with the hand-painted
+// ground layers (GroundMaterial.ts), the moat water, trees and doodads as thin instances (one draw
+// call per species per 32×32-cell chunk), and the road surface.
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder';
@@ -9,20 +9,19 @@ import { CreateIcoSphere } from '@babylonjs/core/Meshes/Builders/icoSphereBuilde
 import { CreatePolyhedron } from '@babylonjs/core/Meshes/Builders/polyhedronBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
-import { MaterialPluginBase } from '@babylonjs/core/Materials/materialPluginBase';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
+import { Constants } from '@babylonjs/core/Engines/constants';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Vector2, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
-import type { Material } from '@babylonjs/core/Materials/material';
-import type { MaterialDefines } from '@babylonjs/core/Materials/materialDefines';
-import type { UniformBuffer } from '@babylonjs/core/Materials/uniformBuffer';
 import type { Scene } from '@babylonjs/core/scene';
 // Side effect: thin instances on Mesh.
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 import { WATER_LEVEL } from '../world/terrain.ts';
-import { makeDetailCanvas, makeCobbleCanvas, roadGeometry } from '../world/groundArt.ts';
+import { makeCobbleCanvas, roadGeometry } from '../world/groundArt.ts';
+import { GroundSplatPlugin } from './GroundMaterial';
 import { FogOfWar } from './FogOfWar';
 import { paint, type PaintKind } from './Painterly';
 import type { Game } from '../game/game.ts';
@@ -43,47 +42,6 @@ function canvasTexture(name: string, canvas: HTMLCanvasElement, scene: Scene, re
   return tex;
 }
 
-/**
- * The ground's tiling detail map, as in three.js: two scales of noise multiply the painted
- * colour so the large map stays crisp up close. three.js applies it in linear colour; Babylon's
- * StandardMaterial works in gamma space, hence the 1/2.2 power.
- */
-class GroundDetailPlugin extends MaterialPluginBase {
-  constructor(material: Material, private readonly detail: Texture) {
-    super(material, 'GroundDetail', 200, { GROUNDDETAIL: false }, true, true);
-  }
-
-  override getClassName(): string {
-    return 'GroundDetailPlugin';
-  }
-
-  override prepareDefines(defines: MaterialDefines): void {
-    defines['GROUNDDETAIL'] = true;
-  }
-
-  override getSamplers(samplers: string[]): void {
-    samplers.push('groundDetailSampler');
-  }
-
-  override bindForSubMesh(uniformBuffer: UniformBuffer): void {
-    uniformBuffer.setTexture('groundDetailSampler', this.detail);
-  }
-
-  override getCustomCode(shaderType: string): { [pointName: string]: string } | null {
-    if (shaderType !== 'fragment') return null;
-    return {
-      CUSTOM_FRAGMENT_DEFINITIONS: `#ifdef GROUNDDETAIL
-        uniform sampler2D groundDetailSampler;
-      #endif`,
-      CUSTOM_FRAGMENT_UPDATE_DIFFUSE: `#ifdef GROUNDDETAIL
-        float gdA = texture2D(groundDetailSampler, vPositionW.xz * 0.37).r;
-        float gdB = texture2D(groundDetailSampler, vPositionW.xz * 0.091 + 0.37).g;
-        baseColor.rgb *= pow(max(0.0, 0.62 + 0.5 * gdA + 0.26 * (gdB - 0.5)), 1.0 / 2.2);
-      #endif`,
-    };
-  }
-}
-
 const WATER_VERTEX = `
 precision highp float;
 attribute vec3 position;
@@ -96,37 +54,102 @@ void main() {
   gl_Position = viewProjection * w;
 }`;
 
-// Same water as the three.js version: animated colour bands, highlights, darkened by the fog. (Its
-// output is written as-is in both renderers: three.js does not colour-convert a ShaderMaterial.)
+// Warcraft III-style water (M13): turquoise shallows to deep blue by the actual depth below the
+// surface, scrolling ripples that catch the sky and the sun, bright painted caustic streaks, and
+// foam lapping at the shore. Darkened by the fog of war; in the HDR pipeline it outputs linear colour
+// and takes the distance haze.
 const WATER_FRAGMENT = `
 precision highp float;
 varying vec3 vW;
 uniform float uTime;
 uniform vec2 uWorldSize;
 uniform sampler2D uFogTex;
-// HDR pipeline (M8): output linear colour and add the distance haze.
+uniform sampler2D uDepthTex;
+uniform sampler2D uNoiseTex;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform vec3 uSkyColor;
 uniform float uLinear;
 uniform vec3 uCamPos;
 uniform vec3 uHazeColor;
 uniform vec2 uHazeRange;
+float nz(vec2 p) { return texture2D(uNoiseTex, p).r; }
+float ripples(vec2 p) {
+  return nz(p * 0.09 + vec2(uTime * 0.011, uTime * 0.007)) + 0.55 * nz(p * 0.21 + vec2(-uTime * 0.016, uTime * 0.012));
+}
 void main() {
-  float w1 = sin(vW.x * 1.3 + uTime * 1.1) * sin(vW.z * 1.1 - uTime * 0.9);
-  float w2 = sin((vW.x + vW.z) * 2.3 + uTime * 1.7);
-  float s = w1 * 0.5 + w2 * 0.25;
-  vec3 deep = vec3(0.08, 0.27, 0.42);
-  vec3 light = vec3(0.32, 0.6, 0.72);
-  vec3 col = mix(deep, light, 0.45 + s * 0.25);
-  col += vec3(0.9) * smoothstep(0.62, 0.75, s) * 0.35;
+  vec2 p = vW.xz;
+  float depth = texture2D(uDepthTex, (p + 0.5) / (uWorldSize + 1.0)).r * 2.5;
+  float e = 0.06;
+  float h = ripples(p);
+  vec3 n = normalize(vec3((h - ripples(p + vec2(e, 0.0))) * 3.2, 1.0, (h - ripples(p + vec2(0.0, e))) * 3.2));
+  vec3 v = normalize(uCamPos - vW);
+  float dk = smoothstep(0.0, 1.7, depth);
+  vec3 col = mix(vec3(0.26, 0.68, 0.7), vec3(0.04, 0.22, 0.4), dk);
+  // Painted caustic streaks, brightest in the shallows.
+  float c = nz(p * 0.29 + vec2(uTime * 0.021, -uTime * 0.014)) * nz(p * 0.41 - vec2(uTime * 0.026, uTime * 0.011));
+  col += vec3(0.5, 0.82, 0.78) * smoothstep(0.3, 0.48, c) * 0.3 * (1.0 - 0.6 * dk);
+  float ndl = max(dot(n, uSunDir), 0.0);
+  col *= (0.45 + 0.65 * ndl) * (0.35 + 0.65 * min(1.0, dot(uSunColor, vec3(0.333))));
+  float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+  col = mix(col, uSkyColor, fres * 0.6);
+  vec3 r = reflect(-v, n);
+  col += uSunColor * pow(max(dot(r, uSunDir), 0.0), 80.0) * 1.5;
+  // Foam where the water meets the land, breaking up and lapping.
+  float fn = nz(p * 0.55 + vec2(uTime * 0.04, -uTime * 0.03));
+  float foam = smoothstep(0.26, 0.0, depth + (fn - 0.5) * 0.3) * (0.65 + 0.35 * sin(uTime * 1.4 + depth * 22.0 + fn * 6.0));
+  foam = clamp(foam, 0.0, 1.0);
+  col = mix(col, vec3(0.93, 0.97, 0.96) * (0.5 + 0.5 * min(1.0, dot(uSunColor, vec3(0.333)))), foam * 0.85);
+  float alpha = max(mix(0.5, 0.93, dk), foam * 0.9) * smoothstep(-0.02, 0.05, depth);
   float fog = texture2D(uFogTex, vW.xz / uWorldSize).r;
   if (uLinear > 0.5) {
-    float h = clamp((uHazeRange.y - distance(vW, uCamPos)) / (uHazeRange.y - uHazeRange.x), 0.0, 1.0);
-    col = mix(uHazeColor, col, h);
+    float hz = clamp((uHazeRange.y - distance(vW, uCamPos)) / (uHazeRange.y - uHazeRange.x), 0.0, 1.0);
+    col = mix(uHazeColor, col, hz);
     col = pow(col, vec3(2.2)) * pow(fog, 2.2);
   } else {
     col *= fog;
   }
-  gl_FragColor = vec4(col, 0.78);
+  gl_FragColor = vec4(col, alpha);
 }`;
+
+/** Tileable value noise (two octaves) for the water ripples, caustics and foam. */
+function waterNoise(size = 256): Uint8Array {
+  let seed = 0x2545f491;
+  const rand = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const octave = (cells: number): Float32Array => {
+    const g = new Float32Array(cells * cells);
+    for (let i = 0; i < g.length; i++) g[i] = rand();
+    const out = new Float32Array(size * size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const fx = (x / size) * cells;
+        const fy = (y / size) * cells;
+        const x0 = Math.floor(fx);
+        const y0 = Math.floor(fy);
+        const sx = (fx - x0) * (fx - x0) * (3 - 2 * (fx - x0));
+        const sy = (fy - y0) * (fy - y0) * (3 - 2 * (fy - y0));
+        const at = (a: number, b: number): number => g[(b % cells) * cells + (a % cells)]!;
+        const top = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * sx;
+        const bot = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * sx;
+        out[y * size + x] = top + (bot - top) * sy;
+      }
+    }
+    return out;
+  };
+  const a = octave(8);
+  const b = octave(16);
+  const c = octave(32);
+  const out = new Uint8Array(size * size * 4);
+  for (let i = 0; i < size * size; i++) {
+    const v = a[i]! * 0.55 + b[i]! * 0.3 + c[i]! * 0.15;
+    out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = Math.round(v * 255);
+    out[i * 4 + 3] = 255;
+  }
+  return out;
+}
 
 /**
  * Linear → sRGB. Instance and vertex colours are linear in the three.js version (which encodes its
@@ -197,6 +220,13 @@ export class TerrainView {
     this.buildWater();
     this.buildTrees();
     this.buildDoodads();
+  }
+
+  /** Sun (direction towards it, colour × strength) and sky colour for the water. */
+  setWaterLight(toSun: Vector3, sun: Color3, sky: Color3): void {
+    this.water.setVector3('uSunDir', toSun);
+    this.water.setColor3('uSunColor', sun);
+    this.water.setColor3('uSkyColor', sky);
   }
 
   /** HDR pipeline state for the water shader (linear output and distance haze). */
@@ -279,10 +309,9 @@ export class TerrainView {
     this.receivers.push(mesh);
 
     const material = this.keep(mat(this.scene, 'ground', Color3.White()));
-    const canvas = t.textureCanvas ?? t.paintTexture();
-    material.diffuseTexture = this.keep(canvasTexture('ground-paint', canvas, this.scene, false));
-    const detail = this.keep(canvasTexture('ground-detail', makeDetailCanvas(), this.scene, true));
-    new GroundDetailPlugin(material, detail);
+    // The flat colour map is still painted: the minimap draws it.
+    if (!t.textureCanvas) t.paintTexture();
+    new GroundSplatPlugin(material, t);
     mesh.material = material;
   }
 
@@ -298,8 +327,8 @@ export class TerrainView {
         { vertexSource: WATER_VERTEX, fragmentSource: WATER_FRAGMENT },
         {
           attributes: ['position'],
-          uniforms: ['world', 'viewProjection', 'uTime', 'uWorldSize', 'uLinear', 'uCamPos', 'uHazeColor', 'uHazeRange'],
-          samplers: ['uFogTex'],
+          uniforms: ['world', 'viewProjection', 'uTime', 'uWorldSize', 'uLinear', 'uCamPos', 'uHazeColor', 'uHazeRange', 'uSunDir', 'uSunColor', 'uSkyColor'],
+          samplers: ['uFogTex', 'uDepthTex', 'uNoiseTex'],
           needAlphaBlending: true,
         },
       ),
@@ -311,6 +340,23 @@ export class TerrainView {
     material.setVector3('uCamPos', Vector3.Zero());
     material.setColor3('uHazeColor', Color3.Black());
     material.setVector2('uHazeRange', new Vector2(1, 2));
+    material.setVector3('uSunDir', new Vector3(0.4, 0.8, 0.4).normalize());
+    material.setColor3('uSunColor', Color3.White());
+    material.setColor3('uSkyColor', new Color3(0.6, 0.75, 0.9));
+    // Depth below the surface at each height-map corner (0-2.5 units).
+    const t = this.terrain;
+    const n = S + 1;
+    const depth = new Uint8Array(n * n * 4);
+    for (let i = 0; i < n * n; i++) {
+      depth[i * 4] = Math.round(Math.max(0, Math.min(1, (WATER_LEVEL - t.heights[i]!) / 2.5)) * 255);
+      depth[i * 4 + 3] = 255;
+    }
+    const depthTex = this.keep(new RawTexture(depth, n, n, Constants.TEXTUREFORMAT_RGBA, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE));
+    depthTex.wrapU = depthTex.wrapV = Texture.CLAMP_ADDRESSMODE;
+    material.setTexture('uDepthTex', depthTex);
+    const noiseTex = this.keep(new RawTexture(waterNoise(), 256, 256, Constants.TEXTUREFORMAT_RGBA, this.scene, true, false, Texture.TRILINEAR_SAMPLINGMODE));
+    noiseTex.wrapU = noiseTex.wrapV = Texture.WRAP_ADDRESSMODE;
+    material.setTexture('uNoiseTex', noiseTex);
     mesh.material = material;
     this.water = material;
   }

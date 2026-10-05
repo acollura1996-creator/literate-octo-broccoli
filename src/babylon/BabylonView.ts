@@ -77,6 +77,8 @@ export class BabylonView {
   private instrumentation: SceneInstrumentation | null = null;
   private readonly frustum: Plane[] = Frustum.GetPlanes(new Matrix());
   private readonly sphereCenter = new Vector3();
+  private readonly toSun = new Vector3();
+  private readonly sunColor = new Color3();
   private terrainView: TerrainView | null = null;
   private roadView: RoadView | null = null;
   private fog: FogOfWar | null = null;
@@ -324,6 +326,7 @@ export class BabylonView {
     }
     this.terrainView.update(g.time);
     this.terrainView.setWaterGrading(this.graphics.linear, this.cam.camera.position, this.graphics.haze);
+    this.terrainView.setWaterLight(this.toSun.copyFrom(this.sun.direction).scaleInPlace(-1), this.sunColor.copyFrom(this.sun.diffuse).scaleInPlace((this.sun.intensity * Math.PI) / 2.3), this.hemi.diffuse);
     this.roadView?.update();
   }
 

@@ -49,14 +49,14 @@ interface FlatSpot {
 
 export const WATER_LEVEL = -0.35;
 
-// Ground types used for painting.
-const T_GRASS = 0;
-const T_FOREST = 1;
-const T_ROAD = 2;
-const T_DIRT = 3;
-const T_COBBLE = 4;
-const T_SHORE = 5;
-const T_BLIGHT = 6;
+// Ground types used for painting (exported for the renderer's ground textures).
+export const T_GRASS = 0;
+export const T_FOREST = 1;
+export const T_ROAD = 2;
+export const T_DIRT = 3;
+export const T_COBBLE = 4;
+export const T_SHORE = 5;
+export const T_BLIGHT = 6;
 
 const TYPE_COLORS: Record<number, Rgb> = {
   [T_GRASS]: [0.36, 0.56, 0.18],

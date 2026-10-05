@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ground textures</title>
+    <style>
+      body { margin: 0; padding: 16px; background: #1a1712; color: #e8dcc0; font: 14px Georgia, serif; }
+      h1 { font-size: 18px; margin: 0 0 12px; }
+      .grid { display: flex; flex-wrap: wrap; gap: 16px; }
+      figure { margin: 0; }
+      figcaption { margin-bottom: 4px; }
+      canvas { display: block; }
+      .pair { display: flex; gap: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>Procedural ground paintings (src/babylon/GroundPaint.ts): each tiled 2 × 2, then its height map</h1>
+    <div class="grid" id="grid"></div>
+    <script type="module">
+      import { paintGroundLayers } from '/src/babylon/GroundPaint.ts';
+      const t0 = performance.now();
+      const layers = paintGroundLayers();
+      const ms = performance.now() - t0;
+      document.querySelector('h1').textContent += ` (${ms.toFixed(0)} ms)`;
+      const grid = document.getElementById('grid');
+      const show = Number(new URLSearchParams(location.search).get('size') || 384);
+      for (const { layer, albedo, height } of layers) {
+        const fig = document.createElement('figure');
+        fig.innerHTML = `<figcaption>${layer}</figcaption>`;
+        const pair = document.createElement('div');
+        pair.className = 'pair';
+        const tiled = document.createElement('canvas');
+        tiled.width = tiled.height = show;
+        const c = tiled.getContext('2d');
+        for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) c.drawImage(albedo, (x * show) / 2, (y * show) / 2, show / 2, show / 2);
+        const h = document.createElement('canvas');
+        h.width = h.height = show / 2;
+        h.getContext('2d').drawImage(height, 0, 0, show / 2, show / 2);
+        pair.append(tiled, h);
+        fig.append(pair);
+        grid.append(fig);
+      }
+      window.__texturesReady = true;
+    </script>
+  </body>
+</html>
