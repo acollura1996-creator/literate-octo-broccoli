@@ -5,11 +5,28 @@
 // dressed paving).
 import { MAP_SIZE } from '../world/layout.ts';
 import { ROAD } from '../data/units.ts';
+import type { Game } from './game.ts';
+import type { Player } from './types.ts';
 
-const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+/** A map cell [cx, cz]. */
+export type Cell = [number, number];
+
+const N4: Cell[] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 export class Roads {
-  constructor(game) {
+  readonly game: Game;
+  readonly size: number;
+  /** General index owning each cell's road, -1 = no road. */
+  owner: Int8Array;
+  /** 1 where a road links back to its owner's town center. */
+  connected: Uint8Array;
+  count: number;
+  /** Road tiles per general index. */
+  counts: Int32Array;
+  /** Bumped whenever the road surface changes (renderers rebuild their mesh). */
+  version: number;
+
+  constructor(game: Game) {
     this.game = game;
     this.size = MAP_SIZE;
     this.owner = new Int8Array(MAP_SIZE * MAP_SIZE).fill(-1); // general index, -1 = no road
@@ -19,29 +36,29 @@ export class Roads {
     this.version = 0; // bumped whenever the road surface changes (renderers rebuild their mesh)
   }
 
-  idx(cx, cz) {
+  idx(cx: number, cz: number): number {
     return cz * this.size + cx;
   }
 
-  isRoad(cx, cz) {
-    return cx >= 0 && cz >= 0 && cx < this.size && cz < this.size && this.owner[cz * this.size + cx] >= 0;
+  isRoad(cx: number, cz: number): boolean {
+    return cx >= 0 && cz >= 0 && cx < this.size && cz < this.size && this.owner[cz * this.size + cx]! >= 0;
   }
 
-  isRoadAt(x, z) {
+  isRoadAt(x: number, z: number): boolean {
     return this.isRoad(Math.floor(x), Math.floor(z));
   }
 
   /** Number of road tiles a general owns. */
-  countOf(p) {
+  countOf(p: Player): number {
     return this.counts[p.index] ?? 0;
   }
 
-  ownerAt(cx, cz) {
+  ownerAt(cx: number, cz: number): Player | null {
     if (!this.isRoad(cx, cz)) return null;
-    return this.game.generals[this.owner[this.idx(cx, cz)]] ?? null;
+    return this.game.generals[this.owner[this.idx(cx, cz)]!] ?? null;
   }
 
-  canPlace(cx, cz, p, ignoreFog = false) {
+  canPlace(cx: number, cz: number, p: Player | null | undefined, ignoreFog = false): boolean {
     const g = this.game;
     if (cx < 1 || cz < 1 || cx >= this.size - 1 || cz >= this.size - 1) return false;
     if (this.isRoad(cx, cz)) return false;
@@ -52,8 +69,8 @@ export class Roads {
   }
 
   /** A 4-connected line of cells from a to b (so roads and walls join edge to edge). */
-  static line(ax, az, bx, bz) {
-    const cells = [[ax, az]];
+  static line(ax: number, az: number, bx: number, bz: number): Cell[] {
+    const cells: Cell[] = [[ax, az]];
     let x = ax;
     let z = az;
     const dx = Math.abs(bx - ax);
@@ -77,7 +94,7 @@ export class Roads {
   }
 
   /** Lay roads on the given cells (those that can be placed). Returns the number laid. */
-  place(cells, p, free = false) {
+  place(cells: Cell[], p: Player, free = false): number {
     const g = this.game;
     const ok = cells.filter(([cx, cz]) => this.canPlace(cx, cz, p, free));
     if (!ok.length) return 0;
@@ -98,7 +115,7 @@ export class Roads {
       this.owner[this.idx(cx, cz)] = p.index;
       g.grid.road[this.idx(cx, cz)] = 1;
       this.count++;
-      this.counts[p.index]++;
+      this.counts[p.index]!++;
     }
     this.version++;
     this.recompute(p);
@@ -106,14 +123,14 @@ export class Roads {
   }
 
   /** Remove road tiles (e.g. under a newly placed building). */
-  clear(cx, cz, w, h) {
-    let changed = null;
+  clear(cx: number, cz: number, w: number, h: number): void {
+    let changed: Player | null | undefined = null;
     for (let z = cz; z < cz + h; z++) {
       for (let x = cx; x < cx + w; x++) {
         if (!this.isRoad(x, z)) continue;
         const i = this.idx(x, z);
-        changed = this.game.generals[this.owner[i]];
-        this.counts[this.owner[i]]--;
+        changed = this.game.generals[this.owner[i]!];
+        this.counts[this.owner[i]!]!--;
         this.owner[i] = -1;
         this.game.grid.road[i] = 0;
         this.count--;
@@ -126,9 +143,9 @@ export class Roads {
   }
 
   /** Does any cell around a building footprint touch one of p's roads? */
-  touchesRoad(cx, cz, fp, p, connectedOnly = false) {
+  touchesRoad(cx: number, cz: number, fp: number, p: Player, connectedOnly = false): boolean {
     for (let i = -1; i <= fp; i++) {
-      for (const [x, z] of [[cx + i, cz - 1], [cx + i, cz + fp], [cx - 1, cz + i], [cx + fp, cz + i]]) {
+      for (const [x, z] of [[cx + i, cz - 1], [cx + i, cz + fp], [cx - 1, cz + i], [cx + fp, cz + i]] as Cell[]) {
         if (i < 0 || i >= fp) {
           // skip the four corner-diagonal cells: roads must touch an edge
           if ((x === cx - 1 || x === cx + fp) && (z === cz - 1 || z === cz + fp)) continue;
@@ -142,19 +159,19 @@ export class Roads {
   }
 
   /** Flood the road network out from p's town centers and mark connected houses. */
-  recompute(p) {
+  recompute(p: Player | null | undefined): void {
     if (!p?.general) return;
     const S = this.size;
     const own = this.owner;
     const conn = this.connected;
     for (let i = 0; i < own.length; i++) if (own[i] === p.index) conn[i] = 0;
-    const queue = [];
+    const queue: number[] = [];
     for (const b of p.buildings) {
       if (b.dead || b.underConstruction || !b.def.tier) continue;
-      const fp = b.def.footprint;
+      const fp = b.def.footprint!;
       const { x: cx, z: cz } = b.cell;
       for (let i = -1; i <= fp; i++) {
-        for (const [x, z] of [[cx + i, cz - 1], [cx + i, cz + fp], [cx - 1, cz + i], [cx + fp, cz + i]]) {
+        for (const [x, z] of [[cx + i, cz - 1], [cx + i, cz + fp], [cx - 1, cz + i], [cx + fp, cz + i]] as Cell[]) {
           if (!this.isRoad(x, z)) continue;
           const k = this.idx(x, z);
           if (own[k] === p.index && !conn[k]) {
@@ -165,7 +182,7 @@ export class Roads {
       }
     }
     while (queue.length) {
-      const k = queue.pop();
+      const k = queue.pop()!;
       const x = k % S;
       const z = (k - x) / S;
       for (const [dx, dz] of N4) {
@@ -181,13 +198,13 @@ export class Roads {
     }
     for (const b of p.buildings) {
       if (!b.def.needsRoad || b.dead) continue;
-      b.roadConnected = this.touchesRoad(b.cell.x, b.cell.z, b.def.footprint, p, true);
+      b.roadConnected = this.touchesRoad(b.cell.x, b.cell.z, b.def.footprint!, p, true);
     }
   }
 
   // ------------------------------------------------------------ appearance
   /** Road surface colour for a general's age (the renderers tint the cobble texture with it). */
-  colorFor(p) {
+  colorFor(p: Player | null | undefined): [number, number, number] {
     const tier = p?.tier ?? 1;
     if (tier <= 2) return [0.55, 0.42, 0.27]; // packed dirt
     if (tier <= 4) return [0.62, 0.58, 0.52]; // cobbles

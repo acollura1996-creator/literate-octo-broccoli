@@ -2,17 +2,61 @@
 //
 // target: 'unit' | 'point' | 'none' | 'passive' | 'aura'
 // filter (for unit targets): 'ally' | 'enemy' | 'any' | 'allyOrUndead'
+import type { Game } from './game.ts';
+import type { Unit } from './unit.ts';
+import type { BuffData, Point } from './types.ts';
 
-const L = (arr, lvl) => arr[Math.max(0, Math.min(arr.length - 1, lvl - 1))];
+export type AbilityTarget = 'unit' | 'point' | 'none' | 'passive' | 'aura';
+export type AbilityFilter = 'ally' | 'enemy' | 'any' | 'allyOrUndead';
 
-export const ABILITIES = {
+/** An ability as written below; each also keeps its own numbers (heal, dmg, duration, ...). */
+export interface AbilitySpec {
+  name: string;
+  icon: string;
+  color: string;
+  hotkey: string;
+  levels: number;
+  target: AbilityTarget;
+  filter?: AbilityFilter;
+  ultimate?: boolean;
+  autocast?: boolean;
+  /** How computer generals use it. */
+  ai?: string;
+  range?: number;
+  /** Area of effect radius (point targets). */
+  aoe?: number;
+  /** Radius of auras and self-centred spells. */
+  radius?: number;
+  mana?: number[];
+  cooldown?: number[];
+  tooltip(level: number): string;
+  cast?(game: Game, caster: Unit, level: number, target?: Unit | null, point?: Point | null): void;
+  aura?(level: number): BuffData;
+}
+/** A registered ability: its spec plus `id` and any numbers it carries. */
+export interface AbilityDef extends AbilitySpec {
+  id: string;
+  /** Critical Strike: a fixed chance; Bash: chance per level. */
+  chance?: number | number[];
+  /** Critical Strike damage multiplier per level. */
+  mult?: number[];
+}
+
+const L = (arr: readonly number[], lvl: number): number => arr[Math.max(0, Math.min(arr.length - 1, lvl - 1))]!;
+
+/** Types an ability's own numbers for its `cast`/`aura` (as `this`). */
+function ab<T extends AbilitySpec>(spec: T & ThisType<T>): T {
+  return spec;
+}
+
+const DEFS = {
   // ------------------------------------------------------------- Paladin
-  holy_light: {
+  holy_light: ab({
     name: 'Holy Light', icon: '✨', color: '#e8c547', hotkey: 'Q', levels: 3, target: 'unit', filter: 'allyOrUndead',
     range: 8, mana: [65, 65, 65], cooldown: [5, 5, 5], heal: [200, 400, 600],
     ai: 'heal',
     tooltip: (l) => `A holy light that heals a friendly unit for ${L([200, 400, 600], l)} hit points, or deals half that damage to an undead enemy.`,
-    cast(game, c, lvl, target) {
+    cast(game, c, lvl, target: Unit) {
       const amt = L(this.heal, lvl);
       if (game.isEnemy(c.owner, target.owner)) {
         game.dealDamage(c, target, amt / 2, 'spell', { spell: true });
@@ -22,8 +66,8 @@ export const ABILITIES = {
       game.fx.holyLight(target);
       game.sound('heal', target.x, target.z);
     },
-  },
-  divine_shield: {
+  }),
+  divine_shield: ab({
     name: 'Divine Shield', icon: '🔆', color: '#f0e68c', hotkey: 'W', levels: 3, target: 'none',
     mana: [25, 25, 25], cooldown: [35, 50, 65], duration: [10, 15, 20], ai: 'defensive',
     tooltip: (l) => `An impenetrable holy shield surrounds the Paladin for ${L([10, 15, 20], l)} seconds, protecting him from all damage.`,
@@ -31,16 +75,16 @@ export const ABILITIES = {
       c.addBuff('divine_shield', L(this.duration, lvl), { invulnerable: true, visual: 'shield', replace: true });
       game.sound('magicCast', c.x, c.z);
     },
-  },
-  devotion_aura: {
+  }),
+  devotion_aura: ab({
     name: 'Devotion Aura', icon: '🛡️', color: '#c9b46b', hotkey: 'E', levels: 3, target: 'aura', radius: 9,
     armor: [1.5, 3, 4.5],
     tooltip: (l) => `Gives nearby friendly units +${L([1.5, 3, 4.5], l)} armor.`,
-    aura(lvl) {
+    aura(lvl): BuffData {
       return { armor: L(this.armor, lvl) };
     },
-  },
-  resurrection: {
+  }),
+  resurrection: ab({
     name: 'Resurrection', icon: '👼', color: '#fff3b0', hotkey: 'R', levels: 1, ultimate: true, target: 'none',
     mana: [200], cooldown: [180], ai: 'resurrect',
     tooltip: () => 'Brings back to life up to 6 of your fallen non-Hero units that died nearby.',
@@ -50,14 +94,14 @@ export const ABILITIES = {
       game.sound('heal', c.x, c.z);
       if (n === 0 && c.owner.isHuman) game.message('There are no corpses nearby.', '#ccc');
     },
-  },
+  }),
 
   // ------------------------------------------------------------ Archmage
-  blizzard: {
+  blizzard: ab({
     name: 'Blizzard', icon: '❄️', color: '#9fd8ff', hotkey: 'Q', levels: 3, target: 'point', range: 9, aoe: 3,
     mana: [75, 75, 75], cooldown: [6, 6, 6], waves: [6, 8, 10], dmg: [30, 40, 50], ai: 'aoe',
     tooltip: (l) => `Calls down ${L([6, 8, 10], l)} waves of freezing ice shards that deal ${L([30, 40, 50], l)} damage per wave to enemies in an area. Channeled.`,
-    cast(game, c, lvl, target, point) {
+    cast(game, c, lvl, target, point: Point) {
       const dmg = L(this.dmg, lvl);
       const aoe = this.aoe;
       game.startChannel(c, {
@@ -73,8 +117,8 @@ export const ABILITIES = {
         },
       });
     },
-  },
-  water_elemental: {
+  }),
+  water_elemental: ab({
     name: 'Summon Water Elemental', icon: '💧', color: '#4fa8ff', hotkey: 'W', levels: 3, target: 'none',
     mana: [125, 125, 125], cooldown: [20, 20, 20], ai: 'summon',
     hp: [525, 675, 900], dmg: [0, 12, 24],
@@ -89,20 +133,20 @@ export const ABILITIES = {
       game.sound('magicCast', p.x, p.z);
       if (c.order.type === 'attack' && c.order.target) game.issueOrder(u, { type: 'attack', target: c.order.target });
     },
-  },
-  brilliance_aura: {
+  }),
+  brilliance_aura: ab({
     name: 'Brilliance Aura', icon: '🌀', color: '#8a7dff', hotkey: 'E', levels: 3, target: 'aura', radius: 9,
     regen: [0.75, 1.5, 2.25],
     tooltip: (l) => `Gives nearby friendly units +${L([0.75, 1.5, 2.25], l)} mana regeneration per second.`,
-    aura(lvl) {
+    aura(lvl): BuffData {
       return { manaRegen: L(this.regen, lvl) };
     },
-  },
-  meteor_shower: {
+  }),
+  meteor_shower: ab({
     name: 'Meteor Shower', icon: '☄️', color: '#ff7b2e', hotkey: 'R', levels: 1, ultimate: true, target: 'point',
     range: 10, aoe: 4, mana: [175], cooldown: [90], ai: 'aoe',
     tooltip: () => 'Calls down 7 blazing meteors over an area. Each deals 140 damage and stuns enemies for 1 second.',
-    cast(game, c, lvl, target, point) {
+    cast(game, c, lvl, target, point: Point) {
       for (let i = 0; i < 7; i++) {
         game.later(0.35 * i, () => {
           const a = Math.random() * Math.PI * 2;
@@ -123,10 +167,10 @@ export const ABILITIES = {
       }
       game.sound('fire', point.x, point.z);
     },
-  },
+  }),
 
   // --------------------------------------------------------- Blademaster
-  wind_walk: {
+  wind_walk: ab({
     name: 'Wind Walk', icon: '💨', color: '#b8f0d0', hotkey: 'Q', levels: 3, target: 'none',
     mana: [75, 75, 75], cooldown: [5, 5, 5], duration: [20, 30, 40], speed: [1.1, 1.4, 1.7], bonus: [40, 70, 100],
     ai: 'escape',
@@ -138,8 +182,8 @@ export const ABILITIES = {
       game.fx.burst(c.x, 0.6, c.z, 0xd8fff0, 14);
       game.sound('teleport', c.x, c.z);
     },
-  },
-  mirror_image: {
+  }),
+  mirror_image: ab({
     name: 'Mirror Image', icon: '👥', color: '#9ab8ff', hotkey: 'W', levels: 3, target: 'none',
     mana: [125, 125, 125], cooldown: [3, 3, 3], images: [1, 2, 3], ai: 'summon',
     tooltip: (l) => `Confuses the enemy by creating ${L([1, 2, 3], l)} illusion${l > 1 ? 's' : ''} of the Blademaster. Illusions deal no damage and take double damage. Lasts 60 seconds.`,
@@ -147,13 +191,13 @@ export const ABILITIES = {
       game.mirrorImage(c, L(this.images, lvl));
       game.sound('teleport', c.x, c.z);
     },
-  },
-  critical_strike: {
+  }),
+  critical_strike: ab({
     name: 'Critical Strike', icon: '🗡️', color: '#e85d5d', hotkey: 'E', levels: 3, target: 'passive',
     chance: 0.15, mult: [2, 3, 4],
     tooltip: (l) => `Gives a 15% chance to deal ${L([2, 3, 4], l)} times normal damage on an attack.`,
-  },
-  bladestorm: {
+  }),
+  bladestorm: ab({
     name: 'Bladestorm', icon: '🌪️', color: '#ffb347', hotkey: 'R', levels: 1, ultimate: true, target: 'none',
     mana: [200], cooldown: [120], ai: 'aoeSelf', radius: 3,
     tooltip: () => 'Becomes a whirling vortex of blades for 5 seconds, dealing 110 damage per second to nearby enemies. The Blademaster is immune to magic while spinning but cannot attack.',
@@ -161,9 +205,9 @@ export const ABILITIES = {
       c.addBuff('bladestorm', 5, {
         spellImmune: true, visual: 'bladestorm', replace: true, acc: 0,
         tick(u, dt, b) {
-          b.acc += dt;
-          while (b.acc >= 0.25) {
-            b.acc -= 0.25;
+          b.acc! += dt;
+          while (b.acc! >= 0.25) {
+            b.acc! -= 0.25;
             for (const e of game.enemiesInRadius(u.owner, u.x, u.z, 3)) {
               game.dealDamage(u, e, 27.5, 'spell', { spell: true, quiet: true });
             }
@@ -172,14 +216,14 @@ export const ABILITIES = {
       });
       game.sound('bladestorm', c.x, c.z);
     },
-  },
+  }),
 
   // ------------------------------------------------------- Mountain King
-  storm_bolt: {
+  storm_bolt: ab({
     name: 'Storm Bolt', icon: '⚡', color: '#6fb7ff', hotkey: 'Q', levels: 3, target: 'unit', filter: 'enemy',
     range: 7, mana: [75, 75, 75], cooldown: [9, 9, 9], dmg: [100, 225, 350], stun: [5, 5, 5], ai: 'nuke',
     tooltip: (l) => `A magical hammer is thrown at an enemy unit, dealing ${L([100, 225, 350], l)} damage and stunning it for 5 seconds (3 seconds on Heroes).`,
-    cast(game, c, lvl, target) {
+    cast(game, c, lvl, target: Unit) {
       const dmg = L(this.dmg, lvl);
       game.projectiles.spawn({
         kind: 'hammer', from: c, target, speed: 14, color: 0x9fd0ff,
@@ -192,8 +236,8 @@ export const ABILITIES = {
       });
       game.sound('magicCast', c.x, c.z);
     },
-  },
-  thunder_clap: {
+  }),
+  thunder_clap: ab({
     name: 'Thunder Clap', icon: '💥', color: '#c7a0ff', hotkey: 'W', levels: 3, target: 'none',
     mana: [90, 90, 90], cooldown: [6, 6, 6], dmg: [60, 100, 140], radius: 3.5, ai: 'aoeSelf',
     tooltip: (l) => `Slams the ground, dealing ${L([60, 100, 140], l)} damage to nearby enemies and slowing their movement and attacks by 50% for 5 seconds.`,
@@ -208,12 +252,12 @@ export const ABILITIES = {
       game.shake(0.25);
       game.sound('thunder', c.x, c.z);
     },
-  },
-  bash: {
+  }),
+  bash: ab({
     name: 'Bash', icon: '🔨', color: '#b08850', hotkey: 'E', levels: 3, target: 'passive', chance: [0.2, 0.3, 0.4],
     tooltip: (l) => `Gives a ${Math.round(L([0.2, 0.3, 0.4], l) * 100)}% chance that an attack deals 25 bonus damage and stuns the target for 2 seconds (1 second on Heroes).`,
-  },
-  avatar: {
+  }),
+  avatar: ab({
     name: 'Avatar', icon: '🗿', color: '#d4a373', hotkey: 'R', levels: 1, ultimate: true, target: 'none',
     mana: [150], cooldown: [180], ai: 'combatBuff',
     tooltip: () => 'Grows to giant size for 60 seconds: +5 armor, +500 hit points, +20 damage and immunity to magic.',
@@ -222,14 +266,14 @@ export const ABILITIES = {
       game.fx.ring(c.x, c.z, 0xd4a373, 3, 0.8);
       game.sound('roar', c.x, c.z);
     },
-  },
+  }),
 
   // -------------------------------------------------------------- Ranger
-  volley: {
+  volley: ab({
     name: 'Volley', icon: '🎯', color: '#9be08f', hotkey: 'Q', levels: 3, target: 'point', range: 9, aoe: 3,
     mana: [70, 70, 70], cooldown: [8, 8, 8], dmg: [80, 150, 220], ai: 'aoe',
     tooltip: (l) => `Fires a rain of arrows into an area, dealing ${L([80, 150, 220], l)} damage to enemies there.`,
-    cast(game, c, lvl, target, point) {
+    cast(game, c, lvl, target, point: Point) {
       const dmg = L(this.dmg, lvl);
       game.fx.volley(c, point.x, point.z, this.aoe);
       game.later(0.65, () => {
@@ -240,12 +284,12 @@ export const ABILITIES = {
       });
       game.sound('arrowShoot', c.x, c.z);
     },
-  },
-  entangle: {
+  }),
+  entangle: ab({
     name: 'Entangling Roots', icon: '🌿', color: '#5fa84a', hotkey: 'W', levels: 3, target: 'unit', filter: 'enemy',
     range: 7, mana: [75, 75, 75], cooldown: [8, 8, 8], duration: [3, 5, 7], dps: 15, ai: 'nuke',
     tooltip: (l) => `Roots an enemy to the ground for ${L([3, 5, 7], l)} seconds, preventing it from moving or attacking and dealing 15 damage per second. Half duration on Heroes.`,
-    cast(game, c, lvl, target) {
+    cast(game, c, lvl, target: Unit) {
       if (target.isBuilding || target.spellImmune) return;
       const dur = L(this.duration, lvl) * (target.isHero ? 0.5 : 1);
       target.addBuff('entangle', dur, {
@@ -256,16 +300,16 @@ export const ABILITIES = {
       });
       game.sound('magicHit', target.x, target.z);
     },
-  },
-  trueshot_aura: {
+  }),
+  trueshot_aura: ab({
     name: 'Trueshot Aura', icon: '🏹', color: '#cfe8a8', hotkey: 'E', levels: 3, target: 'aura', radius: 9,
     pct: [0.1, 0.2, 0.3],
     tooltip: (l) => `Increases the ranged attack damage of nearby friendly units by ${Math.round(L([0.1, 0.2, 0.3], l) * 100)}%.`,
-    aura(lvl) {
+    aura(lvl): BuffData {
       return { rangedPct: L(this.pct, lvl) };
     },
-  },
-  starfall: {
+  }),
+  starfall: ab({
     name: 'Starfall', icon: '🌠', color: '#d4c2ff', hotkey: 'R', levels: 1, ultimate: true, target: 'none',
     mana: [200], cooldown: [150], radius: 8, ai: 'aoeSelf',
     tooltip: () => 'Calls down waves of falling stars for 12 seconds, each dealing 55 damage to nearby enemies. Channeled.',
@@ -285,29 +329,29 @@ export const ABILITIES = {
         },
       });
     },
-  },
+  }),
 
   // ------------------------------------------------------- Unit spells
-  heal: {
+  heal: ab({
     name: 'Heal', icon: '💖', color: '#ffd1dc', hotkey: 'E', levels: 1, target: 'unit', filter: 'ally', range: 6,
     mana: [5], cooldown: [1.5], autocast: true,
     tooltip: () => 'Heals a wounded friendly unit for 25 hit points. Autocast.',
-    cast(game, c, lvl, target) {
+    cast(game, c, lvl, target: Unit) {
       game.heal(target, 25, c);
       game.fx.burst(target.x, 0.8, target.z, 0xfff3b0, 6);
     },
-  },
-  slow: {
+  }),
+  slow: ab({
     name: 'Slow', icon: '🐌', color: '#c08bff', hotkey: 'W', levels: 1, target: 'unit', filter: 'enemy', range: 7,
     mana: [40], cooldown: [2], autocast: true,
     tooltip: () => 'Slows an enemy unit’s movement by 40% and attack rate by 25%. Lasts 20 seconds (8 on Heroes). Autocast.',
-    cast(game, c, lvl, target) {
+    cast(game, c, lvl, target: Unit) {
       if (target.spellImmune || target.isBuilding) return;
       target.addBuff('slow', target.isHero ? 8 : 20, { speedMul: 0.6, attackSpeed: 0.75, visual: 'slow', replace: true });
       game.sound('magicHit', target.x, target.z);
     },
-  },
-  creep_stomp: {
+  }),
+  creep_stomp: ab({
     name: 'War Stomp', icon: '💢', color: '#a88', hotkey: 'Q', levels: 1, target: 'none', mana: [0], cooldown: [12],
     radius: 3, ai: 'aoeSelf',
     tooltip: () => 'Stuns and damages nearby enemies.',
@@ -319,8 +363,8 @@ export const ABILITIES = {
       game.fx.ring(c.x, c.z, 0xc8a070, this.radius, 0.5);
       game.sound('thunder', c.x, c.z);
     },
-  },
-  war_stomp: {
+  }),
+  war_stomp: ab({
     name: 'Tyrant’s Stomp', icon: '💢', color: '#a33', hotkey: 'Q', levels: 1, target: 'none', mana: [0],
     cooldown: [11], radius: 5, ai: 'aoeSelf',
     tooltip: () => 'Kalenden slams the earth, dealing 160 damage and stunning nearby enemies.',
@@ -334,8 +378,8 @@ export const ABILITIES = {
       game.shake(0.5);
       game.sound('thunder', c.x, c.z);
     },
-  },
-  raise_dead: {
+  }),
+  raise_dead: ab({
     name: 'Raise the Fallen', icon: '💀', color: '#9dff6a', hotkey: 'W', levels: 1, target: 'none', mana: [0],
     cooldown: [24], ai: 'summon',
     tooltip: () => 'Kalenden raises skeletal warriors from the earth.',
@@ -350,17 +394,19 @@ export const ABILITIES = {
       }
       game.sound('roar', c.x, c.z);
     },
-  },
+  }),
 };
 
+/** Every ability by id. */
+export const ABILITIES: Record<string, AbilityDef> = DEFS as unknown as Record<string, AbilityDef>;
 for (const [id, a] of Object.entries(ABILITIES)) a.id = id;
 
 /** Hero level required to learn level `n` (1-based) of an ability. */
-export function requiredHeroLevel(ab, n) {
-  if (ab.ultimate) return 6;
+export function requiredHeroLevel(ability: AbilitySpec, n: number): number {
+  if (ability.ultimate) return 6;
   return [1, 3, 5][n - 1] ?? 99;
 }
 
-export function abilityValue(arr, lvl) {
+export function abilityValue(arr: readonly number[], lvl: number): number {
   return L(arr, lvl);
 }

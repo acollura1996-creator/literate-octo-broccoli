@@ -1,7 +1,7 @@
 // Kalenden and his Legion: the boss holds the citadel at the center of the
 // map and periodically sends armies to crush the generals.
 import { CITADEL, CENTER } from '../world/layout.ts';
-import { ABILITIES } from '../game/abilities.js';
+import { ABILITIES } from '../game/abilities.ts';
 
 export class LegionManager {
   constructor(game) {

@@ -4,29 +4,91 @@
 // draw `list` (src/render/projectiles.js, src/babylon/Projectiles.ts). Homing unless they are lobbed
 // at a point.
 import { MUZZLE } from '../data/muzzles.ts';
+import type { Vec3 } from '../data/muzzles.ts';
+import type { Game } from './game.ts';
+import type { Unit } from './unit.ts';
+import type { Point } from './types.ts';
+
+/** A shot to fire: what it looks like, who fires it, and what happens when it lands. */
+export interface ShotSpec {
+  kind: string;
+  from: Unit;
+  /** Homing target (lasers and rail shots always have one). */
+  target?: Unit | null;
+  speed?: number;
+  color?: number;
+  /** Lobbed at `point` rather than flown straight. */
+  arc?: boolean;
+  point?: Point | null;
+  onHit?(target: Unit | null, at: Point): void;
+}
+/** A shot in flight. */
+export interface Shot extends ShotSpec {
+  id: number;
+  beam?: undefined;
+  x: number;
+  y: number;
+  z: number;
+  /** Start position. */
+  sx: number;
+  sy: number;
+  sz: number;
+  /** Position last step (the renderers orient shots along their flight). */
+  px?: number;
+  py?: number;
+  pz?: number;
+  /** Arcing shots: progress 0-1; homing shots: unused. */
+  t: number;
+  dest: Point;
+  destY?: number;
+  /** Arcing shots: ground distance to travel. */
+  dist?: number;
+}
+/** An instant laser or rail shot, lingering briefly for the renderers. */
+export interface Beam {
+  id: number;
+  beam: true;
+  kind: string;
+  color: number;
+  width: number;
+  sx: number;
+  sy: number;
+  sz: number;
+  tx: number;
+  ty: number;
+  tz: number;
+  t: number;
+  life: number;
+}
+export type Projectile = Shot | Beam;
 
 let nextId = 1;
 
 export class Projectiles {
-  constructor(game) {
+  readonly game: Game;
+  /** In-flight shots and fading beams, read by the renderers. */
+  list: Projectile[];
+
+  constructor(game: Game) {
     this.game = game;
-    /** In-flight shots and fading beams, read by the renderers. */
     this.list = [];
   }
 
   /** Aim height: half the target's model height (as drawn). */
-  unitHeight(u) {
+  unitHeight(u: Unit): number {
     return u.view?.height ?? 1;
   }
 
   /** World position of a unit's muzzle (model-space MUZZLE offsets, or a sensible default). */
-  muzzleOf(from) {
+  muzzleOf(from: Unit): { x: number; y: number; z: number } {
     const g = this.game;
-    let m = MUZZLE[from.modelId];
-    if (m && Array.isArray(m[0])) {
-      from.shotIndex = ((from.shotIndex ?? 0) + 1) % m.length;
-      m = m[from.shotIndex];
-    }
+    const entry = MUZZLE[from.modelId];
+    let m: Vec3 | undefined;
+    if (entry && Array.isArray(entry[0])) {
+      const twins = entry as Vec3[];
+      from.shotIndex = ((from.shotIndex ?? 0) + 1) % twins.length;
+      m = twins[from.shotIndex];
+    } else m = entry as Vec3 | undefined;
     const ground = g.terrain.heightAt(from.x, from.z);
     if (m) {
       const sc = from.view?.root?.scale?.x ?? 1;
@@ -42,7 +104,7 @@ export class Projectiles {
     };
   }
 
-  spawn(o) {
+  spawn(o: ShotSpec): Projectile {
     const g = this.game;
     const from = o.from;
     const { x: sx, y: sy, z: sz } = this.muzzleOf(from);
@@ -52,7 +114,7 @@ export class Projectiles {
       if (o.kind === 'shell' || o.kind === 'cannonball') g.hooks.fx?.puff(sx, sy, sz, 0xcfc8bc, 0.4, 1.0);
     }
     if (o.kind === 'laser' || o.kind === 'rail') return this.beam(o, sx, sy, sz, o.kind === 'rail' ? 1.8 : 1);
-    const p = {
+    const p: Shot = {
       ...o,
       id: nextId++,
       x: sx,
@@ -62,7 +124,7 @@ export class Projectiles {
       sy,
       sz,
       t: 0,
-      dest: o.point ? { ...o.point } : { x: o.target.x, z: o.target.z },
+      dest: o.point ? { ...o.point } : { x: o.target!.x, z: o.target!.z },
     };
     if (o.arc) {
       p.dist = Math.max(1, Math.hypot(p.dest.x - sx, p.dest.z - sz));
@@ -72,9 +134,9 @@ export class Projectiles {
   }
 
   /** Lasers hit instantly; the beam lingers briefly for the renderers. */
-  beam(o, sx, sy, sz, width = 1) {
+  beam(o: ShotSpec, sx: number, sy: number, sz: number, width = 1): Beam {
     const g = this.game;
-    const t = o.target;
+    const t = o.target!;
     const tx = t.x;
     const tz = t.z;
     const ty = g.terrain.heightAt(tx, tz) + this.unitHeight(t) * 0.5;
@@ -83,14 +145,14 @@ export class Projectiles {
     } catch (e) {
       console.error(e);
     }
-    const b = { id: nextId++, beam: true, kind: o.kind, color: o.color ?? 0x5ff2ff, width, sx, sy, sz, tx, ty, tz, t: 0, life: 0.14 };
+    const b: Beam = { id: nextId++, beam: true, kind: o.kind, color: o.color ?? 0x5ff2ff, width, sx, sy, sz, tx, ty, tz, t: 0, life: 0.14 };
     this.list.push(b);
     return b;
   }
 
-  update(dt) {
+  update(dt: number): void {
     const g = this.game;
-    const keep = [];
+    const keep: Projectile[] = [];
     for (const p of this.list) {
       if (p.beam) {
         p.t += dt;
@@ -102,12 +164,12 @@ export class Projectiles {
       p.py = p.y;
       p.pz = p.z;
       if (p.arc) {
-        p.t += (dt * p.speed) / p.dist;
+        p.t += (dt * p.speed!) / p.dist!;
         const t = Math.min(1, p.t);
         const dy = g.terrain.heightAt(p.dest.x, p.dest.z) + 0.2;
         p.x = p.sx + (p.dest.x - p.sx) * t;
         p.z = p.sz + (p.dest.z - p.sz) * t;
-        p.y = p.sy + (dy - p.sy) * t + Math.sin(Math.PI * t) * p.dist * 0.32;
+        p.y = p.sy + (dy - p.sy) * t + Math.sin(Math.PI * t) * p.dist! * 0.32;
         if (t >= 1) done = true;
       } else {
         const t = p.target;
@@ -119,13 +181,13 @@ export class Projectiles {
           p.destY = g.terrain.heightAt(p.dest.x, p.dest.z) + 0.5;
         }
         const dx = p.dest.x - p.x;
-        const dy = p.destY - p.y;
+        const dy = p.destY! - p.y;
         const dz = p.dest.z - p.z;
         const d = Math.hypot(dx, dy, dz);
-        const step = p.speed * dt;
+        const step = p.speed! * dt;
         if (d <= Math.max(step, 0.25)) {
           p.x = p.dest.x;
-          p.y = p.destY;
+          p.y = p.destY!;
           p.z = p.dest.z;
           done = true;
         } else {

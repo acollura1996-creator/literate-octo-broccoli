@@ -2,7 +2,7 @@
 // treasure when wiped out and respawn after a while.
 import { DROP_TABLES } from '../data/items.ts';
 import { UNITS } from '../data/units.ts';
-import { ABILITIES } from '../game/abilities.js';
+import { ABILITIES } from '../game/abilities.ts';
 import { CENTER } from '../world/layout.ts';
 
 const DROP_CHANCE = { 1: 0.55, 2: 0.75, 3: 0.9, 4: 1 };

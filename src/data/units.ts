@@ -512,7 +512,7 @@ export const ECONOMY = {
   // Taxes and rations have no upper limit: the people's mood keeps them in check.
   taxPerCitizen: 0.02, // gold per second per citizen per point of tax
   foodPerRation: 0.0033, // food per second per citizen per ration point
-  moods: <Mood[]>[
+  moods: [
     { min: 200, name: 'Utopia', icon: '🌟', color: '#ffe066', income: 1.6, growth: 2.2 },
     { min: 150, name: 'Ecstatic', icon: '🤩', color: '#9effc8', income: 1.45, growth: 1.9 },
     { min: 110, name: 'Devoted', icon: '🥰', color: '#8affa0', income: 1.35, growth: 1.7 },
@@ -521,7 +521,7 @@ export const ECONOMY = {
     { min: 40, name: 'Normal', icon: '😐', color: '#ffe680', income: 1, growth: 1 },
     { min: 20, name: 'Unhappy', icon: '🙁', color: '#ffae5a', income: 0.6, growth: 0 },
     { min: -Infinity, name: 'Hate', icon: '😡', color: '#ff5a5a', income: 0, growth: 0 },
-  ],
+  ] satisfies Mood[],
   maxHappiness: 250,
   hireFee: (level: number) => 120 + 45 * level,
   hireTime: 180,

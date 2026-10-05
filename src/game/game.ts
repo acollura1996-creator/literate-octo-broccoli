@@ -1,24 +1,75 @@
 // The Game: owns the world state and runs the simulation.
-import { Unit } from './unit.js';
+import { Unit } from './unit.ts';
 import { UNITS, ATTACK_TABLE, UPGRADES, RESEARCH_IDS, researchCost, researchTime, researchCap, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES, AGES } from '../data/units.ts';
 import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.ts';
 import { ITEMS } from '../data/items.ts';
-import { ABILITIES } from './abilities.js';
-import { updateUnit, stopMoving, finishOrder } from './behavior.js';
+import { ABILITIES } from './abilities.ts';
+import { updateUnit, stopMoving, finishOrder } from './behavior.ts';
 import { PathGrid, BLOCK_BUILDING, BLOCK_GATE } from '../world/pathgrid.ts';
-import { Roads } from './roads.js';
-import { Empires } from './empire.js';
-import { GameEvents } from './events.js';
+import { Roads } from './roads.ts';
+import { Empires } from './empire.ts';
+import { GameEvents } from './events.ts';
 import { Terrain } from '../world/terrain.ts';
 import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, CITY_RADIUS } from '../world/layout.ts';
-import { Fog } from './fog.js';
-import { Projectiles } from './projectiles.js';
+import { Fog } from './fog.ts';
+import { Projectiles } from './projectiles.ts';
 import { TEAM_COLORS, lightenHex } from '../data/colors.ts';
 import { CreepManager } from '../ai/creeps.js';
 import { LegionManager } from '../ai/legion.js';
 import { GeneralAI } from '../ai/general.js';
+import type { Layout } from '../world/layout.ts';
+import type { Cell } from './roads.ts';
+import type { AttackType, Cost, ItemDef } from '../data/types.ts';
+import type { EffectsApi, Point, SimHooks } from './hooks.ts';
+import type { SpawnOptions } from './unit.ts';
+import type {
+  ChannelSpec, Corpse, FloatText, GameMessage, GameOver, GeneralMode, GroundItem, Order, Ping, Player,
+} from './types.ts';
 
-const GENERAL_COLORS = [
+/** A computer general in the game setup. */
+export interface RivalSpec {
+  mode: 'random' | GeneralMode;
+  /** A hero id, or 'random'. */
+  hero: string;
+  team: 'rival' | 'ally';
+}
+export interface GameOptions {
+  mode: GeneralMode;
+  heroId?: string;
+  difficulty?: 'easy' | 'normal' | 'hard';
+  rivals?: RivalSpec[];
+  playerName?: string;
+  /** Legacy: number of rivals (1-3). */
+  opponents?: number;
+  /** Legacy: 'allied' puts every rival on the player's team. */
+  diplomacy?: 'ffa' | 'allied';
+}
+export interface DamageOptions {
+  /** Spell damage: ignores armor; spell-immune units take none. */
+  spell?: boolean;
+  /** Ignores armor. */
+  pure?: boolean;
+  /** Spells that hit buildings at full strength. */
+  siege?: boolean;
+  quiet?: boolean;
+}
+/** A piece of Kalenden's citadel wall (drawn by the renderers). */
+export interface CitadelWall {
+  model: string;
+  x: number;
+  y: number;
+  z: number;
+  rotY: number;
+  color: number;
+}
+type PlayerInit = Pick<Player, 'index' | 'name' | 'colorName' | 'color' | 'mode'> & Partial<Player>;
+
+/** Effects for a game run without a renderer (until one is attached as `game.fx`). */
+const NO_FX: EffectsApi = new Proxy({} as EffectsApi, { get: () => () => {} });
+
+const DIFFICULTY: Record<string, number> = { easy: 0, normal: 1, hard: 2 };
+
+const GENERAL_COLORS: [string, number][] = [
   ['Red', TEAM_COLORS.red],
   ['Blue', TEAM_COLORS.blue],
   ['Teal', TEAM_COLORS.teal],
@@ -29,6 +80,58 @@ const HASH_CELL = 4;
 const HASH_DIM = Math.ceil(MAP_SIZE / HASH_CELL);
 
 export class Game {
+  readonly opts: GameOptions;
+  readonly hooks: SimHooks;
+  /** Visual effects (the renderer's; set by whoever runs the game). */
+  fx: EffectsApi = NO_FX;
+  time: number;
+  frame: number;
+  units: Unit[];
+  unitById: Map<number, Unit>;
+  timers: { at: number; fn: () => void }[];
+  corpses: Corpse[];
+  groundItems: GroundItem[];
+  messages: GameMessage[];
+  floats: FloatText[];
+  pings: Ping[];
+  /** True when every general is on the player's team. */
+  allied: boolean;
+  over: GameOver | null;
+  /** Path searches left this frame, and A* node expansions. */
+  pathBudget: number;
+  pathNodes = 0;
+  lastAlert: number;
+  lastAlertPos: Point | null;
+  shakeAmount: number;
+  buckets: Unit[][];
+  /** 0 easy, 1 normal, 2 hard. */
+  difficulty: number;
+  projectiles: Projectiles;
+  placeReason = '';
+  kalendenSlainBy: Player | null = null;
+  auraTimer = 0;
+  slowTimer = 0;
+  defeatTimer = 0;
+
+  // Set up by setup().
+  layout!: Layout;
+  grid!: PathGrid;
+  terrain!: Terrain;
+  fog!: Fog;
+  roads!: Roads;
+  empires!: Empires;
+  events!: GameEvents;
+  generals!: Player[];
+  human!: Player;
+  creeps!: Player;
+  legion!: Player;
+  passive!: Player;
+  players!: Player[];
+  wallCells!: Cell[];
+  citadelWalls!: CitadelWall[];
+  legionMgr!: LegionManager;
+  creepMgr!: CreepManager;
+
   /**
    * opts: { mode: 'hero'|'empire', heroId, difficulty: 'easy'|'normal'|'hard',
    *         rivals: [{ mode: 'random'|'hero'|'empire', hero: 'random'|heroId, team: 'rival'|'ally' }] }
@@ -36,7 +139,7 @@ export class Game {
    * hooks: SimHooks (src/game/hooks.ts): onUnitAdded(u), onUnitRemoved(u), onUnitChanged(u), fx,
    *        sound(name, vol), ... all optional.
    */
-  constructor(opts, hooks) {
+  constructor(opts: GameOptions, hooks: SimHooks) {
     this.opts = opts;
     this.hooks = hooks;
     this.time = 0;
@@ -55,13 +158,13 @@ export class Game {
     this.lastAlert = -99;
     this.lastAlertPos = null;
     this.shakeAmount = 0;
-    this.buckets = Array.from({ length: HASH_DIM * HASH_DIM }, () => []);
-    this.difficulty = { easy: 0, normal: 1, hard: 2 }[opts.difficulty] ?? 1;
+    this.buckets = Array.from({ length: HASH_DIM * HASH_DIM }, (): Unit[] => []);
+    this.difficulty = DIFFICULTY[opts.difficulty ?? ''] ?? 1;
     this.projectiles = new Projectiles(this);
   }
 
   // ------------------------------------------------------------------ setup
-  setup() {
+  setup(): void {
     this.layout = buildLayout();
     this.grid = new PathGrid(MAP_SIZE);
     this.terrain = new Terrain(this.layout, this.grid);
@@ -85,7 +188,7 @@ export class Game {
     this.blockCitadelWalls();
 
     // Keep these areas free of trees.
-    const clear = [];
+    const clear: { x: number; z: number; r: number }[] = [];
     for (const b of this.layout.bases) {
       clear.push({ x: b.hall[0], z: b.hall[1], r: CITY_RADIUS });
       clear.push({ x: b.mine[0], z: b.mine[1], r: 4.5 });
@@ -108,7 +211,7 @@ export class Game {
       });
       if (n.type === 'mercenary_camp') {
         u.stock = {};
-        for (const m of u.def.mercenaries) u.stock[m] = 2;
+        for (const m of u.def.mercenaries!) u.stock[m] = 2;
         u.stockTimer = 0;
       }
     }
@@ -128,23 +231,23 @@ export class Game {
   }
 
   /** The computer generals: [{ mode, hero, team }], also accepting the legacy options. */
-  rivalLineup() {
+  rivalLineup(): RivalSpec[] {
     let rivals = this.opts.rivals;
     if (!rivals?.length) {
       const n = Math.max(1, Math.min(3, this.opts.opponents ?? 3));
       const team = this.opts.diplomacy === 'allied' ? 'ally' : 'rival';
-      rivals = Array.from({ length: n }, () => ({ mode: 'random', hero: 'random', team }));
+      rivals = Array.from({ length: n }, (): RivalSpec => ({ mode: 'random', hero: 'random', team }));
     }
     return rivals.slice(0, 3);
   }
 
-  createPlayers() {
+  createPlayers(): void {
     const rivals = this.rivalLineup();
     const n = 1 + rivals.length;
     this.generals = [];
     const names = [...AI_GENERAL_NAMES].sort(() => Math.random() - 0.5);
     // Random paths are resolved so the computer generals mix heroes and empires.
-    const modes = rivals.map((r) => (r.mode === 'hero' || r.mode === 'empire' ? r.mode : null));
+    const modes = rivals.map((r): GeneralMode | null => (r.mode === 'hero' || r.mode === 'empire' ? r.mode : null));
     rivals.forEach((r, i) => {
       if (modes[i]) return;
       const heroes = modes.filter((m) => m === 'hero').length;
@@ -155,23 +258,23 @@ export class Game {
     const taken = new Set([this.opts.mode === 'hero' ? this.opts.heroId : null, ...rivals.map((r) => r.hero)]);
     const heroPool = HERO_IDS.filter((h) => !taken.has(h)).sort(() => Math.random() - 0.5);
     let poolIndex = 0;
-    const pickHero = (r) => (r.hero && r.hero !== 'random' ? r.hero : heroPool[poolIndex++ % Math.max(1, heroPool.length)] ?? HERO_IDS[0]);
-    const handicap = [0.85, 1.0, 1.15][this.difficulty];
+    const pickHero = (r: RivalSpec): string => (r.hero && r.hero !== 'random' ? r.hero : heroPool[poolIndex++ % Math.max(1, heroPool.length)] ?? HERO_IDS[0]!);
+    const handicap = [0.85, 1.0, 1.15][this.difficulty]!;
     for (let i = 0; i < n; i++) {
       const isHuman = i === 0;
       const r = rivals[i - 1];
-      const mode = isHuman ? this.opts.mode : modes[i - 1];
-      const heroType = isHuman ? this.opts.heroId : pickHero(r);
-      const [colorName, color] = GENERAL_COLORS[i];
+      const mode = isHuman ? this.opts.mode : modes[i - 1]!;
+      const heroType = isHuman ? this.opts.heroId : pickHero(r!);
+      const [colorName, color] = GENERAL_COLORS[i]!;
       const p = this.makePlayer({
         index: i,
-        name: isHuman ? (this.opts.playerName || 'You') : names[i - 1],
+        name: isHuman ? (this.opts.playerName || 'You') : names[i - 1]!,
         colorName,
         color,
         isHuman,
         general: true,
         mode,
-        team: isHuman || r.team === 'ally' ? 0 : i,
+        team: isHuman || r!.team === 'ally' ? 0 : i,
         heroType: mode === 'hero' ? heroType : null,
         slot: PLAYER_SLOTS[i],
         handicap: isHuman ? 1 : handicap,
@@ -180,7 +283,7 @@ export class Game {
       p.homeTeam = p.team;
       this.generals.push(p);
     }
-    this.human = this.generals[0];
+    this.human = this.generals[0]!;
     this.allied = this.generals.every((p) => p.team === this.human.team);
     this.creeps = this.makePlayer({ index: 10, name: 'Neutral Hostile', colorName: 'Creeps', color: TEAM_COLORS.neutral, mode: 'creep' });
     this.legion = this.makePlayer({ index: 11, name: 'Kalenden', colorName: 'Legion', color: TEAM_COLORS.kalenden, mode: 'legion' });
@@ -188,7 +291,7 @@ export class Game {
     this.players = [...this.generals, this.creeps, this.legion, this.passive];
   }
 
-  makePlayer(d) {
+  makePlayer(d: PlayerInit): Player {
     return {
       gold: 0,
       lumber: 0,
@@ -210,8 +313,8 @@ export class Game {
     };
   }
 
-  setupGeneral(p) {
-    const base = this.layout.bases[p.slot];
+  setupGeneral(p: Player): void {
+    const base = this.layout.bases[p.slot!]!;
     p.base = base;
     const [hx, hz] = base.hall;
     const [tcx, tcz] = base.toCenter;
@@ -226,7 +329,7 @@ export class Game {
       const mz = base.mine[1];
       for (let i = 0; i < 5; i++) {
         const a = Math.atan2(mx - hx, mz - hz) + (i - 2) * 0.45;
-        const pos = this.grid.nearestWalkable(hx + Math.sin(a) * 3.6, hz + Math.cos(a) * 3.6, 5);
+        const pos = this.grid.nearestWalkable(hx + Math.sin(a) * 3.6, hz + Math.cos(a) * 3.6, 5)!;
         const peasant = this.spawnUnit('peasant', p, pos.x, pos.z, { facing: a });
         const mine = this.units.find((u) => u.type === 'goldmine' && Math.hypot(u.x - mx, u.z - mz) < 1);
         if (mine) this.issueOrder(peasant, { type: 'harvest', target: mine });
@@ -236,21 +339,21 @@ export class Game {
       p.lumber = 0;
       this.spawnUnit('altar', p, hx, hz);
       for (const [tx, tz] of base.towers) this.spawnUnit('guardtower', p, tx, tz);
-      const pos = this.grid.nearestWalkable(hx + tcx * 3.5, hz + tcz * 3.5, 6);
-      const hero = this.spawnUnit(p.heroType, p, pos.x, pos.z, { facing: Math.atan2(tcx, tcz) });
+      const pos = this.grid.nearestWalkable(hx + tcx * 3.5, hz + tcz * 3.5, 6)!;
+      const hero = this.spawnUnit(p.heroType!, p, pos.x, pos.z, { facing: Math.atan2(tcx, tcz) });
       p.hero = hero;
     }
     if (!p.isHuman) p.ai = new GeneralAI(this, p);
   }
 
   /** A town square: roads ringing the Town Hall plus a high street toward the map center. */
-  layStartingRoads(p, th) {
+  layStartingRoads(p: Player, th: Unit): void {
     const { x: cx, z: cz } = th.cell;
-    const fp = th.def.footprint;
-    const cells = [];
+    const fp = th.def.footprint!;
+    const cells: Cell[] = [];
     for (let i = -1; i <= fp; i++) cells.push([cx + i, cz - 1], [cx + i, cz + fp], [cx - 1, cz + i], [cx + fp, cz + i]);
     // High street: from the ring toward the center of the map.
-    const [tx, tz] = p.base.toCenter;
+    const [tx, tz] = p.base!.toCenter;
     const sx = Math.round(th.x + tx * (fp / 2 + 1));
     const sz = Math.round(th.z + tz * (fp / 2 + 1));
     const ex = Math.round(th.x + tx * (fp / 2 + 12));
@@ -259,7 +362,7 @@ export class Game {
     this.roads.place(cells, p, true);
   }
 
-  blockCitadelWalls() {
+  blockCitadelWalls(): void {
     const half = CITADEL.half;
     const g = CITADEL.gateHalf;
     const lo = CENTER - half;
@@ -268,7 +371,7 @@ export class Game {
     for (let i = lo; i <= hi; i++) {
       const inGate = i >= CENTER - g && i < CENTER + g;
       if (inGate) continue;
-      for (const [cx, cz] of [[i, lo], [i, hi], [lo, i], [hi, i]]) {
+      for (const [cx, cz] of [[i, lo], [i, hi], [lo, i], [hi, i]] as Cell[]) {
         this.grid.setFlag(cx, cz, BLOCK_BUILDING, true);
         this.wallCells.push([cx, cz]);
       }
@@ -276,13 +379,13 @@ export class Game {
   }
 
   /** Placement of Kalenden's citadel walls and towers (drawn by the renderers; blocked separately). */
-  buildCitadelWalls() {
+  buildCitadelWalls(): void {
     const half = CITADEL.half;
     const g = CITADEL.gateHalf;
     const lo = CENTER - half;
     const hi = CENTER + half;
-    const walls = [];
-    const place = (model, x, z, rotY) => walls.push({ model, x, y: this.terrain.heightAt(x, z) - 0.05, z, rotY, color: TEAM_COLORS.kalenden });
+    const walls: CitadelWall[] = [];
+    const place = (model: string, x: number, z: number, rotY: number): number => walls.push({ model, x, y: this.terrain.heightAt(x, z) - 0.05, z, rotY, color: TEAM_COLORS.kalenden });
     // Segments are 2 long along X; place along each side.
     for (let i = lo; i < hi; i += 2) {
       const mid = i + 1;
@@ -292,7 +395,7 @@ export class Game {
       place('wall_segment', lo + 0.5, mid, Math.PI / 2);
       place('wall_segment', hi + 0.5, mid, Math.PI / 2);
     }
-    for (const [x, z] of [[lo, lo], [hi + 1, lo], [lo, hi + 1], [hi + 1, hi + 1]]) place('wall_tower', x, z, 0);
+    for (const [x, z] of [[lo, lo], [hi + 1, lo], [lo, hi + 1], [hi + 1, hi + 1]] as Cell[]) place('wall_tower', x, z, 0);
     // Gate towers.
     for (const s of [-1, 1]) {
       place('wall_tower', CENTER + s * (g + 0.6), lo + 0.5, 0);
@@ -304,51 +407,51 @@ export class Game {
   }
 
   // -------------------------------------------------------------- relations
-  isEnemy(a, b) {
+  isEnemy(a: Player | null | undefined, b: Player | null | undefined): boolean {
     if (!a || !b || a === b) return false;
     if (a.mode === 'passive' || b.mode === 'passive') return false;
     if (!a.general && !b.general) return false;
     if (a.general && b.general) return a.team !== b.team;
     return true;
   }
-  isAlly(a, b) {
+  isAlly(a: Player, b: Player): boolean {
     return a === b || (!this.isEnemy(a, b) && a.mode !== 'passive' && b.mode !== 'passive');
   }
-  isAlliedToHuman(p) {
+  isAlliedToHuman(p: Player): boolean {
     return p === this.human || (p.general && p.team === this.human.team);
   }
   /** CSS color for a player's name in messages (team colors lightened to read on dark UI). */
-  nameColor(p) {
+  nameColor(p: Player): string {
     return lightenHex(p.color, 0.35);
   }
   /** A message about another general's doings, in their color. */
-  notify(p, text) {
+  notify(p: Player | null | undefined, text: string): void {
     if (p?.isHuman) return;
     this.message(text, p ? this.nameColor(p) : '#ffd700');
   }
-  get isNight() {
+  get isNight(): boolean {
     const h = this.timeOfDay;
     return h < 6 || h >= 18;
   }
   /** Hours 0-24. A full day lasts 8 minutes; the game starts at 8:00. */
-  get timeOfDay() {
+  get timeOfDay(): number {
     return (8 + (this.time / 480) * 24) % 24;
   }
 
   // ---------------------------------------------------------------- spawning
-  snap(v, fp) {
+  snap(v: number, fp: number): number {
     return fp % 2 === 0 ? Math.round(v) : Math.floor(v) + 0.5;
   }
 
-  spawnUnit(type, owner, x, z, opts = {}) {
-    const def = UNITS[type];
+  spawnUnit(type: string, owner: Player, x: number, z: number, opts: SpawnOptions = {}): Unit {
+    const def = UNITS[type]!;
     if (def.kind === 'building') {
-      x = this.snap(x, def.footprint);
-      z = this.snap(z, def.footprint);
+      x = this.snap(x, def.footprint!);
+      z = this.snap(z, def.footprint!);
     }
     const u = new Unit(this, type, owner, x, z, opts);
     if (u.isBuilding) {
-      const fp = def.footprint;
+      const fp = def.footprint!;
       u.cell = { x: Math.round(x - fp / 2), z: Math.round(z - fp / 2) };
       if (def.gate) {
         this.grid.setRect(u.cell.x, u.cell.z, fp, fp, BLOCK_GATE, true);
@@ -374,7 +477,7 @@ export class Game {
     return u;
   }
 
-  removeUnit(u) {
+  removeUnit(u: Unit): void {
     if (u.removed) return;
     u.removed = true;
     const arr = u.isBuilding ? u.owner.buildings : u.owner.units;
@@ -385,7 +488,7 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ orders
-  issueOrder(u, order, queue = false) {
+  issueOrder(u: Unit, order: Order, queue = false): void {
     if (u.dead) return;
     if (queue && u.order.type !== 'idle') {
       u.orderQueue.push(order);
@@ -403,19 +506,19 @@ export class Game {
   }
 
   // ------------------------------------------------------------- spatial
-  rebuildHash() {
+  rebuildHash(): void {
     for (const b of this.buckets) b.length = 0;
     for (const u of this.units) {
       if (u.dead || u.removed) continue;
       const cx = Math.min(HASH_DIM - 1, Math.max(0, Math.floor(u.x / HASH_CELL)));
       const cz = Math.min(HASH_DIM - 1, Math.max(0, Math.floor(u.z / HASH_CELL)));
-      this.buckets[cz * HASH_DIM + cx].push(u);
+      this.buckets[cz * HASH_DIM + cx]!.push(u);
     }
   }
 
   /** Living units whose edge lies within r of (x, z). */
-  unitsNear(x, z, r) {
-    const out = [];
+  unitsNear(x: number, z: number, r: number): Unit[] {
+    const out: Unit[] = [];
     const pad = 3; // largest radius
     const x0 = Math.max(0, Math.floor((x - r - pad) / HASH_CELL));
     const x1 = Math.min(HASH_DIM - 1, Math.floor((x + r + pad) / HASH_CELL));
@@ -423,7 +526,7 @@ export class Game {
     const z1 = Math.min(HASH_DIM - 1, Math.floor((z + r + pad) / HASH_CELL));
     for (let cz = z0; cz <= z1; cz++) {
       for (let cx = x0; cx <= x1; cx++) {
-        for (const u of this.buckets[cz * HASH_DIM + cx]) {
+        for (const u of this.buckets[cz * HASH_DIM + cx]!) {
           if (u.dead) continue;
           const d = Math.hypot(u.x - x, u.z - z) - u.radius;
           if (d <= r) out.push(u);
@@ -433,19 +536,19 @@ export class Game {
     return out;
   }
 
-  enemiesInRadius(owner, x, z, r) {
+  enemiesInRadius(owner: Player, x: number, z: number, r: number): Unit[] {
     return this.unitsNear(x, z, r).filter(
       (u) => this.isEnemy(owner, u.owner) && !u.hidden && !u.def.invulnerable && u.targetableBy({ owner }),
     );
   }
 
   // ------------------------------------------------------------------ combat
-  armorReduction(armor) {
+  armorReduction(armor: number): number {
     if (armor >= 0) return 1 - (0.06 * armor) / (1 + 0.06 * armor);
     return 2 - Math.pow(0.94, -armor);
   }
 
-  dealDamage(src, t, amount, attackType, opts = {}) {
+  dealDamage(src: Unit | null | undefined, t: Unit | null | undefined, amount: number, attackType: AttackType, opts: DamageOptions = {}): number {
     if (!t || t.dead || t.def.invulnerable) return 0;
     if (t.invulnerable) return 0;
     if (opts.spell && t.spellImmune) return 0;
@@ -468,7 +571,7 @@ export class Game {
     return dmg;
   }
 
-  onDamaged(t, src) {
+  onDamaged(t: Unit, src: Unit): void {
     if (!this.isEnemy(t.owner, src.owner)) return;
     // Retaliate.
     if (!t.isBuilding && t.canAttack && !t.def.worker && !t.dead) {
@@ -511,13 +614,13 @@ export class Game {
     }
   }
 
-  rollDamage(u) {
-    const [a, b] = u.damageRange;
+  rollDamage(u: Unit): number {
+    const [a, b] = u.damageRange!;
     return a + Math.random() * (b - a);
   }
 
   /** A basic attack connects. */
-  attackHit(u, t) {
+  attackHit(u: Unit, t: Unit | null | undefined): void {
     if (!t || t.dead) return;
     let dmg = this.rollDamage(u);
     let crit = false;
@@ -525,18 +628,19 @@ export class Game {
     // Wind Walk backstab
     const ww = u.buffs.get('wind_walk');
     if (ww) {
-      dmg += ww.bonusDamage;
+      dmg += ww.bonusDamage!;
       u.removeBuff('wind_walk');
       crit = true;
     }
     if (u.isHero && !u.isIllusion) {
       const cs = u.abilityLevel('critical_strike');
-      if (cs > 0 && Math.random() < ABILITIES.critical_strike.chance) {
-        dmg *= ABILITIES.critical_strike.mult[cs - 1];
+      const critStrike = ABILITIES['critical_strike']!;
+      if (cs > 0 && Math.random() < (critStrike.chance as number)) {
+        dmg *= critStrike.mult![cs - 1]!;
         crit = true;
       }
       const bash = u.abilityLevel('bash');
-      if (bash > 0 && Math.random() < ABILITIES.bash.chance[bash - 1] && !t.isBuilding) {
+      if (bash > 0 && Math.random() < (ABILITIES['bash']!.chance as number[])[bash - 1]! && !t.isBuilding) {
         dmg += 25;
         stun = t.isHero ? 1 : 2;
       }
@@ -564,7 +668,7 @@ export class Game {
     this.hooks.fx?.hit(t, proj ? proj.color ?? (proj.kind === 'bullet' ? 0xffe28a : 0xffffff) : 0xffeecc);
   }
 
-  splashHit(u, x, z, radius, scale = 1) {
+  splashHit(u: Unit, x: number, z: number, radius: number, scale = 1): void {
     const dmg = this.rollDamage(u) * scale;
     for (const e of this.enemiesInRadius(u.owner, x, z, radius)) {
       const d = Math.hypot(e.x - x, e.z - z) - e.radius;
@@ -574,19 +678,19 @@ export class Game {
     this.hooks.fx?.explosion(x, z, 0.9);
   }
 
-  heal(t, amount, src, quiet = false) {
+  heal(t: Unit | null | undefined, amount: number, _src?: Unit | null, quiet = false): void {
     if (!t || t.dead) return;
     const before = t.hp;
     t.hp = Math.min(t.maxHp, t.hp + amount);
     if (!quiet && t.hp - before >= 50) this.floatText(t.x, t.z, `+${Math.round(t.hp - before)}`, '#7CFC00', 1.0);
   }
 
-  stun(t, dur) {
+  stun(t: Unit | null | undefined, dur: number): void {
     if (!t || t.dead || t.isBuilding || t.spellImmune || t.def.boss) return;
     t.addBuff('stun', dur, { stun: true, visual: 'stun' });
   }
 
-  kill(u, killer, opts = {}) {
+  kill(u: Unit, killer: Unit | null | undefined, opts: { expire?: boolean } = {}): void {
     if (u.dead) return;
     u.dead = true;
     u.hp = 0;
@@ -598,16 +702,16 @@ export class Game {
     if (u.harvest?.inside) u.harvest.inside = false;
     const owner = u.owner;
     if (u.isBuilding) {
-      const fp = u.def.footprint;
+      const fp = u.def.footprint!;
       this.grid.setRect(u.cell.x, u.cell.z, fp, fp, u.def.gate ? BLOCK_GATE : BLOCK_BUILDING, false);
       if (owner.general && (u.def.tier || u.def.needsRoad)) {
         this.updateTier(owner);
         this.roads.recompute(owner);
       }
       // Refund queued training.
-      for (const q of u.trainQueue) this.refund(owner, UNITS[q.type].cost);
+      for (const q of u.trainQueue) this.refund(owner, UNITS[q.type]!.cost);
       u.trainQueue = [];
-      this.hooks.fx?.explosion(u.x, u.z, u.def.footprint * 0.6);
+      this.hooks.fx?.explosion(u.x, u.z, u.def.footprint! * 0.6);
       this.sound('explosion', u.x, u.z, 0.6);
     } else if (!opts.expire) {
       this.sound('death', u.x, u.z, 0.35);
@@ -620,7 +724,7 @@ export class Game {
       if (owner.general) owner.stats.unitsLost++;
       // Bounty
       if (kOwner.general && (owner === this.creeps || owner === this.legion || u.isHero) && u.def.bounty !== null) {
-        const [a, b] = u.isHero ? [80 + 20 * u.level, 100 + 20 * u.level] : u.def.bounty ?? [0, 0];
+        const [a, b] = u.isHero ? [80 + 20 * u.level!, 100 + 20 * u.level!] : u.def.bounty ?? [0, 0];
         const g = Math.round((a + Math.random() * (b - a)) * (u.isHero ? 1 : 1.3));
         if (g > 0) {
           kOwner.gold += g;
@@ -638,7 +742,7 @@ export class Game {
     if (u.camp) this.creepMgr.onCreepDied(u);
     u.onDeath?.(killer);
     if (u.isHero && owner.general && !u.isIllusion) {
-      u.reviveAt = this.time + 12 + 4 * u.level;
+      u.reviveAt = this.time + 12 + 4 * u.level!;
       if (owner.isHuman) {
         const altar = owner.buildings.find((b) => b.def.revivesHeroes && !b.dead);
         this.message(
@@ -663,14 +767,14 @@ export class Game {
     this.hooks.onUnitChanged?.(u);
   }
 
-  giveXp(killer, victim) {
+  giveXp(killer: Unit, victim: Unit): void {
     if (victim.isIllusion || victim.summoned) return;
-    let base;
-    if (victim.isHero) base = 100 + 80 * victim.level;
+    let base: number;
+    if (victim.isHero) base = 100 + 80 * victim.level!;
     else if (victim.isBuilding) base = victim.type === 'kalenden_keep' ? 400 : victim.owner.general ? 30 : 0;
     else base = XP_BY_LEVEL[Math.min(15, victim.def.level)] ?? 25;
     if (base <= 0) return;
-    const heroes = [];
+    const heroes: Unit[] = [];
     for (const p of this.generals) {
       if (!p.hero || p.hero.dead || p.defeated) continue;
       if (p.team !== killer.owner.team) continue; // allied heroes nearby share experience
@@ -680,26 +784,26 @@ export class Game {
     const share = base / heroes.length;
     for (const h of heroes) {
       let amt = share;
-      if (victim.owner === this.creeps) amt *= 1.5 * ([1, 1, 1, 1, 1, 0.9, 0.8, 0.7, 0.65, 0.6, 0.55][h.level] ?? 0.5);
+      if (victim.owner === this.creeps) amt *= 1.5 * ([1, 1, 1, 1, 1, 0.9, 0.8, 0.7, 0.65, 0.6, 0.55][h.level!] ?? 0.5);
       this.addXp(h, amt);
     }
   }
 
-  addXp(h, amt) {
-    if (h.level >= MAX_HERO_LEVEL) return;
-    h.xp += amt;
-    while (h.level < MAX_HERO_LEVEL && h.xp >= HERO_XP[h.level + 1]) {
+  addXp(h: Unit, amt: number): void {
+    if (h.level! >= MAX_HERO_LEVEL) return;
+    h.xp! += amt;
+    while (h.level! < MAX_HERO_LEVEL && h.xp! >= HERO_XP[h.level! + 1]!) {
       const hpRatio = h.hp / h.maxHp;
       const mpRatio = h.maxMana ? h.mana / h.maxMana : 1;
-      h.level++;
-      h.skillPoints++;
+      h.level!++;
+      h.skillPoints!++;
       h.hp = h.maxHp * hpRatio;
       h.mana = h.maxMana * mpRatio;
       this.hooks.fx?.levelUp(h);
       if (h.owner.isHuman) {
         this.sound('levelUp', h.x, h.z);
         this.message(`${h.def.name} has reached level ${h.level}!`, '#ffd700');
-      } else if (!h.isIllusion && [3, 6, 8, 10].includes(h.level)) {
+      } else if (!h.isIllusion && [3, 6, 8, 10].includes(h.level!)) {
         this.notify(h.owner, `${h.owner.name}'s ${h.def.name} has reached level ${h.level}.`);
       }
       h.owner.ai?.onLevelUp?.(h);
@@ -707,25 +811,25 @@ export class Game {
   }
 
   // ----------------------------------------------------------- abilities
-  startChannel(u, ch) {
+  startChannel(u: Unit, ch: ChannelSpec): void {
     u.channel = { ...ch, elapsed: 0, timer: 0 };
     u.order = { type: 'channel' };
     stopMoving(u);
   }
-  endChannel(u) {
+  endChannel(u: Unit): void {
     u.channel = null;
     if (u.order.type === 'channel') finishOrder(this, u);
   }
-  later(delay, fn) {
+  later(delay: number, fn: () => void): void {
     this.timers.push({ at: this.time + delay, fn });
   }
 
-  resurrect(caster, radius, max) {
+  resurrect(caster: Unit, radius: number, max: number): number {
     let n = 0;
     const fresh = this.corpses.filter(
       (c) => c.owner === caster.owner && this.time - c.time < 90 && Math.hypot(c.x - caster.x, c.z - caster.z) <= radius,
     );
-    fresh.sort((a, b) => UNITS[b.type].level - UNITS[a.type].level);
+    fresh.sort((a, b) => UNITS[b.type]!.level - UNITS[a.type]!.level);
     for (const c of fresh.slice(0, max)) {
       const p = this.grid.nearestWalkable(c.x, c.z, 4);
       if (!p) continue;
@@ -737,24 +841,24 @@ export class Game {
     return n;
   }
 
-  mirrorImage(c, count) {
+  mirrorImage(c: Unit, count: number): void {
     // Remove existing illusions of this hero.
     for (const u of c.owner.units) if (u.isIllusion && u.type === c.type && !u.dead) this.kill(u, null, { expire: true });
-    const spots = [];
+    const spots: Point[] = [];
     for (let i = 0; i <= count; i++) {
       const a = (i / (count + 1)) * Math.PI * 2 + Math.random();
       const p = this.grid.nearestWalkable(c.x + Math.cos(a) * 1.6, c.z + Math.sin(a) * 1.6, 4) ?? { x: c.x, z: c.z };
       spots.push(p);
     }
     spots.sort(() => Math.random() - 0.5);
-    const realSpot = spots.pop();
+    const realSpot = spots.pop()!;
     for (const s of spots) {
       const u = this.spawnUnit(c.type, c.owner, s.x, s.z, { illusion: true, lifetime: 60, facing: c.facing });
       u.level = c.level;
-      u.tomes = { ...c.tomes };
-      u.inventory = c.inventory.map((it) => (it ? { ...it } : null));
+      u.tomes = { ...c.tomes! };
+      u.inventory = c.inventory!.map((it) => (it ? { ...it } : null));
       u.skillPoints = 0;
-      for (const k in u.abilityLevels) u.abilityLevels[k] = 0;
+      for (const k in u.abilityLevels) u.abilityLevels![k] = 0;
       u.hp = u.maxHp * (c.hp / c.maxHp);
       u.mana = 0;
       this.hooks.fx?.burst(s.x, 0.7, s.z, 0x9ab8ff, 10);
@@ -766,23 +870,23 @@ export class Game {
     this.hooks.fx?.burst(c.x, 0.7, c.z, 0x9ab8ff, 10);
   }
 
-  learnAbility(h, abilityId) {
-    if (!h.isHero || h.skillPoints <= 0) return false;
-    const ab = ABILITIES[abilityId];
-    const cur = h.abilityLevels[abilityId] ?? 0;
+  learnAbility(h: Unit, abilityId: string): boolean {
+    if (!h.isHero || h.skillPoints! <= 0) return false;
+    const ab = ABILITIES[abilityId]!;
+    const cur = h.abilityLevels![abilityId] ?? 0;
     if (cur >= ab.levels) return false;
-    const req = ab.ultimate ? 6 : [1, 3, 5][cur];
-    if (h.level < req) return false;
-    h.abilityLevels[abilityId] = cur + 1;
-    h.skillPoints--;
+    const req = ab.ultimate ? 6 : [1, 3, 5][cur]!;
+    if (h.level! < req) return false;
+    h.abilityLevels![abilityId] = cur + 1;
+    h.skillPoints!--;
     return true;
   }
 
   // ----------------------------------------------------------- economy
-  canAfford(p, cost) {
+  canAfford(p: Player, cost: Partial<Cost>): boolean {
     return p.gold >= (cost.gold || 0) && p.lumber >= (cost.lumber || 0);
   }
-  spend(p, cost) {
+  spend(p: Player, cost: Partial<Cost>): boolean {
     if (!this.canAfford(p, cost)) {
       if (p.isHuman) {
         this.message(p.gold < (cost.gold || 0) ? 'Not enough gold.' : 'Not enough lumber.', '#ff8080');
@@ -794,32 +898,32 @@ export class Game {
     p.lumber -= cost.lumber || 0;
     return true;
   }
-  refund(p, cost) {
+  refund(p: Player, cost: Partial<Cost>): void {
     p.gold += cost.gold || 0;
     p.lumber += cost.lumber || 0;
   }
 
-  hasRequirement(p, req) {
+  hasRequirement(p: Player, req: string): boolean {
     const age = /^age(\d+)$/.exec(req);
     if (age) return p.tier >= Number(age[1]);
     return p.buildings.some((b) => !b.dead && !b.underConstruction && (b.type === req || (req === 'scouttower' && b.type === 'guardtower')));
   }
-  requirementName(req) {
+  requirementName(req: string): string {
     const m = /^age(\d+)$/.exec(req);
-    if (m) return AGE_NAMES[Number(m[1])];
+    if (m) return AGE_NAMES[Number(m[1])]!;
     return UNITS[req]?.name ?? req;
   }
-  missingRequirements(p, def) {
+  missingRequirements(p: Player, def: { requires?: string[] }): string[] {
     return (def.requires || []).filter((r) => !this.hasRequirement(p, r));
   }
 
   /** Ages are researched at the town center and never lost; hero generals stay at 0. */
-  updateTier(p) {
+  updateTier(p: Player): void {
     if (p.mode === 'empire') p.tier = Math.max(p.tier, 1);
   }
 
   /** Supply (army food) and housing for citizens. Houses only count while connected by road. */
-  computeFood(p) {
+  computeFood(p: Player): void {
     let cap = 0;
     let used = 0;
     let housing = 0;
@@ -829,12 +933,12 @@ export class Game {
         if (b.def.foodProvided) cap += b.def.foodProvided;
         if (b.def.housing) housing += b.def.housing;
         if (b.def.housingByAge && b.roadConnected) {
-          const h = b.def.housingByAge[b.ageLevel - 1] + (p.upgrades?.housing ?? 0);
+          const h = b.def.housingByAge[b.ageLevel - 1]! + (p.upgrades?.['housing'] ?? 0);
           cap += h;
           housing += h;
         }
       }
-      for (const q of b.trainQueue) used += UNITS[q.type].food;
+      for (const q of b.trainQueue) used += UNITS[q.type]!.food;
     }
     for (const u of p.units) {
       if (u.dead || u.summoned || u.isIllusion) continue;
@@ -850,9 +954,9 @@ export class Game {
    * Can `type` be placed centered at (x, z)? Sets this.placeReason when not.
    * Houses must touch one of the owner's roads; gates may replace the owner's walls.
    */
-  canPlace(type, x, z, p = null) {
-    const def = UNITS[type];
-    const fp = def.footprint;
+  canPlace(type: string, x: number, z: number, p: Player | null = null): boolean {
+    const def = UNITS[type]!;
+    const fp = def.footprint!;
     const cx = Math.round(x - fp / 2);
     const cz = Math.round(z - fp / 2);
     this.placeReason = "Can't build there";
@@ -890,16 +994,16 @@ export class Game {
   }
 
   /** The wall piece occupying a cell, if any. */
-  wallAt(cx, cz) {
+  wallAt(cx: number, cz: number): Unit | null {
     for (const u of this.unitsNear(cx + 0.5, cz + 0.5, 0.2)) {
       if (u.def.wall && !u.dead && u.cell.x === cx && u.cell.z === cz) return u;
     }
     return null;
   }
 
-  placeBuilding(builder, type, x, z) {
-    const def = UNITS[type];
-    const fp = def.footprint;
+  placeBuilding(builder: Unit, type: string, x: number, z: number): Unit | null {
+    const def = UNITS[type]!;
+    const fp = def.footprint!;
     const sx = this.snap(x, fp);
     const sz = this.snap(z, fp);
     if (!this.canPlace(type, sx, sz, builder.owner)) return null;
@@ -935,21 +1039,21 @@ export class Game {
     return b;
   }
 
-  progressConstruction(b, dt) {
+  progressConstruction(b: Unit, dt: number): void {
     if (b.buildFrame !== this.frame) {
       b.buildFrame = this.frame;
       b.buildersThisFrame = 0;
     }
     const f = b.buildersThisFrame === 0 ? 1 : 0.6;
-    b.buildersThisFrame++;
-    const speed = (b.owner.isHuman ? 1 : [0.85, 1, 1.15][this.difficulty]) * (1 + 0.1 * (b.owner.upgrades?.masonry ?? 0));
+    b.buildersThisFrame!++;
+    const speed = (b.owner.isHuman ? 1 : [0.85, 1, 1.15][this.difficulty]!) * (1 + 0.1 * (b.owner.upgrades?.['masonry'] ?? 0));
     const dp = (dt * f * speed) / b.def.buildTime;
     b.buildProgress = Math.min(1, b.buildProgress + dp);
     b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.9 * dp);
     if (b.buildProgress >= 1) this.finishConstruction(b);
   }
 
-  finishConstruction(b) {
+  finishConstruction(b: Unit): void {
     b.underConstruction = false;
     b.buildProgress = 1;
     this.updateTier(b.owner);
@@ -965,9 +1069,9 @@ export class Game {
     b.owner.ai?.onBuilt?.(b);
   }
 
-  trainUnit(b, type) {
+  trainUnit(b: Unit, type: string): boolean {
     const p = b.owner;
-    const def = UNITS[type];
+    const def = UNITS[type]!;
     if (b.underConstruction || b.dead) return false;
     if (b.trainQueue.length >= 5) {
       if (p.isHuman) this.message('The training queue is full.', '#ff8080');
@@ -987,18 +1091,18 @@ export class Game {
       return false;
     }
     if (!this.spend(p, def.cost)) return false;
-    b.trainQueue.push({ type, time: 0, total: def.buildTime * (p.isHuman ? 1 : [1.15, 1, 0.9][this.difficulty]) });
+    b.trainQueue.push({ type, time: 0, total: def.buildTime * (p.isHuman ? 1 : [1.15, 1, 0.9][this.difficulty]!) });
     return true;
   }
 
-  cancelTrain(b, index) {
+  cancelTrain(b: Unit, index: number): void {
     const q = b.trainQueue[index];
     if (!q) return;
     b.trainQueue.splice(index, 1);
-    this.refund(b.owner, UNITS[q.type].cost);
+    this.refund(b.owner, UNITS[q.type]!.cost);
   }
 
-  spawnPointNear(b, toward) {
+  spawnPointNear(b: Unit, toward: Point | null | undefined): Point {
     let dx = 0;
     let dz = 1;
     if (toward) {
@@ -1015,16 +1119,18 @@ export class Game {
     );
   }
 
-  finishTraining(b, type) {
+  finishTraining(b: Unit, type: string): Unit {
     const p = b.owner;
     const sp = this.spawnPointNear(b, b.rally);
     const u = this.spawnUnit(type, p, sp.x, sp.z, { facing: Math.atan2(sp.x - b.x, sp.z - b.z) });
     p.stats.unitsTrained++;
     if (b.rally) {
-      if (b.rally.target && u.def.worker && (b.rally.target.type === 'goldmine' || b.rally.target.lumber !== undefined)) {
-        this.issueOrder(u, { type: 'harvest', target: b.rally.target });
-      } else if (b.rally.target && !b.rally.target.dead && b.rally.target.isBuilding === false) {
-        this.issueOrder(u, { type: 'follow', target: b.rally.target });
+      // A rally target is a unit (a gold mine to harvest, a unit to follow) or a tree.
+      const rt = b.rally.target;
+      if (rt && u.def.worker && (('type' in rt && rt.type === 'goldmine') || ('lumber' in rt && rt.lumber !== undefined))) {
+        this.issueOrder(u, { type: 'harvest', target: rt });
+      } else if (rt && 'isBuilding' in rt && !rt.dead && rt.isBuilding === false) {
+        this.issueOrder(u, { type: 'follow', target: rt });
       } else {
         this.issueOrder(u, { type: 'move', point: { x: b.rally.x, z: b.rally.z } });
       }
@@ -1034,11 +1140,11 @@ export class Game {
     return u;
   }
 
-  startUpgrade(b) {
+  startUpgrade(b: Unit): boolean {
     const p = b.owner;
     const to = b.def.upgradesTo;
     if (!to || b.upgrading || b.underConstruction || b.trainQueue.length) return false;
-    const def = UNITS[to];
+    const def = UNITS[to]!;
     const missing = this.missingRequirements(p, def);
     if (missing.length) {
       if (p.isHuman) this.message(`Requires: ${missing.map((m) => this.requirementName(m)).join(', ')}.`, '#ff8080');
@@ -1049,26 +1155,27 @@ export class Game {
     return true;
   }
 
-  cancelUpgrade(b) {
+  cancelUpgrade(b: Unit): void {
     if (!b.upgrading) return;
-    this.refund(b.owner, b.upgrading.age ? AGES[b.upgrading.age].cost : UNITS[b.upgrading.to].cost);
+    this.refund(b.owner, b.upgrading.age ? AGES[b.upgrading.age]!.cost! : UNITS[b.upgrading.to!]!.cost);
     b.upgrading = null;
   }
 
-  finishUpgrade(b) {
-    if (b.upgrading.age) {
+  finishUpgrade(b: Unit): void {
+    const upgrading = b.upgrading!;
+    if (upgrading.age) {
       const p = b.owner;
-      p.tier = Math.max(p.tier, b.upgrading.age);
+      p.tier = Math.max(p.tier, upgrading.age);
       b.upgrading = null;
       this.onAgeAdvanced(p);
       return;
     }
-    const to = b.upgrading.to;
+    const to = upgrading.to!;
     b.upgrading = null;
     const ratio = b.hp / b.maxHp;
     const p = b.owner;
     const before = p.tier;
-    b.def = UNITS[to];
+    b.def = UNITS[to]!;
     b.type = to;
     b.hp = b.maxHp * ratio;
     this.updateTier(p);
@@ -1081,7 +1188,7 @@ export class Game {
   }
 
   /** A general reached a new age: houses, walls and gates rebuild in the new style. */
-  onAgeAdvanced(p) {
+  onAgeAdvanced(p: Player): void {
     const age = AGE_NAMES[p.tier];
     if (p.isHuman) {
       this.sound('levelUp');
@@ -1100,7 +1207,7 @@ export class Game {
     this.hooks.onAgeAdvanced?.(p);
   }
 
-  upgradeStructureAge(b, tier) {
+  upgradeStructureAge(b: Unit, tier: number): void {
     if (b.dead || b.ageLevel >= tier) return;
     const ratio = b.hp / b.maxHp;
     b.ageLevel = tier;
@@ -1111,17 +1218,17 @@ export class Game {
   }
 
   /** Can `upg` be researched one more level by p right now (ignoring cost)? */
-  researchState(p, upg) {
+  researchState(p: Player, upg: string): { lvl: number; cap: number; busy: boolean } {
     const lvl = p.upgrades[upg] ?? 0;
     return { lvl, cap: researchCap(p), busy: !!p.researchingUpg?.[upg] };
   }
 
-  startResearch(b, upg) {
+  startResearch(b: Unit, upg: string): boolean {
     const p = b.owner;
     const { lvl, cap, busy } = this.researchState(p, upg);
     if (b.researching || b.underConstruction || busy) return false;
     if (lvl >= cap) {
-      if (p.isHuman) this.message(`Advance to the next age to research ${UPGRADES[upg].name} further.`, '#ff8080');
+      if (p.isHuman) this.message(`Advance to the next age to research ${UPGRADES[upg]!.name} further.`, '#ff8080');
       return false;
     }
     if (!this.spend(p, researchCost(upg, lvl))) return false;
@@ -1130,51 +1237,51 @@ export class Game {
     return true;
   }
 
-  cancelResearch(b) {
+  cancelResearch(b: Unit): void {
     if (!b.researching) return;
     const p = b.owner;
     const { upg } = b.researching;
-    this.refund(p, researchCost(upg, p.upgrades[upg]));
-    p.researchingUpg[upg] = false;
+    this.refund(p, researchCost(upg, p.upgrades[upg]!));
+    p.researchingUpg![upg] = false;
     b.researching = null;
   }
 
-  finishResearch(b) {
+  finishResearch(b: Unit): void {
     const p = b.owner;
-    const { upg } = b.researching;
+    const { upg } = b.researching!;
     b.researching = null;
     // Health research keeps every unit's health fraction.
     const scale = upg === 'vitality' || upg === 'masonry';
-    const before = scale ? new Map([...p.units, ...p.buildings].map((u) => [u, u.maxHp])) : null;
-    p.upgrades[upg]++;
-    p.researchingUpg[upg] = false;
+    const before = scale ? new Map([...p.units, ...p.buildings].map((u): [Unit, number] => [u, u.maxHp])) : null;
+    p.upgrades[upg]!++;
+    p.researchingUpg![upg] = false;
     if (before) for (const [u, m] of before) if (!u.dead) u.hp = Math.min(u.maxHp, u.hp * (u.maxHp / m));
     if (upg === 'housing') this.computeFood(p);
     if (p.isHuman) {
       this.sound('buildComplete', b.x, b.z);
-      this.message(`Research complete: ${UPGRADES[upg].name} level ${p.upgrades[upg]} (${UPGRADES[upg].effect}).`, '#9fe89f');
+      this.message(`Research complete: ${UPGRADES[upg]!.name} level ${p.upgrades[upg]} (${UPGRADES[upg]!.effect}).`, '#9fe89f');
     }
   }
 
-  collapseMine(mine) {
+  collapseMine(mine: Unit): void {
     if (mine.dead) return;
     this.message('A gold mine has collapsed!', '#ffd700');
     this.kill(mine, null);
   }
 
   // ------------------------------------------------------------- items
-  heroOf(p) {
+  heroOf(p: Player): Unit | null {
     return p.hero && !p.hero.dead ? p.hero : null;
   }
 
-  shopCustomer(p, shop) {
+  shopCustomer(p: Player, shop: Unit): Unit | null {
     const h = this.heroOf(p);
     if (h && h.distTo(shop) <= shop.radius + 7) return h;
     return null;
   }
 
-  buyItem(p, shop, itemId) {
-    const item = ITEMS[itemId];
+  buyItem(p: Player, shop: Unit, itemId: string): boolean {
+    const item = ITEMS[itemId]!;
     const h = this.shopCustomer(p, shop);
     if (!h) {
       if (p.isHuman) {
@@ -1184,8 +1291,9 @@ export class Game {
       return false;
     }
     // Stack consumables of the same kind.
-    let slot = h.inventory.findIndex((s) => s && s.id === itemId && item.use && item.charges);
-    if (slot < 0) slot = h.inventory.findIndex((s) => s === null);
+    const inv = h.inventory!;
+    let slot = inv.findIndex((s) => s && s.id === itemId && item.use && item.charges);
+    if (slot < 0) slot = inv.findIndex((s) => s === null);
     if (slot < 0) {
       if (p.isHuman) {
         this.message('Inventory is full.', '#ff8080');
@@ -1194,25 +1302,26 @@ export class Game {
       return false;
     }
     if (!this.spend(p, { gold: item.cost })) return false;
-    if (h.inventory[slot]) h.inventory[slot].charges += item.charges;
-    else h.inventory[slot] = { id: itemId, charges: item.charges ?? 0 };
+    const stack = inv[slot];
+    if (stack) stack.charges += item.charges!;
+    else inv[slot] = { id: itemId, charges: item.charges ?? 0 };
     if (p.isHuman) this.sound('buy', shop.x, shop.z);
     if (item.stats?.hp) h.hp += item.stats.hp;
     return true;
   }
 
-  sellItem(h, slot) {
-    const it = h.inventory[slot];
+  sellItem(h: Unit, slot: number): void {
+    const it = h.inventory![slot];
     if (!it) return;
     const shop = this.units.find((s) => s.def.shop && !s.dead && h.distTo(s) < s.radius + 7);
     if (!shop) {
       if (h.owner.isHuman) this.message('Your Hero must be near a shop to sell items.', '#ff8080');
       return;
     }
-    const def = ITEMS[it.id];
+    const def = ITEMS[it.id]!;
     const value = Math.round(((def.cost ?? 100) * 0.5 * (def.use ? Math.max(1, it.charges) / (def.charges || 1) : 1)));
     h.owner.gold += value;
-    h.inventory[slot] = null;
+    h.inventory![slot] = null;
     h.hp = Math.min(h.hp, h.maxHp);
     if (h.owner.isHuman) {
       this.sound('buy', h.x, h.z);
@@ -1220,8 +1329,8 @@ export class Game {
     }
   }
 
-  hireMerc(p, camp, type) {
-    const def = UNITS[type];
+  hireMerc(p: Player, camp: Unit, type: string): Unit | false {
+    const def = UNITS[type]!;
     const near = p.units.find((u) => !u.dead && u.distTo(camp) <= camp.radius + 7);
     if (!near) {
       if (p.isHuman) {
@@ -1230,7 +1339,7 @@ export class Game {
       }
       return false;
     }
-    if ((camp.stock[type] ?? 0) < 1) {
+    if ((camp.stock![type] ?? 0) < 1) {
       if (p.isHuman) this.message('No mercenaries of that kind are available yet.', '#ff8080');
       return false;
     }
@@ -1243,7 +1352,7 @@ export class Game {
       return false;
     }
     if (!this.spend(p, def.cost)) return false;
-    camp.stock[type]--;
+    camp.stock![type]!--;
     const sp = this.spawnPointNear(camp, near);
     const u = this.spawnUnit(type, p, sp.x, sp.z, { facing: Math.atan2(near.x - sp.x, near.z - sp.z) });
     if (p.hero && !p.hero.dead) this.issueOrder(u, { type: 'follow', target: p.hero });
@@ -1251,41 +1360,43 @@ export class Game {
     return u;
   }
 
-  dropItem(x, z, itemId) {
-    const it = { id: itemId, x, z, taken: false, spawnTime: this.time };
+  dropItem(x: number, z: number, itemId: string): GroundItem {
+    const it: GroundItem = { id: itemId, x, z, taken: false, spawnTime: this.time };
     this.groundItems.push(it);
     this.hooks.onItemDropped?.(it);
     return it;
   }
 
-  pickupItem(h, it) {
+  pickupItem(h: Unit, it: GroundItem): boolean {
     if (!h.isHero || h.isIllusion || it.taken) return false;
-    const def = ITEMS[it.id];
+    const def = ITEMS[it.id]!;
     if (def.autoUse) {
       it.taken = true;
       this.applyItemEffect(h, def);
       this.hooks.onItemTaken?.(it);
       return true;
     }
-    let slot = h.inventory.findIndex((s) => s && s.id === it.id && def.use && def.charges);
-    if (slot < 0) slot = h.inventory.findIndex((s) => s === null);
+    const inv = h.inventory!;
+    let slot = inv.findIndex((s) => s && s.id === it.id && def.use && def.charges);
+    if (slot < 0) slot = inv.findIndex((s) => s === null);
     if (slot < 0) {
       if (h.owner.isHuman) this.message('Inventory is full.', '#ff8080');
       return false;
     }
     it.taken = true;
-    if (h.inventory[slot]) h.inventory[slot].charges += def.charges;
-    else h.inventory[slot] = { id: it.id, charges: def.charges ?? 0 };
+    const stack = inv[slot];
+    if (stack) stack.charges += def.charges!;
+    else inv[slot] = { id: it.id, charges: def.charges ?? 0 };
     if (def.stats?.hp) h.hp += def.stats.hp;
     this.hooks.onItemTaken?.(it);
     if (h.owner.isHuman) this.message(`Picked up ${def.name}.`, '#ffd700');
     return true;
   }
 
-  useItem(h, slot) {
-    const it = h.inventory[slot];
+  useItem(h: Unit, slot: number): boolean {
+    const it = h.inventory![slot];
     if (!it || h.dead) return false;
-    const def = ITEMS[it.id];
+    const def = ITEMS[it.id]!;
     if (!def.use) return false;
     if (def.use === 'heal' && h.hp >= h.maxHp) {
       if (h.owner.isHuman) this.message('Already at full health.', '#ccc');
@@ -1295,47 +1406,47 @@ export class Game {
       if (h.owner.isHuman) this.message('Already at full mana.', '#ccc');
       return false;
     }
-    if (h.itemCooldown > this.time) return false;
+    if (h.itemCooldown! > this.time) return false;
     h.itemCooldown = this.time + 0.5;
     this.applyItemEffect(h, def);
     it.charges--;
-    if (it.charges <= 0) h.inventory[slot] = null;
+    if (it.charges <= 0) h.inventory![slot] = null;
     return true;
   }
 
-  applyItemEffect(h, def) {
+  applyItemEffect(h: Unit, def: ItemDef): void {
     switch (def.use) {
       case 'heal':
-        this.heal(h, def.amount, h);
+        this.heal(h, def.amount!, h);
         this.hooks.fx?.burst(h.x, 0.8, h.z, 0x7cfc00, 12);
         this.sound('heal', h.x, h.z, 0.6);
         break;
       case 'mana':
-        h.mana = Math.min(h.maxMana, h.mana + def.amount);
+        h.mana = Math.min(h.maxMana, h.mana + def.amount!);
         this.hooks.fx?.burst(h.x, 0.8, h.z, 0x6fa8ff, 12);
         this.sound('magicCast', h.x, h.z, 0.6);
         break;
       case 'xp':
-        this.addXp(h, def.amount);
+        this.addXp(h, def.amount!);
         this.hooks.fx?.burst(h.x, 0.8, h.z, 0xffd700, 12);
         break;
       case 'str':
       case 'agi':
       case 'int': {
         const hpRatio = h.hp / h.maxHp;
-        h.tomes[def.use] += def.amount;
+        h.tomes![def.use] += def.amount!;
         h.hp = h.maxHp * hpRatio;
         this.hooks.fx?.burst(h.x, 0.8, h.z, 0xffd700, 12);
         if (h.owner.isHuman) this.message(`${def.name}: +${def.amount} ${def.use.toUpperCase()}.`, '#ffd700');
         break;
       }
       case 'areaHeal':
-        for (const u of this.unitsNear(h.x, h.z, 6)) if (u.owner === h.owner && !u.isBuilding) this.heal(u, def.amount, h);
+        for (const u of this.unitsNear(h.x, h.z, 6)) if (u.owner === h.owner && !u.isBuilding) this.heal(u, def.amount!, h);
         this.hooks.fx?.ring(h.x, h.z, 0x7cfc00, 6, 0.7);
         this.sound('heal', h.x, h.z);
         break;
       case 'gold':
-        h.owner.gold += def.amount;
+        h.owner.gold += def.amount!;
         if (h.owner.isHuman) this.floatText(h.x, h.z, `+${def.amount}`, '#ffd700', 1.6);
         this.sound('gold', h.x, h.z);
         break;
@@ -1346,13 +1457,13 @@ export class Game {
     }
   }
 
-  homeOf(p) {
-    const ok = (x) => !x.dead && !x.underConstruction;
+  homeOf(p: Player): Unit | null {
+    const ok = (x: Unit): boolean => !x.dead && !x.underConstruction;
     const b = p.buildings.find((x) => ok(x) && (x.def.dropOff === true || x.def.revivesHeroes)) ?? p.buildings.find((x) => ok(x) && x.def.dropOff);
     return b || null;
   }
 
-  townPortal(h) {
+  townPortal(h: Unit): void {
     const home = this.homeOf(h.owner);
     if (!home) {
       if (h.owner.isHuman) this.message('You have no base to return to.', '#ff8080');
@@ -1377,7 +1488,7 @@ export class Game {
     });
   }
 
-  reviveHero(p) {
+  reviveHero(p: Player): void {
     const h = p.hero;
     const altar = p.buildings.find((b) => b.def.revivesHeroes && !b.dead && !b.underConstruction);
     if (!h || !h.dead || !altar) return;
@@ -1407,14 +1518,14 @@ export class Game {
     p.ai?.onHeroRevived?.(h);
   }
 
-  aggroCamp(creep, target) {
+  aggroCamp(creep: Unit, target: Unit): void {
     if (creep.camp) this.creepMgr.aggro(creep.camp, target);
     else if (creep.guardPos) {
       creep.order = { type: 'attack', target, auto: true, anchor: creep.guardPos, leash: creep.guardPos.leash ?? 12 };
     }
   }
 
-  onKalendenSlain(killer) {
+  onKalendenSlain(killer: Unit | null | undefined): void {
     const p = killer?.owner?.general ? killer.owner : null;
     this.kalendenSlainBy = p;
     this.sound('roar');
@@ -1427,14 +1538,14 @@ export class Game {
     }
   }
 
-  endGame(victory, text) {
+  endGame(victory: boolean, text: string): void {
     if (this.over) return;
     this.over = { victory, text, time: this.time };
     this.sound(victory ? 'victory' : 'defeat');
     this.hooks.onGameOver?.(this.over);
   }
 
-  checkDefeats() {
+  checkDefeats(): void {
     for (const p of this.generals) {
       if (p.defeated) continue;
       const hasBuilding = p.buildings.some((b) => !b.dead && !b.def.wall && !b.def.gate); // fortifications alone don't count
@@ -1455,7 +1566,7 @@ export class Game {
               this.sound('warning');
             } else this.notify(p, `${p.name} has lost their last town center!`);
           }
-          if (this.time - p.hallLostAt >= 20) out = true;
+          if (this.time - p.hallLostAt! >= 20) out = true;
         }
       }
       if (out) {
@@ -1467,7 +1578,7 @@ export class Game {
         else this.message(`${p.name} has been defeated!`, this.isAlliedToHuman(p) ? '#ff8a7a' : '#ffd700');
       }
     }
-    const home = (p) => p.homeTeam ?? p.team;
+    const home = (p: Player): number | undefined => p.homeTeam ?? p.team;
     const enemies = this.generals.filter((p) => home(p) !== home(this.human));
     if (!this.over && enemies.length && enemies.every((p) => p.defeated) && !this.human.defeated) {
       this.endGame(true, 'All rival generals have fallen. The land of Kalenden bows before you!');
@@ -1475,12 +1586,12 @@ export class Game {
   }
 
   /** Change a general's team (Heroes hired by an empire fight on its side). */
-  setTeam(p, team) {
+  setTeam(p: Player, team: number): void {
     if (p.team === team) return;
     p.team = team;
     for (const b of p.buildings) {
       if (b.dead || !b.def.gate) continue;
-      const fp = b.def.footprint;
+      const fp = b.def.footprint!;
       for (let zz = b.cell.z; zz < b.cell.z + fp; zz++) {
         for (let xx = b.cell.x; xx < b.cell.x + fp; xx++) if (this.grid.inBounds(xx, zz)) this.grid.gateTeam[zz * MAP_SIZE + xx] = team;
       }
@@ -1488,10 +1599,12 @@ export class Game {
     // Nobody keeps fighting a new friend.
     for (const u of this.units) {
       if (u.dead) continue;
-      const t = u.order.target;
-      if (t?.owner && (t.owner === p || u.owner === p) && !this.isEnemy(u.owner, t.owner) && (u.order.type === 'attack')) {
-        u.order = { type: 'idle' };
-        u.path = null;
+      if (u.order.type === 'attack') {
+        const t = u.order.target;
+        if (t?.owner && (t.owner === p || u.owner === p) && !this.isEnemy(u.owner, t.owner)) {
+          u.order = { type: 'idle' };
+          u.path = null;
+        }
       }
       if (u.windupTarget?.owner && !this.isEnemy(u.owner, u.windupTarget.owner)) u.windupTarget = null;
     }
@@ -1499,27 +1612,27 @@ export class Game {
   }
 
   // ------------------------------------------------------------- feedback
-  message(text, color = '#fff') {
+  message(text: string, color = '#fff'): void {
     this.messages.push({ text, color, time: performance.now() });
     if (this.messages.length > 8) this.messages.shift();
   }
-  floatText(x, z, text, color = '#fff', size = 1) {
+  floatText(x: number, z: number, text: string, color = '#fff', size = 1): void {
     if (!this.fog.isVisible(x, z)) return;
     this.floats.push({ x, z, y: this.terrain.heightAt(x, z) + 2.2, text, color, size, t: 0 });
   }
-  ping(x, z, color = '#ff3333') {
+  ping(x: number, z: number, color = '#ff3333'): void {
     this.pings.push({ x, z, color, t: 0 });
   }
-  sound(name, x, z, vol = 1) {
-    if (x !== undefined && !this.fog.isVisible(x, z)) return;
+  sound(name: string, x?: number, z?: number, vol = 1): void {
+    if (x !== undefined && !this.fog.isVisible(x, z!)) return;
     this.hooks.sound?.(name, vol, x, z);
   }
-  shake(amount) {
+  shake(amount: number): void {
     this.shakeAmount = Math.max(this.shakeAmount, amount);
   }
 
   // --------------------------------------------------------------- update
-  update(dt) {
+  update(dt: number): void {
     if (this.over && this.time - this.over.time > 4) {
       // Keep the world animating behind the end screen, but slowly.
       dt *= 0.25;
@@ -1540,7 +1653,7 @@ export class Game {
     }
 
     const list = this.units;
-    for (let i = 0; i < list.length; i++) updateUnit(this, list[i], dt);
+    for (let i = 0; i < list.length; i++) updateUnit(this, list[i]!, dt);
 
     this.separate(dt);
     this.grid.passTeam = -99;
@@ -1586,7 +1699,7 @@ export class Game {
     this.shakeAmount = Math.max(0, this.shakeAmount - dt * 1.5);
   }
 
-  heroUpkeep() {
+  heroUpkeep(): void {
     for (const p of this.generals) {
       if (p.defeated) continue;
       // Hero-path generals receive tribute from their followers.
@@ -1604,15 +1717,15 @@ export class Game {
     // Mercenary stock
     for (const u of this.passive.buildings) {
       if (!u.stock) continue;
-      u.stockTimer += 0.25;
-      if (u.stockTimer >= 45) {
+      u.stockTimer! += 0.25;
+      if (u.stockTimer! >= 45) {
         u.stockTimer = 0;
-        for (const k in u.stock) u.stock[k] = Math.min(2, u.stock[k] + 1);
+        for (const k in u.stock) u.stock[k] = Math.min(2, u.stock[k]! + 1);
       }
     }
   }
 
-  itemPickups() {
+  itemPickups(): void {
     if (!this.groundItems.length) return;
     for (const it of this.groundItems) {
       if (it.taken) continue;
@@ -1623,16 +1736,16 @@ export class Game {
     this.groundItems = this.groundItems.filter((i) => !i.taken);
   }
 
-  applyAuras() {
+  applyAuras(): void {
     for (const u of this.units) {
       if (u.dead || !u.isHero || u.isIllusion) continue;
-      for (const id of u.heroDef.abilities) {
-        const ab = ABILITIES[id];
+      for (const id of u.heroDef!.abilities) {
+        const ab = ABILITIES[id]!;
         if (ab.target !== 'aura') continue;
         const lvl = u.abilityLevel(id);
         if (lvl <= 0) continue;
-        const mods = ab.aura(lvl);
-        for (const t of this.unitsNear(u.x, u.z, ab.radius)) {
+        const mods = ab.aura!(lvl);
+        for (const t of this.unitsNear(u.x, u.z, ab.radius!)) {
           if (t.isBuilding || !this.isAlly(u.owner, t.owner)) continue;
           t.addBuff(`aura_${id}`, 1.0, { ...mods, replace: true, aura: true });
         }
@@ -1640,7 +1753,7 @@ export class Game {
     }
   }
 
-  fountains() {
+  fountains(): void {
     for (const f of this.passive.buildings) {
       if (f.type !== 'fountain') continue;
       for (const u of this.unitsNear(f.x, f.z, 5)) {
@@ -1663,7 +1776,7 @@ export class Game {
   }
 
   /** Push overlapping ground units apart. */
-  separate(dt) {
+  separate(dt: number): void {
     const grid = this.grid;
     for (const u of this.units) {
       if (u.dead || u.isBuilding || u.hidden) continue;
@@ -1676,8 +1789,8 @@ export class Game {
         const min = (u.radius + o.radius) * 0.9;
         if (d >= min) continue;
         const overlap = min - d;
-        let nx;
-        let nz;
+        let nx: number;
+        let nz: number;
         if (d < 1e-4) {
           const a = Math.random() * Math.PI * 2;
           nx = Math.cos(a);
@@ -1711,7 +1824,7 @@ export class Game {
     }
   }
 
-  pushWeight(u) {
+  pushWeight(u: Unit): number {
     if (u.moving) return 0.35;
     if (u.windup > 0 || u.anim === 'attack' || u.order.type === 'construct' || u.harvest?.phase === 'chop') return 0.25;
     if (u.def.boss) return 0.05;

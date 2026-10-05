@@ -2,23 +2,51 @@
 // (from Love down to Hate, when they riot), advancing through the ages at the town center,
 // hiring Heroes, and nuclear missiles.
 import { UNITS, AGES, MAX_AGE, AGE_NAMES, ECONOMY } from '../data/units.ts';
-import { findNearestTree } from './behavior.js';
+import { findNearestTree } from './behavior.ts';
+import type { AgeDef, Mood } from '../data/types.ts';
+import type { Game } from './game.ts';
+import type { Unit } from './unit.ts';
+import type { EmpirePlayer, Player } from './types.ts';
+import { isEmpire } from './types.ts';
 
-export function moodOf(h) {
-  return ECONOMY.moods.find((m) => h >= m.min) ?? ECONOMY.moods[ECONOMY.moods.length - 1];
+export function moodOf(h: number): Mood {
+  return ECONOMY.moods.find((m) => h >= m.min) ?? ECONOMY.moods[ECONOMY.moods.length - 1]!;
 }
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v));
+
+/** An empire's offer to hire the human's Hero (waiting for an answer). */
+export interface HireOffer {
+  from: Player;
+  to: Player;
+  fee: number;
+  expires: number;
+}
+/** A nuclear missile in flight. */
+export interface Nuke {
+  x: number;
+  z: number;
+  owner: Player;
+  silo: Unit;
+  t: number;
+  flight: number;
+}
 
 export class Empires {
-  constructor(game) {
+  readonly game: Game;
+  timer: number;
+  nukes: Nuke[];
+  offers: HireOffer[];
+
+  constructor(game: Game) {
     this.game = game;
     this.timer = 0;
     this.nukes = [];
     this.offers = [];
   }
 
-  init(p) {
+  /** Give an empire general its citizens and economy. */
+  init(p: Player): asserts p is EmpirePlayer {
     p.food = 150;
     p.citizens = 5;
     p.housing = 5;
@@ -37,15 +65,15 @@ export class Empires {
   }
 
   // ---------------------------------------------------------------- update
-  update(dt) {
+  update(dt: number): void {
     const g = this.game;
     this.timer += dt;
     while (this.timer >= 0.5) {
       this.timer -= 0.5;
       for (const p of g.generals) {
         if (p.defeated) continue;
-        if (p.mode === 'empire') this.economy(p, 0.5);
-        if (p.hiredBy && (g.time >= p.contractEnds || p.hiredBy.defeated)) this.endContract(p);
+        if (isEmpire(p)) this.economy(p, 0.5);
+        if (p.hiredBy && (g.time >= p.contractEnds! || p.hiredBy.defeated)) this.endContract(p);
       }
       this.offers = this.offers.filter((o) => {
         if (g.time < o.expires && !o.to.hiredBy && !o.from.defeated) return true;
@@ -57,19 +85,19 @@ export class Empires {
     this.updateNukes(dt);
   }
 
-  housesOf(p) {
+  housesOf(p: Player): Unit[] {
     return p.buildings.filter((b) => !b.dead && b.def.needsRoad && !b.underConstruction);
   }
 
-  economy(p, dt) {
+  economy(p: EmpirePlayer, dt: number): void {
     const g = this.game;
     // Food: farms grow it, citizens eat their rations.
     let produced = 0;
     for (const b of p.buildings) {
       if (b.dead || b.underConstruction || !b.def.foodRateByAge) continue;
-      produced += b.def.foodRateByAge[b.ageLevel - 1];
+      produced += b.def.foodRateByAge[b.ageLevel - 1]!;
     }
-    produced *= 1 + 0.1 * (p.upgrades?.agriculture ?? 0);
+    produced *= 1 + 0.1 * (p.upgrades?.['agriculture'] ?? 0);
     produced *= g.events?.harvestMult(p) ?? 1;
     const eaten = p.citizens * p.rations * ECONOMY.foodPerRation;
     p.foodProduced = produced;
@@ -91,9 +119,9 @@ export class Empires {
     // Rations please the people (less so once they are already well fed); every point of tax angers them.
     const r = p.rations;
     const rationJoy = r <= 20 ? (r - 10) * 3 : 30 + (r - 20) * 1.5;
-    let target = 55 + rationJoy - (p.tax - 3) * 7 + roadBonus - p.unrest + 3 * (p.upgrades?.civics ?? 0);
+    let target = 55 + rationJoy - (p.tax - 3) * 7 + roadBonus - p.unrest + 3 * (p.upgrades?.['civics'] ?? 0);
     if (p.starving) target -= 35;
-    if (p.citizens > p.housing + 0.5) target -= 10;
+    if (p.citizens > p.housing! + 0.5) target -= 10;
     // Big cities are harder to keep content (roads help).
     p.crowding = Math.min(15, Math.max(0, (p.citizens - 80) / 25));
     target -= p.crowding;
@@ -111,18 +139,18 @@ export class Empires {
 
     // Citizens move into free homes while the people are content, and leave when they starve.
     if (p.starving) p.citizens = Math.max(0, p.citizens - Math.max(0.15, p.citizens * 0.01) * dt);
-    else if (p.citizens < p.housing && mood.growth > 0) {
-      p.citizens = Math.min(p.housing, p.citizens + (0.2 + 0.012 * p.citizens) * mood.growth * dt);
+    else if (p.citizens < p.housing! && mood.growth > 0) {
+      p.citizens = Math.min(p.housing!, p.citizens + (0.2 + 0.012 * p.citizens) * mood.growth * dt);
     }
-    if (p.citizens > p.housing) p.citizens = Math.max(p.housing, p.citizens - 0.5 * dt);
+    if (p.citizens > p.housing!) p.citizens = Math.max(p.housing!, p.citizens - 0.5 * dt);
     if (mood.name === 'Hate') p.citizens = Math.max(0, p.citizens - 0.08 * dt);
 
     // Taxes: no income while the people starve or hate you.
-    const mult = p.starving ? 0 : mood.income * (g.events?.incomeMult(p) ?? 1) * (1 + 0.05 * (p.upgrades?.commerce ?? 0)) * (p.isHuman ? 1 : p.handicap ?? 1);
+    const mult = p.starving ? 0 : mood.income * (g.events?.incomeMult(p) ?? 1) * (1 + 0.05 * (p.upgrades?.['commerce'] ?? 0)) * (p.isHuman ? 1 : p.handicap ?? 1);
     p.taxRate = p.citizens * p.tax * ECONOMY.taxPerCitizen * mult;
     const gold = p.taxRate * dt;
     p.gold += gold;
-    p.stats.taxCollected += gold;
+    p.stats.taxCollected! += gold;
 
     // Riots when the people are unhappy.
     if (mood.name === 'Unhappy' || mood.name === 'Hate') {
@@ -135,16 +163,16 @@ export class Empires {
   }
 
   /** Infantry type of an age (used for rebels and as a sensible default). */
-  footSoldier(age) {
-    const list = UNITS.barracks.trains.filter((t) => UNITS[t].age === age);
+  footSoldier(age: number): string {
+    const list = UNITS['barracks']!.trains!.filter((t) => UNITS[t]!.age === age);
     return list[0] ?? 'caveman';
   }
 
-  riot(p) {
+  riot(p: EmpirePlayer): void {
     const g = this.game;
     if (p.citizens < 4) return;
     const homes = this.housesOf(p);
-    const at = homes.length ? homes[Math.floor(Math.random() * homes.length)] : p.buildings.find((b) => !b.dead && b.def.tier);
+    const at = homes.length ? homes[Math.floor(Math.random() * homes.length)]! : p.buildings.find((b) => !b.dead && b.def.tier);
     if (!at) return;
     const n = Math.min(6, 1 + Math.floor(p.citizens / 25));
     const type = this.footSoldier(Math.max(1, p.tier));
@@ -165,24 +193,24 @@ export class Empires {
   }
 
   // ------------------------------------------------------------ settings
-  setTax(p, v) {
+  setTax(p: EmpirePlayer, v: number): void {
     p.tax = Math.max(0, Math.round(v)); // no upper limit
   }
-  setRations(p, v) {
+  setRations(p: EmpirePlayer, v: number): void {
     p.rations = Math.max(0, Math.round(v)); // no upper limit
   }
 
   // ---------------------------------------------------------------- ages
-  nextAge(p) {
-    return p.tier < MAX_AGE ? AGES[p.tier + 1] : null;
+  nextAge(p: Player): AgeDef | null {
+    return p.tier < MAX_AGE ? AGES[p.tier + 1]! : null;
   }
-  ageMissing(p) {
+  ageMissing(p: Player): string[] {
     const a = this.nextAge(p);
     if (!a) return [];
     return (a.requires ?? []).filter((r) => !this.game.hasRequirement(p, r));
   }
   /** Begin researching the next age at a town center. */
-  startAgeUp(b) {
+  startAgeUp(b: Unit): boolean {
     const g = this.game;
     const p = b.owner;
     const a = this.nextAge(p);
@@ -193,26 +221,26 @@ export class Empires {
       if (p.isHuman) g.message(`Requires: ${missing.map((m) => g.requirementName(m)).join(', ')}.`, '#ff8080');
       return false;
     }
-    if (!g.spend(p, a.cost)) return false;
-    b.upgrading = { age: p.tier + 1, time: 0, total: a.time * (p.isHuman ? 1 : [1.15, 1, 0.9][g.difficulty]) };
+    if (!g.spend(p, a.cost!)) return false;
+    b.upgrading = { age: p.tier + 1, time: 0, total: a.time! * (p.isHuman ? 1 : [1.15, 1, 0.9][g.difficulty]!) };
     return true;
   }
 
   // ---------------------------------------------------------------- hiring
-  hireFee(hg) {
+  hireFee(hg: Player): number {
     return Math.round(ECONOMY.hireFee(hg.hero?.level ?? 1));
   }
-  canHire(emp, hg) {
-    return (
+  canHire(emp: Player, hg: Player | null | undefined): hg is Player {
+    return !!(
       hg && hg !== emp && hg.mode === 'hero' && !hg.defeated && !hg.hiredBy && hg.hero && !hg.hero.dead &&
       hg.team !== emp.team && !emp.defeated
     );
   }
-  heroesForHire(emp) {
+  heroesForHire(emp: Player): Player[] {
     return this.game.generals.filter((hg) => this.canHire(emp, hg));
   }
   /** An empire asks a Hero to fight for it. AI Heroes take the gold; the player is asked. */
-  hire(emp, hg) {
+  hire(emp: Player, hg: Player): boolean {
     const g = this.game;
     if (!this.canHire(emp, hg)) return false;
     const fee = this.hireFee(hg);
@@ -234,7 +262,7 @@ export class Empires {
     this.startContract(emp, hg, fee);
     return true;
   }
-  acceptOffer(o) {
+  acceptOffer(o: HireOffer): void {
     this.offers = this.offers.filter((x) => x !== o);
     this.game.hooks.onOffersChanged?.();
     if (!this.canHire(o.from, o.to) || o.from.gold < o.fee) {
@@ -243,35 +271,35 @@ export class Empires {
     }
     this.startContract(o.from, o.to, o.fee);
   }
-  declineOffer(o) {
+  declineOffer(o: HireOffer): void {
     this.offers = this.offers.filter((x) => x !== o);
     this.game.hooks.onOffersChanged?.();
   }
-  startContract(emp, hg, fee) {
+  startContract(emp: Player, hg: Player, fee: number): void {
     const g = this.game;
     emp.gold -= fee;
     hg.gold += fee;
     hg.hiredBy = emp;
     hg.contractEnds = g.time + ECONOMY.hireTime;
-    g.setTeam(hg, emp.team);
-    const text = `${hg.name}'s ${hg.hero.def.name} has been hired by ${emp.name} for ${fee} gold.`;
+    g.setTeam(hg, emp.team!);
+    const text = `${hg.name}'s ${hg.hero!.def.name} has been hired by ${emp.name} for ${fee} gold.`;
     if (hg.isHuman) g.message(`You are now fighting for ${emp.name} for ${ECONOMY.hireTime / 60} minutes (+${fee} gold). Their enemies are your enemies.`, '#ffe680');
-    else if (emp.isHuman) g.message(`${hg.name}'s ${hg.hero.def.name} now fights for you for ${ECONOMY.hireTime / 60} minutes.`, '#9fe89f');
+    else if (emp.isHuman) g.message(`${hg.name}'s ${hg.hero!.def.name} now fights for you for ${ECONOMY.hireTime / 60} minutes.`, '#9fe89f');
     else g.notify(emp, text);
     if (hg.isHuman || emp.isHuman) g.sound('buildComplete');
   }
-  endContract(hg) {
+  endContract(hg: Player): void {
     const g = this.game;
-    const emp = hg.hiredBy;
+    const emp = hg.hiredBy!;
     hg.hiredBy = null;
     hg.contractEnds = 0;
-    g.setTeam(hg, hg.homeTeam ?? hg.team);
+    g.setTeam(hg, (hg.homeTeam ?? hg.team)!);
     if (hg.isHuman) g.message(`Your contract with ${emp.name} has ended.`, '#ffe680');
     else if (emp.isHuman) g.message(`${hg.name}'s ${hg.hero?.def.name ?? 'Hero'} has finished serving you.`, '#ffe680');
   }
 
   // ----------------------------------------------------------------- nukes
-  startNuke(b) {
+  startNuke(b: Unit): boolean {
     const g = this.game;
     const p = b.owner;
     if (!b.def.nukes || b.underConstruction || b.nukeReady || b.nukeBuild) return false;
@@ -279,12 +307,12 @@ export class Empires {
     b.nukeBuild = { time: 0, total: ECONOMY.nuke.time };
     return true;
   }
-  cancelNuke(b) {
+  cancelNuke(b: Unit): void {
     if (!b.nukeBuild) return;
     this.game.refund(b.owner, ECONOMY.nuke.cost);
     b.nukeBuild = null;
   }
-  silos(dt) {
+  silos(dt: number): void {
     const g = this.game;
     for (const p of g.generals) {
       for (const b of p.buildings) {
@@ -301,20 +329,20 @@ export class Empires {
       }
     }
   }
-  launchNuke(b, x, z) {
+  launchNuke(b: Unit, x: number, z: number): boolean {
     const g = this.game;
     if (!b.nukeReady || b.dead) return false;
     b.nukeReady = false;
-    const n = { x, z, owner: b.owner, silo: b, t: 0, flight: ECONOMY.nuke.flight };
+    const n: Nuke = { x, z, owner: b.owner, silo: b, t: 0, flight: ECONOMY.nuke.flight };
     this.nukes.push(n);
     g.message(b.owner.isHuman ? 'Nuclear missile launched.' : 'Nuclear launch detected!', '#ff5a5a');
     g.sound('nukeSiren');
     g.hooks.fx?.nukeLaunch?.(b, x, z, n.flight);
     return true;
   }
-  updateNukes(dt) {
+  updateNukes(dt: number): void {
     if (!this.nukes.length) return;
-    const keep = [];
+    const keep: Nuke[] = [];
     for (const n of this.nukes) {
       n.t += dt;
       if (n.t >= n.flight) this.detonate(n);
@@ -322,7 +350,7 @@ export class Empires {
     }
     this.nukes = keep;
   }
-  detonate(n) {
+  detonate(n: Nuke): void {
     const g = this.game;
     const { radius: R, damage: D } = ECONOMY.nuke;
     const src = n.silo;
@@ -340,7 +368,7 @@ export class Empires {
       g.terrain.fellTree(t);
     }
     for (const p of g.generals) {
-      if (p.mode !== 'empire' || p.defeated) continue;
+      if (!isEmpire(p) || p.defeated) continue;
       if (p.buildings.some((b) => !b.dead && Math.hypot(b.x - n.x, b.z - n.z) < R * 1.5)) {
         p.unrest += 25;
         p.citizens *= 0.75;
@@ -352,7 +380,7 @@ export class Empires {
     g.message('A nuclear blast has scorched the land!', '#ff8a5a');
   }
 
-  ageName(p) {
-    return AGE_NAMES[Math.max(1, p.tier)];
+  ageName(p: Player): string {
+    return AGE_NAMES[Math.max(1, p.tier)]!;
   }
 }

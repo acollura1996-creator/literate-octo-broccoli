@@ -3,28 +3,43 @@
 // with gold, or a golden age for a happy empire.
 import { CENTER, rotate } from '../world/layout.ts';
 import { DROP_TABLES } from '../data/items.ts';
-import { moodOf } from './empire.js';
+import { moodOf } from './empire.ts';
+import type { Game } from './game.ts';
+import type { Unit } from './unit.ts';
+import type { EmpirePlayer, Player } from './types.ts';
+import { isEmpire } from './types.ts';
 
-const pick = (list) => list[Math.floor(Math.random() * list.length)];
+const pick = <T>(list: T[]): T => list[Math.floor(Math.random() * list.length)]!;
+
+export type GameEventKind = 'harvest' | 'bandits' | 'caravan' | 'plague' | 'golden';
 
 export class GameEvents {
-  constructor(game) {
+  readonly game: Game;
+  /** Game time of the next event. */
+  next: number;
+  harvestUntil: number;
+  /** General -> time their golden age ends. */
+  goldenUntil: Map<Player, number>;
+  caravans: Unit[];
+  log: { kind: GameEventKind; time: number }[];
+
+  constructor(game: Game) {
     this.game = game;
     this.next = 240;
     this.harvestUntil = 0;
-    this.goldenUntil = new Map(); // general -> time the golden age ends
+    this.goldenUntil = new Map();
     this.caravans = [];
     this.log = [];
   }
 
-  harvestMult() {
+  harvestMult(_p?: Player): number {
     return this.game.time < this.harvestUntil ? 2 : 1;
   }
-  incomeMult(p) {
+  incomeMult(p: Player): number {
     return (this.goldenUntil.get(p) ?? 0) > this.game.time ? 1.25 : 1;
   }
 
-  update(dt) {
+  update(_dt: number): void {
     const g = this.game;
     if (g.over) return;
     if (g.time >= this.next) {
@@ -43,13 +58,13 @@ export class GameEvents {
     });
   }
 
-  empires() {
-    return this.game.generals.filter((p) => !p.defeated && p.mode === 'empire');
+  empires(): EmpirePlayer[] {
+    return this.game.generals.filter((p): p is EmpirePlayer => !p.defeated && isEmpire(p));
   }
 
-  fire() {
+  fire(): void {
     const g = this.game;
-    const options = ['harvest', 'bandits', 'caravan'];
+    const options: GameEventKind[] = ['harvest', 'bandits', 'caravan'];
     if (this.empires().some((p) => p.citizens >= 15)) options.push('plague');
     if (this.empires().some((p) => moodOf(p.happiness).income >= 1.1)) options.push('golden');
     const kind = pick(options);
@@ -57,22 +72,21 @@ export class GameEvents {
     this[kind]();
   }
 
-  announce(text, color = '#ffd27a') {
+  announce(text: string, color = '#ffd27a'): void {
     this.game.message(`📜 ${text}`, color);
     this.game.sound('horn');
   }
 
-  harvest() {
+  harvest(): void {
     this.harvestUntil = this.game.time + 90;
     this.announce('A bountiful harvest! Every farm in the land yields double food for 90 seconds.');
   }
 
-  plague() {
-    const g = this.game;
+  plague(): void {
     const victims = this.empires().filter((p) => p.citizens >= 15);
     const p = pick(victims);
     const hardy = p.rations >= 14;
-    const loss = Math.round(p.citizens * (hardy ? 0.1 : 0.2) * Math.pow(0.85, p.upgrades?.medicine ?? 0));
+    const loss = Math.round(p.citizens * (hardy ? 0.1 : 0.2) * Math.pow(0.85, p.upgrades?.['medicine'] ?? 0));
     p.citizens -= loss;
     p.unrest += hardy ? 6 : 15;
     if (p.isHuman) {
@@ -80,14 +94,14 @@ export class GameEvents {
     } else this.announce(`Plague strikes ${p.name}'s empire.`);
   }
 
-  bandits() {
+  bandits(): void {
     const g = this.game;
     const targets = g.generals.filter((p) => !p.defeated && p.base);
     if (!targets.length) return;
     const p = pick(targets);
     const home = p.buildings.find((b) => !b.dead && (b.def.tier || b.def.revivesHeroes)) ?? p.buildings.find((b) => !b.dead);
     if (!home) return;
-    const [tx, tz] = p.base.toCenter;
+    const [tx, tz] = p.base!.toCenter;
     const from = g.grid.nearestWalkable(home.x + tx * 30, home.z + tz * 30, 10);
     if (!from) return;
     const minutes = Math.max(0, g.time / 60);
@@ -104,7 +118,7 @@ export class GameEvents {
     this.announce(p.isHuman ? `Bandits! A band of ${n} raiders is marching on your base.` : `Bandits are raiding ${p.name}'s lands.`, p.isHuman ? '#ff8a6a' : '#ffd27a');
   }
 
-  caravan() {
+  caravan(): void {
     const g = this.game;
     const k = Math.floor(Math.random() * 4);
     const dir = Math.random() < 0.5 ? 1 : 3;
@@ -119,14 +133,14 @@ export class GameEvents {
       g.issueOrder(w, { type: 'move', point: p }, i > 0);
     });
     w.onDeath = (killer) => {
-      if (killer?.owner?.general) g.dropItem(w.x, w.z, pick(DROP_TABLES[3]));
+      if (killer?.owner?.general) g.dropItem(w.x, w.z, pick(DROP_TABLES[3]!));
     };
     this.caravans.push(w);
     g.ping(pos.x, pos.z, '#ffd700');
     this.announce('A merchant caravan laden with gold is crossing the land. Whoever stops it keeps the treasure!');
   }
 
-  golden() {
+  golden(): void {
     const g = this.game;
     const happy = this.empires().filter((p) => moodOf(p.happiness).income >= 1.1);
     const p = pick(happy);

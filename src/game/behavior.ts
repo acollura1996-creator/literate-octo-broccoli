@@ -1,15 +1,23 @@
 // Per-unit order execution: movement, combat, harvesting, construction,
 // training and spell casting.
-import { ABILITIES } from './abilities.js';
+import { ABILITIES } from './abilities.ts';
+import type { AbilityDef } from './abilities.ts';
 import { UNITS } from '../data/units.ts';
+import type { Game } from './game.ts';
+import type { Unit } from './unit.ts';
+import type { Tree } from '../world/terrain.ts';
+import type { OrderOf, Point, Resource } from './types.ts';
 
 const TAU = Math.PI * 2;
 
-export function angleTo(u, x, z) {
+export type MoveResult = 'arrived' | 'moving' | 'blocked';
+export type AttackResult = 'done' | 'out' | 'busy';
+
+export function angleTo(u: Point, x: number, z: number): number {
   return Math.atan2(x - u.x, z - u.z);
 }
 
-export function turnToward(u, target, dt, rate = null) {
+export function turnToward(u: Unit, target: number, dt: number, rate: number | null = null): number {
   let diff = target - u.facing;
   diff = ((diff + Math.PI) % TAU + TAU) % TAU - Math.PI;
   const r = (rate ?? u.def.turnRate) * dt;
@@ -18,7 +26,7 @@ export function turnToward(u, target, dt, rate = null) {
   return Math.abs(diff);
 }
 
-export function stopMoving(u) {
+export function stopMoving(u: Unit): void {
   u.moving = false;
   u.path = null;
   u.pathGoal = null;
@@ -28,7 +36,7 @@ export function stopMoving(u) {
  * Move a unit toward (x, z) until within `range`. Returns 'arrived',
  * 'moving' or 'blocked'.
  */
-export function moveToward(game, u, x, z, range, dt) {
+export function moveToward(game: Game, u: Unit, x: number, z: number, range: number, dt: number): MoveResult {
   const dist = Math.hypot(x - u.x, z - u.z);
   if (dist <= range) {
     stopMoving(u);
@@ -69,7 +77,7 @@ export function moveToward(game, u, x, z, range, dt) {
     u.pathIndex = 0;
   }
 
-  let wp = u.path[u.pathIndex];
+  let wp = u.path![u.pathIndex];
   if (!wp) {
     // Path exhausted but not within range: approach directly if possible.
     if (game.grid.lineWalkable(u.x, u.z, x, z, 0)) wp = { x, z };
@@ -97,8 +105,8 @@ export function moveToward(game, u, x, z, range, dt) {
   const angDiff = turnToward(u, desired, dt);
   u.moving = true;
   if (angDiff > 1.6) return 'moving'; // turn in place first
-  let nx;
-  let nz;
+  let nx: number;
+  let nz: number;
   if (d <= step) {
     nx = wp.x;
     nz = wp.z;
@@ -142,7 +150,7 @@ export function moveToward(game, u, x, z, range, dt) {
   return 'moving';
 }
 
-export function validTarget(game, u, t) {
+export function validTarget(game: Game, u: Unit, t: Unit | null | undefined): t is Unit {
   if (!t || t.dead || t.removed || t.hidden) return false;
   if (t.invulnerable && !t.def.invulnerable) return true; // divine shield: still a target, just takes no damage
   if (t.def.invulnerable) return false;
@@ -151,8 +159,8 @@ export function validTarget(game, u, t) {
 }
 
 /** Acquire the best enemy target within radius. */
-export function findTarget(game, u, radius) {
-  let best = null;
+export function findTarget(game: Game, u: Unit, radius: number): Unit | null {
+  let best: Unit | null = null;
   let bestScore = Infinity;
   const human = u.owner.isHuman || game.isAlliedToHuman(u.owner);
   for (const t of game.unitsNear(u.x, u.z, radius + 1.5)) {
@@ -175,7 +183,7 @@ export function findTarget(game, u, radius) {
   return best;
 }
 
-export function acquireRange(u) {
+export function acquireRange(u: Unit): number {
   if (u.def.creep || (u.def.legion && u.guardPos)) return Math.max(4.5, u.range + 1);
   return Math.max(u.range + 1.5, 6);
 }
@@ -185,7 +193,7 @@ export function acquireRange(u) {
  * Returns 'done' when the target is gone, 'out' if out of range and unable
  * to chase, 'busy' otherwise.
  */
-export function attackTarget(game, u, t, dt, chase = true) {
+export function attackTarget(game: Game, u: Unit, t: Unit | null | undefined, dt: number, chase = true): AttackResult {
   if (!validTarget(game, u, t)) return 'done';
   if (!u.canAttack || u.hasBuff('bladestorm')) {
     if (chase && u.canMove) moveToward(game, u, t.x, t.z, 1.5, dt);
@@ -201,7 +209,8 @@ export function attackTarget(game, u, t, dt, chase = true) {
       // Hack through whatever is in the way, then carry on.
       const obstacle = blockingStructure(game, u);
       if (obstacle && obstacle !== t) {
-        u.order = { type: 'attack', target: obstacle, resume: u.order.type === 'attack' && u.order.target === t ? u.order : u.order.resume ?? { type: 'attack', target: t } };
+        const cur = u.order;
+        u.order = { type: 'attack', target: obstacle, resume: cur.type === 'attack' && cur.target === t ? cur : ('resume' in cur ? cur.resume : undefined) ?? { type: 'attack', target: t } };
         return 'busy';
       }
       return 'out';
@@ -224,8 +233,8 @@ export function attackTarget(game, u, t, dt, chase = true) {
 }
 
 /** The nearest enemy structure (wall, gate or building) right next to a stuck unit. */
-export function blockingStructure(game, u) {
-  let best = null;
+export function blockingStructure(game: Game, u: Unit): Unit | null {
+  let best: Unit | null = null;
   let bd = 3.5;
   for (const b of game.unitsNear(u.x, u.z, 3.5)) {
     if (!b.isBuilding || b.dead || b.def.invulnerable || !game.isEnemy(u.owner, b.owner)) continue;
@@ -238,13 +247,13 @@ export function blockingStructure(game, u) {
   return best;
 }
 
-const SHOT_SOUND = {
+const SHOT_SOUND: Record<string, string> = {
   rock: 'explosion', stone: 'arrowShoot', arrow: 'arrowShoot', axe: 'arrowShoot', bullet: 'gunshot', grenade: 'arrowShoot',
   cannonball: 'cannon', shell: 'cannon', rocket: 'rocket', laser: 'laser', plasma: 'laser', javelin: 'arrowShoot',
   flame: 'fire', rail: 'laser',
 };
 
-function deliverAttack(game, u, t) {
+function deliverAttack(game: Game, u: Unit, t: Unit | null): void {
   if (!validTarget(game, u, t)) return;
   const reach = u.range + u.radius + t.radius + 1.6;
   if (u.distTo(t) > reach) return;
@@ -275,9 +284,9 @@ function deliverAttack(game, u, t) {
 }
 
 // ------------------------------------------------------------------ orders
-export function finishOrder(game, u) {
+export function finishOrder(_game: Game, u: Unit): void {
   if (u.orderQueue.length) {
-    u.order = u.orderQueue.shift();
+    u.order = u.orderQueue.shift()!;
   } else {
     u.order = { type: 'idle' };
   }
@@ -285,11 +294,11 @@ export function finishOrder(game, u) {
 }
 
 /** Team id used to let units through their own (and allied) gates. */
-export function passTeamOf(u) {
+export function passTeamOf(u: Unit): number {
   return u.owner.team ?? -99;
 }
 
-export function updateUnit(game, u, dt) {
+export function updateUnit(game: Game, u: Unit, dt: number): void {
   if (u.dead) return;
   u.animTime += dt;
   game.grid.passTeam = passTeamOf(u);
@@ -309,7 +318,7 @@ export function updateUnit(game, u, dt) {
   const mm = u.maxMana;
   if (mm > 0 && u.mana < mm) u.mana = Math.min(mm, u.mana + u.manaRegen * dt);
   if (u.attackTimer > 0) u.attackTimer -= dt;
-  for (const k in u.cooldowns) if (u.cooldowns[k] > 0) u.cooldowns[k] -= dt;
+  for (const k in u.cooldowns) if (u.cooldowns[k]! > 0) u.cooldowns[k]! -= dt;
 
   if (u.isBuilding) {
     updateBuilding(game, u, dt);
@@ -403,29 +412,29 @@ export function updateUnit(game, u, dt) {
     }
     case 'attackMove':
     case 'patrol':
-      doAttackMove(game, u, dt);
+      doAttackMove(game, u, o, dt);
       break;
     case 'hold':
       stopMoving(u);
       doHoldAttack(game, u, dt, u.range + 0.5);
       break;
     case 'harvest':
-      doHarvest(game, u, dt);
+      doHarvest(game, u, o, dt);
       break;
     case 'returnRes':
-      doReturn(game, u, dt);
+      doReturn(game, u, o, dt);
       break;
     case 'build':
-      doBuild(game, u, dt);
+      doBuild(game, u, o, dt);
       break;
     case 'construct':
-      doConstruct(game, u, dt);
+      doConstruct(game, u, o, dt);
       break;
     case 'cast':
-      doCast(game, u, dt);
+      doCast(game, u, o, dt);
       break;
     case 'pickup':
-      doPickup(game, u, dt);
+      doPickup(game, u, o, dt);
       break;
     case 'guardReturn': {
       // Creeps walking home after a chase: ignore enemies, heal up.
@@ -451,7 +460,7 @@ export function updateUnit(game, u, dt) {
   else u.anim = u.moving ? 'walk' : 'stand';
 }
 
-function doIdle(game, u, dt) {
+function doIdle(game: Game, u: Unit, dt: number): void {
   stopMoving(u);
   if (!u.canAttack || u.def.worker) return;
   u.acquireTimer -= dt;
@@ -466,7 +475,7 @@ function doIdle(game, u, dt) {
   }
 }
 
-function doHoldAttack(game, u, dt, radius) {
+function doHoldAttack(game: Game, u: Unit, dt: number, radius: number): void {
   if (u.order.engage && validTarget(game, u, u.order.engage)) {
     const r = attackTarget(game, u, u.order.engage, dt, false);
     if (r === 'busy') return;
@@ -479,8 +488,7 @@ function doHoldAttack(game, u, dt, radius) {
   if (t) u.order.engage = t;
 }
 
-function doAttackMove(game, u, dt) {
-  const o = u.order;
+function doAttackMove(game: Game, u: Unit, o: OrderOf<'attackMove' | 'patrol'>, dt: number): void {
   if (o.engage) {
     if (validTarget(game, u, o.engage) && u.distTo(o.engage) < acquireRange(u) + 6) {
       const r = attackTarget(game, u, o.engage, dt, true);
@@ -512,7 +520,7 @@ function doAttackMove(game, u, dt) {
   if (r !== 'moving') {
     if (o.type === 'patrol') {
       const tmp = o.point;
-      o.point = o.origin;
+      o.point = o.origin!;
       o.origin = tmp;
       stopMoving(u);
     } else finishOrder(game, u);
@@ -521,8 +529,8 @@ function doAttackMove(game, u, dt) {
 
 // --------------------------------------------------------------- harvesting
 /** Nearest building that accepts `kind` ('gold' or 'lumber'); town centers take both. */
-function nearestDropOff(game, u, kind = u.carry?.kind) {
-  let best = null;
+function nearestDropOff(_game: Game, u: Unit, kind: Resource | undefined = u.carry?.kind): Unit | null {
+  let best: Unit | null = null;
   let bd = Infinity;
   for (const b of u.owner.buildings) {
     if (b.dead || !b.def.dropOff || b.underConstruction) continue;
@@ -536,9 +544,9 @@ function nearestDropOff(game, u, kind = u.carry?.kind) {
   return best;
 }
 
-export function findNearestTree(game, x, z, maxR = 14) {
+export function findNearestTree(game: Game, x: number, z: number, maxR = 14): Tree | null {
   const t = game.terrain;
-  let best = null;
+  let best: Tree | null = null;
   let bd = Infinity;
   const cx = Math.floor(x);
   const cz = Math.floor(z);
@@ -550,7 +558,7 @@ export function findNearestTree(game, x, z, maxR = 14) {
         if (!tree) continue;
         // Must have a walkable neighbour.
         let open = false;
-        for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as [number, number][]) {
           if (game.grid.walkable(tree.cx + ox, tree.cz + oz)) open = true;
         }
         if (!open) continue;
@@ -566,17 +574,22 @@ export function findNearestTree(game, x, z, maxR = 14) {
   return best;
 }
 
-function carryCap(u, kind) {
+function carryCap(u: Unit, kind: Resource): number {
   const up = u.owner.upgrades;
-  return 10 + 2 * ((kind === 'lumber' ? up?.forestry : up?.mining) ?? 0);
+  return 10 + 2 * ((kind === 'lumber' ? up?.['forestry'] : up?.['mining']) ?? 0);
 }
 
-function doHarvest(game, u, dt) {
-  const o = u.order;
+function doHarvest(game: Game, u: Unit, o: OrderOf<'harvest'>, dt: number): void {
   const h = (u.harvest ||= { phase: 'goto', timer: 0 });
-  h.kind = o.target?.isBuilding ? 'gold' : 'lumber';
-  if (h.kind === 'gold') h.mine = o.target;
-  else h.tree = o.target;
+  // Gold mines are buildings; trees are not units at all.
+  const target = o.target;
+  if (target && 'isBuilding' in target && target.isBuilding) {
+    h.kind = 'gold';
+    h.mine = target;
+  } else {
+    h.kind = 'lumber';
+    h.tree = target as Tree | null | undefined;
+  }
 
   if (u.carry && (u.carry.kind !== h.kind || u.carry.amount >= carryCap(u, u.carry.kind)) && h.phase !== 'inside') {
     u.order = { type: 'returnRes', resume: { type: 'harvest', target: h.kind === 'gold' ? h.mine : h.tree } };
@@ -646,7 +659,7 @@ function doHarvest(game, u, dt) {
     turnToward(u, angleTo(u, tree.x, tree.z), dt);
     h.timer -= dt;
     if (h.timer <= 0) {
-      h.timer = 1.0 / (1 + 0.1 * (u.owner.upgrades?.forestry ?? 0));
+      h.timer = 1.0 / (1 + 0.1 * (u.owner.upgrades?.['forestry'] ?? 0));
       const amt = Math.min(2, tree.lumber);
       tree.lumber -= amt;
       u.carry = { kind: 'lumber', amount: (u.carry?.kind === 'lumber' ? u.carry.amount : 0) + amt };
@@ -674,7 +687,7 @@ function doHarvest(game, u, dt) {
   }
 }
 
-function exitMine(game, u, mine) {
+function exitMine(game: Game, u: Unit, mine: Unit | null | undefined): void {
   if (!u.harvest) return;
   u.harvest.inside = false;
   if (!mine) return;
@@ -691,8 +704,7 @@ function exitMine(game, u, mine) {
   u.facing = a;
 }
 
-function doReturn(game, u, dt) {
-  const o = u.order;
+function doReturn(game: Game, u: Unit, o: OrderOf<'returnRes'>, dt: number): void {
   if (!u.carry) {
     if (o.resume) u.order = o.resume;
     else finishOrder(game, u);
@@ -718,10 +730,9 @@ function doReturn(game, u, dt) {
 }
 
 // ------------------------------------------------------------ construction
-function doBuild(game, u, dt) {
-  const o = u.order;
-  const def = UNITS[o.building];
-  const fp = def.footprint;
+function doBuild(game: Game, u: Unit, o: OrderOf<'build'>, dt: number): void {
+  const def = UNITS[o.building]!;
+  const fp = def.footprint!;
   const r = moveToward(game, u, o.x, o.z, fp * 0.5 + u.radius + 0.6, dt);
   if (r === 'moving') return;
   const b = game.placeBuilding(u, o.building, o.x, o.z);
@@ -734,8 +745,8 @@ function doBuild(game, u, dt) {
   u.order = { type: 'construct', target: b };
 }
 
-function doConstruct(game, u, dt) {
-  const b = u.order.target;
+function doConstruct(game: Game, u: Unit, o: OrderOf<'construct'>, dt: number): void {
+  const b = o.target;
   if (!b || b.dead || !b.underConstruction) {
     finishOrder(game, u);
     return;
@@ -756,11 +767,11 @@ function doConstruct(game, u, dt) {
 }
 
 // ---------------------------------------------------------------- buildings
-function updateBuilding(game, b, dt) {
+function updateBuilding(game: Game, b: Unit, dt: number): void {
   if (b.underConstruction) return;
   // Training
   if (b.trainQueue.length) {
-    const q = b.trainQueue[0];
+    const q = b.trainQueue[0]!;
     q.time += dt;
     if (q.time >= q.total) {
       b.trainQueue.shift();
@@ -796,7 +807,7 @@ function updateBuilding(game, b, dt) {
 }
 
 // ------------------------------------------------------------------ casting
-export function canCast(game, u, abilityId, silent = true) {
+export function canCast(game: Game, u: Unit, abilityId: string, silent = true): boolean {
   const ab = ABILITIES[abilityId];
   if (!ab || ab.target === 'passive' || ab.target === 'aura') return false;
   const lvl = u.abilityLevel(abilityId);
@@ -805,7 +816,7 @@ export function canCast(game, u, abilityId, silent = true) {
     if (!silent && u.owner.isHuman) game.message('That ability is not ready yet.', '#f88');
     return false;
   }
-  const mana = ab.mana[Math.min(ab.mana.length, lvl) - 1] ?? 0;
+  const mana = ab.mana![Math.min(ab.mana!.length, lvl) - 1] ?? 0;
   if (u.mana < mana) {
     if (!silent && u.owner.isHuman) game.message('Not enough mana.', '#88f');
     return false;
@@ -813,7 +824,7 @@ export function canCast(game, u, abilityId, silent = true) {
   return true;
 }
 
-function abilityTargetOk(game, u, ab, t) {
+function abilityTargetOk(game: Game, u: Unit, ab: AbilityDef, t: Unit | null | undefined): t is Unit {
   if (!t || t.dead || t.removed || t.def.invulnerable) return false;
   const enemy = game.isEnemy(u.owner, t.owner);
   switch (ab.filter) {
@@ -822,15 +833,14 @@ function abilityTargetOk(game, u, ab, t) {
     case 'enemy':
       return enemy && t.targetableBy(u);
     case 'allyOrUndead':
-      return (!enemy && !t.isBuilding) || (enemy && t.def.undead && t.targetableBy(u));
+      return (!enemy && !t.isBuilding) || (enemy && !!t.def.undead && t.targetableBy(u));
     default:
       return true;
   }
 }
 
-function doCast(game, u, dt) {
-  const o = u.order;
-  const ab = ABILITIES[o.ability];
+function doCast(game: Game, u: Unit, o: OrderOf<'cast'>, dt: number): void {
+  const ab = ABILITIES[o.ability]!;
   if (!canCast(game, u, o.ability, false)) {
     finishOrder(game, u);
     return;
@@ -840,7 +850,7 @@ function doCast(game, u, dt) {
       finishOrder(game, u);
       return;
     }
-    const r = moveToward(game, u, o.target.x, o.target.z, ab.range + u.radius + o.target.radius, dt);
+    const r = moveToward(game, u, o.target.x, o.target.z, ab.range! + u.radius + o.target.radius, dt);
     if (r === 'moving') return;
     if (r === 'blocked') {
       finishOrder(game, u);
@@ -848,13 +858,14 @@ function doCast(game, u, dt) {
     }
     u.facing = angleTo(u, o.target.x, o.target.z);
   } else if (ab.target === 'point') {
-    const r = moveToward(game, u, o.point.x, o.point.z, ab.range, dt);
+    const point = o.point!;
+    const r = moveToward(game, u, point.x, point.z, ab.range!, dt);
     if (r === 'moving') return;
     if (r === 'blocked') {
       finishOrder(game, u);
       return;
     }
-    u.facing = angleTo(u, o.point.x, o.point.z);
+    u.facing = angleTo(u, point.x, point.z);
   }
   stopMoving(u);
   u.castTimer = ab.target === 'none' ? 0.15 : 0.3;
@@ -863,11 +874,11 @@ function doCast(game, u, dt) {
   u.animTime = 0;
 }
 
-function completeCast(game, u) {
+function completeCast(game: Game, u: Unit): void {
   const o = u.castOrder;
   u.castOrder = null;
   if (!o) return;
-  const ab = ABILITIES[o.ability];
+  const ab = ABILITIES[o.ability]!;
   const lvl = u.abilityLevel(o.ability);
   if (!canCast(game, u, o.ability)) {
     finishOrder(game, u);
@@ -877,15 +888,15 @@ function completeCast(game, u) {
     finishOrder(game, u);
     return;
   }
-  u.mana -= ab.mana[Math.min(ab.mana.length, lvl) - 1] ?? 0;
-  u.cooldowns[o.ability] = ab.cooldown[Math.min(ab.cooldown.length, lvl) - 1] ?? 0;
+  u.mana -= ab.mana![Math.min(ab.mana!.length, lvl) - 1] ?? 0;
+  u.cooldowns[o.ability] = ab.cooldown![Math.min(ab.cooldown!.length, lvl) - 1] ?? 0;
   if (u.hasBuff('wind_walk') && o.ability !== 'wind_walk') u.removeBuff('wind_walk');
   finishOrder(game, u);
-  ab.cast(game, u, lvl, o.target, o.point);
+  ab.cast!(game, u, lvl, o.target, o.point);
 }
 
-function updateChannel(game, u, dt) {
-  const ch = u.channel;
+function updateChannel(game: Game, u: Unit, dt: number): void {
+  const ch = u.channel!;
   u.anim = 'cast';
   if (u.animTime > 0.6) u.animTime = 0.3;
   ch.elapsed += dt;
@@ -897,16 +908,16 @@ function updateChannel(game, u, dt) {
   if (ch.elapsed >= ch.duration) game.endChannel(u);
 }
 
-function tryAutocast(game, u) {
+function tryAutocast(game: Game, u: Unit): boolean {
   for (const id of u.def.abilities) {
-    const ab = ABILITIES[id];
+    const ab = ABILITIES[id]!;
     if (!ab.autocast || !u.autocast[id]) continue;
     if (!canCast(game, u, id)) continue;
     if (u.order.type === 'move' || u.order.type === 'cast') continue;
-    let target = null;
+    let target: Unit | null = null;
     if (id === 'heal') {
       let worst = 0.97;
-      for (const t of game.unitsNear(u.x, u.z, ab.range + 1)) {
+      for (const t of game.unitsNear(u.x, u.z, ab.range! + 1)) {
         if (t.dead || t.isBuilding || t.owner !== u.owner || t.def.invulnerable) continue;
         const ratio = t.hp / t.maxHp;
         if (ratio < worst) {
@@ -915,7 +926,7 @@ function tryAutocast(game, u) {
         }
       }
     } else if (id === 'slow') {
-      for (const t of game.unitsNear(u.x, u.z, ab.range)) {
+      for (const t of game.unitsNear(u.x, u.z, ab.range!)) {
         if (t.dead || t.isBuilding || !game.isEnemy(u.owner, t.owner) || t.hasBuff('slow') || !t.targetableBy(u)) continue;
         if (t.def.invulnerable || t.spellImmune) continue;
         if ((u.owner.isHuman || game.isAlliedToHuman(u.owner)) && !game.fog.isVisible(t.x, t.z)) continue;
@@ -933,8 +944,8 @@ function tryAutocast(game, u) {
   return false;
 }
 
-function doPickup(game, u, dt) {
-  const it = u.order.item;
+function doPickup(game: Game, u: Unit, o: OrderOf<'pickup'>, dt: number): void {
+  const it = o.item;
   if (!it || it.taken) {
     finishOrder(game, u);
     return;

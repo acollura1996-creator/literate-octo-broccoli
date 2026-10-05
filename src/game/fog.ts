@@ -1,11 +1,28 @@
 // Fog of war and black mask for the human player (and allies in allied mode). Engine-free.
 import { MAP_SIZE } from '../world/layout.ts';
+import type { Game } from './game.ts';
+import type { Player } from './types.ts';
 
 const VISIBLE = 255;
 const EXPLORED = 110;
 
 export class Fog {
-  constructor(game) {
+  readonly game: Game;
+  readonly size: number;
+  /** 1 where the human (and allies) see this instant. */
+  visible: Uint8Array;
+  /** 1 where they have ever seen. */
+  explored: Uint8Array;
+  target: Uint8Array;
+  current: Float32Array;
+  texData: Uint8Array;
+  version: number;
+  lastCompute: number;
+  revealAll: boolean;
+  /** Cell offsets [dx, dz, dx, dz, ...] of a vision circle, by twice its radius. */
+  circles: Map<number, number[]>;
+
+  constructor(game: Game) {
     this.game = game;
     this.size = MAP_SIZE;
     const n = MAP_SIZE * MAP_SIZE;
@@ -22,23 +39,23 @@ export class Fog {
     this.circles = new Map();
   }
 
-  circle(r) {
+  circle(r: number): number[] {
     const key = Math.round(r * 2);
-    let c = this.circles.get(key);
-    if (c) return c;
+    const cached = this.circles.get(key);
+    if (cached) return cached;
     const R = key / 2;
-    c = [];
+    const c: number[] = [];
     const ri = Math.ceil(R);
     for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) if (dx * dx + dz * dz <= R * R) c.push(dx, dz);
     this.circles.set(key, c);
     return c;
   }
 
-  hasVision(p) {
+  hasVision(p: Player): boolean {
     return this.game.isAlliedToHuman(p);
   }
 
-  update(force = false) {
+  update(force = false): void {
     const g = this.game;
     if (force || g.time - this.lastCompute >= 0.12 || g.time < this.lastCompute) {
       this.lastCompute = g.time;
@@ -53,8 +70,8 @@ export class Fog {
           const cz = Math.floor(u.z);
           const c = this.circle(u.sight);
           for (let i = 0; i < c.length; i += 2) {
-            const x = cx + c[i];
-            const z = cz + c[i + 1];
+            const x = cx + c[i]!;
+            const z = cz + c[i + 1]!;
             if (x < 0 || z < 0 || x >= S || z >= S) continue;
             vis[z * S + x] = 1;
           }
@@ -73,8 +90,8 @@ export class Fog {
     const out = this.texData;
     let changed = force;
     for (let i = 0; i < cur.length; i++) {
-      const t = tgt[i];
-      const c = cur[i];
+      const t = tgt[i]!;
+      const c = cur[i]!;
       if (c !== t) {
         const nc = force ? t : Math.abs(t - c) < 2 ? t : c + (t - c) * 0.25;
         cur[i] = nc;
@@ -85,7 +102,7 @@ export class Fog {
     if (changed) this.version++;
   }
 
-  isVisible(x, z) {
+  isVisible(x: number, z: number): boolean {
     if (this.revealAll) return true;
     const cx = Math.floor(x);
     const cz = Math.floor(z);
@@ -93,7 +110,7 @@ export class Fog {
     return this.visible[cz * this.size + cx] === 1;
   }
 
-  isExplored(x, z) {
+  isExplored(x: number, z: number): boolean {
     if (this.revealAll) return true;
     const cx = Math.floor(x);
     const cz = Math.floor(z);
@@ -102,7 +119,7 @@ export class Fog {
   }
 
   /** Reveal everything (end of game / debug). */
-  reveal() {
+  reveal(): void {
     this.revealAll = true;
     this.explored.fill(1);
     this.update(true);

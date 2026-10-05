@@ -3,11 +3,153 @@
 import { UNITS, HERO_XP, MAX_HERO_LEVEL, MAX_AGE } from '../data/units.ts';
 import { HEROES } from '../data/heroes.ts';
 import { ITEMS } from '../data/items.ts';
+import type { Attribute, HeroDef, ItemStat, ProjectileDef, Range2, UnitDef } from '../data/types.ts';
+import type { Game } from './game.ts';
+import type { UnitViewHandle } from './hooks.ts';
+import type {
+  AdditiveMod, Buff, BuffData, CampState, Carry, Channel, GuardPos, HarvestState, InventoryItem, Mods, Order, OrderOf,
+  Player, Progress, Rally, Researching, TrainItem, Upgrading,
+} from './types.ts';
 
 let nextId = 1;
 
+export interface SpawnOptions {
+  facing?: number;
+  /** Age style of a structure (defaults to its owner's age). */
+  ageLevel?: number;
+  illusion?: boolean;
+  summoned?: boolean;
+  /** Seconds a summon lasts. */
+  lifetime?: number;
+  /** Gold in a gold mine. */
+  gold?: number;
+  /** Place a building as a construction site. */
+  construction?: boolean;
+}
+
+export type AnimName = 'stand' | 'walk' | 'attack' | 'cast' | 'work' | 'death';
+
+const ADDITIVE_MODS: readonly AdditiveMod[] = ['armor', 'damage', 'hp', 'hpRegen', 'manaRegen', 'rangedPct', 'str', 'agi', 'int'];
+
 export class Unit {
-  constructor(game, typeId, owner, x, z, opts = {}) {
+  readonly id: number;
+  readonly game: Game;
+  def: UnitDef;
+  type: string;
+  owner: Player;
+  x: number;
+  z: number;
+  facing: number;
+  readonly isBuilding: boolean;
+  readonly isHero: boolean;
+  radius: number;
+  dead: boolean;
+  deathTime: number;
+  removed: boolean;
+
+  // Heroes only.
+  heroDef?: HeroDef;
+  level?: number;
+  xp?: number;
+  skillPoints?: number;
+  abilityLevels?: Record<string, number>;
+  tomes?: Record<Attribute, number>;
+  inventory?: (InventoryItem | null)[];
+  /** Game time a fallen hero returns at the altar. */
+  reviveAt?: number | null;
+  itemCooldown?: number;
+
+  /** Age style of a structure. */
+  ageLevel: number;
+  isIllusion: boolean;
+  summoned: boolean;
+  /** Seconds left for summons and illusions. */
+  lifetime: number | null;
+
+  buffs: Map<string, Buff>;
+  mods: Mods;
+  cooldowns: Record<string, number>;
+  autocast: Record<string, boolean>;
+  hp: number;
+  mana: number;
+
+  // Orders / movement
+  order: Order;
+  orderQueue: Order[];
+  path: { x: number; z: number }[] | null;
+  pathIndex: number;
+  pathGoal: { x: number; z: number } | null;
+  pathVersion: number;
+  stuckTime: number;
+  waitPath: boolean;
+  moving: boolean;
+  lastProgressDist?: number;
+  progressTimer?: number;
+  noProgress?: number;
+  failedPaths?: number;
+  exhausted?: number;
+  attackTimer: number;
+  windup: number;
+  windupTarget: Unit | null;
+  windWalkStrike?: boolean;
+  lastShotAt?: number;
+  /** Alternates twin barrels. */
+  shotIndex?: number;
+  castTimer: number;
+  castOrder?: OrderOf<'cast'> | null;
+  channel: Channel | null;
+  autoTimer?: number;
+  lastAttackedAt: number;
+  lastAttacker: Unit | null;
+  acquireTimer: number;
+  /** Creeps and Legion guards return here. */
+  guardPos: GuardPos | null;
+  camp: CampState | null;
+  /** Kalenden's wave units: the general they march on. */
+  wave?: { target: Player };
+  raider?: boolean;
+  rebel?: boolean;
+  caravan?: boolean;
+  onDeath?: (killer: Unit | null | undefined) => void;
+
+  // Buildings
+  underConstruction: boolean;
+  buildProgress: number;
+  builders: Set<Unit>;
+  buildFrame?: number;
+  buildersThisFrame?: number;
+  trainQueue: TrainItem[];
+  upgrading: Upgrading | null;
+  researching: Researching | null;
+  rally: Rally | null;
+  /** Bottom-left cell of a building's footprint. */
+  cell!: { x: number; z: number };
+  goldLeft: number;
+  /** The Peasant inside a gold mine. */
+  occupant?: Unit | null;
+  /** Houses: connected to a town center by road. */
+  roadConnected?: boolean;
+  nukeBuild?: Progress | null;
+  nukeReady?: boolean;
+  /** Mercenary camps: hires left per type, and the restock timer. */
+  stock?: Record<string, number>;
+  stockTimer?: number;
+
+  // Workers
+  carry: Carry | null;
+  harvest: HarvestState | null;
+  buildSoundTimer?: number;
+
+  // Animation
+  anim: AnimName;
+  animTime: number;
+  walkCycle: number;
+  /** The renderer's object for this unit. */
+  view: UnitViewHandle | null;
+  seenByHuman: boolean;
+  selected: boolean;
+
+  constructor(game: Game, typeId: string, owner: Player, x: number, z: number, opts: SpawnOptions = {}) {
     const def = UNITS[typeId];
     if (!def) throw new Error(`Unknown unit type ${typeId}`);
     this.id = nextId++;
@@ -27,12 +169,13 @@ export class Unit {
 
     // Hero state (must exist before maxHp is read).
     if (this.isHero) {
-      this.heroDef = HEROES[typeId];
+      const heroDef = HEROES[typeId]!;
+      this.heroDef = heroDef;
       this.level = 1;
       this.xp = 0;
       this.skillPoints = 1;
       this.abilityLevels = {};
-      for (const a of this.heroDef.abilities) this.abilityLevels[a] = 0;
+      for (const a of heroDef.abilities) this.abilityLevels[a] = 0;
       this.tomes = { str: 0, agi: 0, int: 0 };
       this.inventory = [null, null, null, null, null, null];
     }
@@ -95,163 +238,164 @@ export class Unit {
     this.selected = false;
   }
 
-  get name() {
+  get name(): string {
     return this.def.ageNames?.[this.ageLevel - 1] ?? this.def.name;
   }
   /** Model for this unit (houses, walls and gates change with the age). */
-  get modelId() {
+  get modelId(): string {
     return this.def.ageModels?.[this.ageLevel - 1] ?? this.def.model;
   }
 
   // ------------------------------------------------------------- attributes
-  heroAttr(attr) {
+  heroAttr(attr: Attribute): number {
     if (!this.isHero) return 0;
-    const [base, growth] = this.heroDef[attr];
-    let v = Math.floor(base + growth * (this.level - 1)) + this.tomes[attr];
-    for (const it of this.inventory) if (it && ITEMS[it.id].stats?.[attr]) v += ITEMS[it.id].stats[attr];
+    const [base, growth] = this.heroDef![attr];
+    let v = Math.floor(base + growth * (this.level! - 1)) + this.tomes![attr];
+    for (const it of this.inventory!) if (it && ITEMS[it.id]!.stats?.[attr]) v += ITEMS[it.id]!.stats![attr]!;
     v += this.mods[attr] || 0;
     return v;
   }
-  get str() {
+  get str(): number {
     return this.heroAttr('str');
   }
-  get agi() {
+  get agi(): number {
     return this.heroAttr('agi');
   }
-  get int() {
+  get int(): number {
     return this.heroAttr('int');
   }
 
-  itemStat(key) {
+  itemStat(key: ItemStat): number {
     if (!this.isHero) return 0;
     let v = 0;
-    for (const it of this.inventory) if (it && ITEMS[it.id].stats?.[key]) v += ITEMS[it.id].stats[key];
+    for (const it of this.inventory!) if (it && ITEMS[it.id]!.stats?.[key]) v += ITEMS[it.id]!.stats![key]!;
     return v;
   }
 
-  get maxHp() {
+  get maxHp(): number {
     let hp = this.isHero ? 100 + 25 * this.str : (this.def.hpByAge?.[this.ageLevel - 1] ?? this.def.hp);
     const up = this.owner?.upgrades;
-    if (up && !this.isHero) hp *= this.isBuilding ? 1 + 0.1 * (up.masonry || 0) : 1 + 0.06 * (up.vitality || 0);
+    if (up && !this.isHero) hp *= this.isBuilding ? 1 + 0.1 * (up['masonry'] || 0) : 1 + 0.06 * (up['vitality'] || 0);
     hp += this.itemStat('hp') + (this.mods.hp || 0);
     if (this.owner?.handicap && !this.isBuilding) hp *= this.owner.handicap;
     return Math.round(hp);
   }
-  get maxMana() {
+  get maxMana(): number {
     if (this.isHero) return Math.round(15 * this.int);
     return this.def.mana;
   }
-  get hpRegen() {
+  get hpRegen(): number {
     let r = this.isHero ? 0.25 + 0.05 * this.str : this.def.hpRegen;
-    if (!this.isHero && !this.isBuilding && this.owner?.upgrades?.medicine) r += 0.4 * this.owner.upgrades.medicine;
+    if (!this.isHero && !this.isBuilding && this.owner?.upgrades?.['medicine']) r += 0.4 * this.owner.upgrades['medicine'];
     return r + this.itemStat('hpRegen') + (this.mods.hpRegen || 0);
   }
-  get manaRegen() {
-    let r = this.isHero ? 0.01 + 0.05 * this.int : this.def.manaRegen;
+  get manaRegen(): number {
+    const r = this.isHero ? 0.01 + 0.05 * this.int : this.def.manaRegen;
     return r + this.itemStat('manaRegen') + (this.mods.manaRegen || 0);
   }
-  get armor() {
+  get armor(): number {
     let a = this.def.armorByAge?.[this.ageLevel - 1] ?? this.def.armor;
     if (this.isHero) a += this.agi * 0.3;
-    else if (!this.isBuilding && this.owner?.upgrades) a += this.owner.upgrades.armor || 0;
+    else if (!this.isBuilding && this.owner?.upgrades) a += this.owner.upgrades['armor'] || 0;
     return a + this.itemStat('armor') + (this.mods.armor || 0);
   }
   /** Projectile fired by this unit (towers change ammunition with the ages). */
-  get projectile() {
+  get projectile(): ProjectileDef | null {
     return this.def.projectileByAge?.[this.ageLevel - 1] ?? this.def.projectile;
   }
-  get damageRange() {
+  get damageRange(): Range2 | null {
     const d = this.def.damageByAge?.[this.ageLevel - 1] ?? this.def.damage;
     if (!d) return null;
     let bonus = this.itemStat('damage') + (this.mods.damage || 0);
-    if (this.isHero) bonus += this[this.heroDef.primary];
+    if (this.isHero) bonus += this[this.heroDef!.primary];
     let mult = 1;
-    if (!this.isHero && this.owner?.upgrades?.weaponry) mult *= 1 + 0.06 * this.owner.upgrades.weaponry;
+    if (!this.isHero && this.owner?.upgrades?.['weaponry']) mult *= 1 + 0.06 * this.owner.upgrades['weaponry'];
     if (this.projectile && this.mods.rangedPct) mult += this.mods.rangedPct;
     if (this.owner?.damageMult && !this.isBuilding) mult *= this.owner.damageMult;
     return [Math.round((d[0] + bonus) * mult), Math.round((d[1] + bonus) * mult)];
   }
-  get attackCooldown() {
+  get attackCooldown(): number {
     let cd = this.def.cooldownByAge?.[this.ageLevel - 1] ?? this.def.attackCooldown;
     if (this.isHero) cd /= 1 + 0.02 * this.agi;
     cd /= this.mods.attackSpeed || 1;
     return cd;
   }
-  get speed() {
+  get speed(): number {
     let s = this.def.speed + this.itemStat('speed');
     s *= this.mods.speedMul || 1;
-    if (!this.isHero && this.owner?.upgrades?.mobility) s *= 1 + 0.04 * this.owner.upgrades.mobility;
+    if (!this.isHero && this.owner?.upgrades?.['mobility']) s *= 1 + 0.04 * this.owner.upgrades['mobility'];
     return Math.min(7, s);
   }
-  get range() {
+  get range(): number {
     return this.def.range;
   }
-  get sight() {
+  get sight(): number {
     let s = this.def.sight;
     if (!this.isBuilding && this.game.isNight) s *= 0.8;
     return s;
   }
-  get canAttack() {
+  get canAttack(): boolean {
     return !!this.def.damage && !this.underConstruction;
   }
-  get canMove() {
+  get canMove(): boolean {
     return !this.isBuilding && this.def.speed > 0;
   }
-  get xpLevel() {
-    return this.isHero ? this.level : this.def.level;
+  get xpLevel(): number {
+    return this.isHero ? this.level! : this.def.level;
   }
 
   // ------------------------------------------------------------------ state
-  get alive() {
+  get alive(): boolean {
     return !this.dead;
   }
-  get stunned() {
+  get stunned(): boolean {
     return !!this.mods.stunned;
   }
-  get rooted() {
+  get rooted(): boolean {
     return !!this.mods.rooted;
   }
-  get invulnerable() {
+  get invulnerable(): boolean {
     return !!this.def.invulnerable || !!this.mods.invulnerable;
   }
-  get invisible() {
+  get invisible(): boolean {
     return !!this.mods.invisible;
   }
-  get spellImmune() {
+  get spellImmune(): boolean {
     return !!this.mods.spellImmune;
   }
-  get hidden() {
+  get hidden(): boolean {
     return !!this.harvest?.inside;
   }
 
   /** Can this unit be targeted by `viewer`'s owner? */
-  targetableBy(viewer) {
+  targetableBy(viewer: { owner: Player }): boolean {
     if (this.dead || this.hidden || this.removed) return false;
     if (this.invisible && this.game.isEnemy(viewer.owner, this.owner)) return false;
     return true;
   }
 
   // ------------------------------------------------------------------ buffs
-  addBuff(id, duration, data = {}) {
+  addBuff(id: string, duration: number, data: BuffData = {}): Buff {
     const existing = this.buffs.get(id);
     if (existing && existing.time > duration && !data.replace) return existing;
-    const b = { id, time: duration, total: duration, ...data };
+    const b: Buff = { id, time: duration, total: duration, ...data };
     this.buffs.set(id, b);
     this.recomputeMods();
     return b;
   }
-  removeBuff(id) {
+  removeBuff(id: string): void {
     if (this.buffs.delete(id)) this.recomputeMods();
   }
-  hasBuff(id) {
+  hasBuff(id: string): boolean {
     return this.buffs.has(id);
   }
-  recomputeMods() {
+  recomputeMods(): void {
     const hpBefore = this.maxHp;
     const m = emptyMods();
     for (const b of this.buffs.values()) {
-      for (const k of ['armor', 'damage', 'hp', 'hpRegen', 'manaRegen', 'rangedPct', 'str', 'agi', 'int']) {
-        if (b[k]) m[k] += b[k];
+      for (const k of ADDITIVE_MODS) {
+        const v = b[k];
+        if (v) m[k] += v;
       }
       if (b.speedMul) m.speedMul *= b.speedMul;
       if (b.attackSpeed) m.attackSpeed *= b.attackSpeed;
@@ -272,7 +416,7 @@ export class Unit {
     }
   }
 
-  updateBuffs(dt) {
+  updateBuffs(dt: number): void {
     let changed = false;
     for (const b of this.buffs.values()) {
       if (b.tick) b.tick(this, dt, b);
@@ -287,37 +431,37 @@ export class Unit {
   }
 
   // ------------------------------------------------------------------- hero
-  get xpForNext() {
-    return this.level >= MAX_HERO_LEVEL ? null : HERO_XP[this.level + 1];
+  get xpForNext(): number | null {
+    return this.level! >= MAX_HERO_LEVEL ? null : HERO_XP[this.level! + 1]!;
   }
-  get xpForCurrent() {
-    return HERO_XP[this.level] ?? 0;
+  get xpForCurrent(): number {
+    return HERO_XP[this.level!] ?? 0;
   }
 
-  abilityLevel(id) {
-    if (this.isHero) return this.abilityLevels[id] ?? 0;
+  abilityLevel(id: string): number {
+    if (this.isHero) return this.abilityLevels![id] ?? 0;
     return this.def.abilities.includes(id) ? 1 : 0;
   }
 
-  get abilityIds() {
-    return this.isHero ? this.heroDef.abilities : this.def.abilities;
+  get abilityIds(): string[] {
+    return this.isHero ? this.heroDef!.abilities : this.def.abilities;
   }
 
-  inventoryFreeSlot() {
+  inventoryFreeSlot(): number {
     if (!this.isHero) return -1;
-    return this.inventory.findIndex((s) => s === null);
+    return this.inventory!.findIndex((s) => s === null);
   }
 
-  distTo(other) {
+  distTo(other: { x: number; z: number }): number {
     return Math.hypot(other.x - this.x, other.z - this.z);
   }
   /** Edge-to-edge distance. */
-  edgeDist(other) {
+  edgeDist(other: { x: number; z: number; radius: number }): number {
     return Math.hypot(other.x - this.x, other.z - this.z) - this.radius - other.radius;
   }
 }
 
-function emptyMods() {
+function emptyMods(): Mods {
   return {
     armor: 0, damage: 0, hp: 0, hpRegen: 0, manaRegen: 0, rangedPct: 0, str: 0, agi: 0, int: 0,
     speedMul: 1, attackSpeed: 1, stunned: false, rooted: false, invulnerable: false, invisible: false,
