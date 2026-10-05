@@ -16,17 +16,17 @@ export const TEAM_COLORS = {
 };
 
 /** sRGB channel (0-1) to linear, as three.js does. */
-export function srgbToLinear(c) {
+export function srgbToLinear(c: number): number {
   return c < 0.04045 ? c * 0.0773993808 : Math.pow(c * 0.9478672986 + 0.0521327014, 2.4);
 }
 
 /** Linear channel (0-1) to sRGB, as three.js does. */
-export function linearToSrgb(c) {
+export function linearToSrgb(c: number): number {
   return c < 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 0.41666) - 0.055;
 }
 
 /** Blend a hex colour toward white by t, in linear space (three.js `Color.lerp`), as a CSS colour. */
-export function lightenHex(hex, t) {
+export function lightenHex(hex: number, t: number): string {
   const out = [16, 8, 0].map((shift) => {
     const lin = srgbToLinear(((hex >> shift) & 255) / 255);
     const v = linearToSrgb(lin + (1 - lin) * t);

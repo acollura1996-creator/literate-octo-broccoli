@@ -1,7 +1,8 @@
 // Items sold by shops or dropped by creeps. `stats` are passive bonuses while
 // carried; `use` items are consumed (or have charges).
+import type { ItemDef } from './types.ts';
 
-export const ITEMS = {
+export const ITEMS: Record<string, ItemDef> = {
   potion_healing: {
     name: 'Potion of Healing', icon: '🧪', color: '#c0392b', cost: 150, use: 'heal', amount: 300, charges: 1,
     description: 'Restores 300 hit points.',
@@ -118,7 +119,7 @@ export const ITEMS = {
   },
 };
 
-export const SHOP_STOCK = {
+export const SHOP_STOCK: Record<string, string[]> = {
   merchant: [
     'potion_healing', 'potion_mana', 'scroll_tp', 'boots',
     'claws6', 'ring2', 'gauntlets', 'slippers',
@@ -132,7 +133,7 @@ export const SHOP_STOCK = {
 };
 
 /** Item drop tables by creep camp tier. */
-export const DROP_TABLES = {
+export const DROP_TABLES: Record<number, string[]> = {
   1: ['potion_healing', 'potion_mana', 'rune_gold', 'tome_xp'],
   2: ['potion_healing', 'tome_xp', 'rune_healing', 'ring2', 'rune_gold', 'potion_mana'],
   3: ['tome_str', 'tome_agi', 'tome_int', 'tome_xp', 'periapt', 'claws6', 'greater_healing'],

@@ -4,7 +4,7 @@
 // their surface follows the owner's age (packed dirt, then cobbles, then
 // dressed paving).
 import { MAP_SIZE } from '../world/layout.js';
-import { ROAD } from '../data/units.js';
+import { ROAD } from '../data/units.ts';
 
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 

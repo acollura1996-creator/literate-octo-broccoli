@@ -1,7 +1,7 @@
 // Per-unit order execution: movement, combat, harvesting, construction,
 // training and spell casting.
 import { ABILITIES } from './abilities.js';
-import { UNITS } from '../data/units.js';
+import { UNITS } from '../data/units.ts';
 
 const TAU = Math.PI * 2;
 

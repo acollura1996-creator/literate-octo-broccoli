@@ -1,8 +1,8 @@
 // A Unit is any entity on the map: soldiers, heroes, creeps and buildings
 // (as in Warcraft III, buildings are units too).
-import { UNITS, HERO_XP, MAX_HERO_LEVEL, MAX_AGE } from '../data/units.js';
-import { HEROES } from '../data/heroes.js';
-import { ITEMS } from '../data/items.js';
+import { UNITS, HERO_XP, MAX_HERO_LEVEL, MAX_AGE } from '../data/units.ts';
+import { HEROES } from '../data/heroes.ts';
+import { ITEMS } from '../data/items.ts';
 
 let nextId = 1;
 

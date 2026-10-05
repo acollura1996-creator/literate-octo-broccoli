@@ -1,7 +1,7 @@
 // Neutral hostile creep camps: guard their spot, leash back home, drop
 // treasure when wiped out and respawn after a while.
-import { DROP_TABLES } from '../data/items.js';
-import { UNITS } from '../data/units.js';
+import { DROP_TABLES } from '../data/items.ts';
+import { UNITS } from '../data/units.ts';
 import { ABILITIES } from '../game/abilities.js';
 import { CENTER } from '../world/layout.js';
 

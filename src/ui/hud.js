@@ -1,8 +1,8 @@
 // The Warcraft III-style console: resources, clock, hero buttons, minimap,
 // 3D portrait, unit info, inventory and the command card.
 import { moodOf } from '../game/empire.js';
-import { UNITS, UPGRADES, AGE_NAMES, ECONOMY } from '../data/units.js';
-import { ITEMS } from '../data/items.js';
+import { UNITS, UPGRADES, AGE_NAMES, ECONOMY } from '../data/units.ts';
+import { ITEMS } from '../data/items.ts';
 import { getCommands } from './commands.js';
 import { Minimap } from './minimap.js';
 

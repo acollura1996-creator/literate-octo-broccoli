@@ -1,9 +1,9 @@
 // Computer-controlled rival generals. Each plays either the Hero path
 // (level up on creeps, buy items, hire mercenaries, raid and hunt Kalenden)
 // or the Empire path (gather, build a base, train an army and attack).
-import { UNITS, UPGRADES, ROAD, AGES, ECONOMY, researchCost, researchCap } from '../data/units.js';
+import { UNITS, UPGRADES, ROAD, AGES, ECONOMY, researchCost, researchCap } from '../data/units.ts';
 import { Roads } from '../game/roads.js';
-import { ITEMS } from '../data/items.js';
+import { ITEMS } from '../data/items.ts';
 import { ABILITIES } from '../game/abilities.js';
 import { canCast, findNearestTree } from '../game/behavior.js';
 import { CENTER, CITADEL, MAP_SIZE } from '../world/layout.js';

@@ -1,7 +1,7 @@
 // Builds the 4x3 command card for the current selection.
-import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES, AGES, ECONOMY, researchCost, researchTime, researchCap } from '../data/units.js';
+import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES, AGES, ECONOMY, researchCost, researchTime, researchCap } from '../data/units.ts';
 import { moodOf } from '../game/empire.js';
-import { ITEMS, SHOP_STOCK } from '../data/items.js';
+import { ITEMS, SHOP_STOCK } from '../data/items.ts';
 import { ABILITIES, requiredHeroLevel } from '../game/abilities.js';
 
 const GRID_KEYS = [['Q', 'W', 'E', 'R'], ['A', 'S', 'D', 'F'], ['Z', 'X', 'C', 'V']];

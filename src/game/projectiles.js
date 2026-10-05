@@ -3,7 +3,7 @@
 // shots. Engine-free: this is where shots travel and land (calling their `onHit`); the renderers
 // draw `list` (src/render/projectiles.js, src/babylon/Projectiles.ts). Homing unless they are lobbed
 // at a point.
-import { MUZZLE } from '../data/muzzles.js';
+import { MUZZLE } from '../data/muzzles.ts';
 
 let nextId = 1;
 

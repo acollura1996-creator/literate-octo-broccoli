@@ -1,7 +1,7 @@
 // Empire systems from the original map: citizens who pay taxes and eat rations, their happiness
 // (from Love down to Hate, when they riot), advancing through the ages at the town center,
 // hiring Heroes, and nuclear missiles.
-import { UNITS, AGES, MAX_AGE, AGE_NAMES, ECONOMY } from '../data/units.js';
+import { UNITS, AGES, MAX_AGE, AGE_NAMES, ECONOMY } from '../data/units.ts';
 import { findNearestTree } from './behavior.js';
 
 export function moodOf(h) {

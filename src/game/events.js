@@ -2,7 +2,7 @@
 // land of Kalenden: a bountiful harvest, a plague, a bandit raid, a merchant caravan laden
 // with gold, or a golden age for a happy empire.
 import { CENTER, rotate } from '../world/layout.js';
-import { DROP_TABLES } from '../data/items.js';
+import { DROP_TABLES } from '../data/items.ts';
 import { moodOf } from './empire.js';
 
 const pick = (list) => list[Math.floor(Math.random() * list.length)];

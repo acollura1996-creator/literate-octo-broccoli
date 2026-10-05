@@ -4,8 +4,9 @@
 //   Mana = 15*INT, mana regen = 0.05*INT
 //   Armor = base + 0.3*AGI, attack speed +2% per AGI
 //   Damage = base damage + primary attribute
+import type { HeroDef } from './types.ts';
 
-export const HEROES = {
+export const HEROES: Record<string, HeroDef> = {
   paladin: {
     primary: 'str',
     str: [22, 2.7], agi: [13, 1.5], int: [17, 1.8],

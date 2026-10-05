@@ -1,6 +1,6 @@
 // Mouse & keyboard: selection, smart right-click orders, targeting modes,
 // building placement, control groups and camera controls.
-import { UNITS, ROAD } from './data/units.js';
+import { UNITS, ROAD } from './data/units.ts';
 import { Roads } from './game/roads.js';
 import { ABILITIES } from './game/abilities.js';
 import { canCast } from './game/behavior.js';

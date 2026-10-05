@@ -1,8 +1,8 @@
 // The Game: owns the world state and runs the simulation.
 import { Unit } from './unit.js';
-import { UNITS, ATTACK_TABLE, UPGRADES, RESEARCH_IDS, researchCost, researchTime, researchCap, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES, AGES } from '../data/units.js';
-import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.js';
-import { ITEMS } from '../data/items.js';
+import { UNITS, ATTACK_TABLE, UPGRADES, RESEARCH_IDS, researchCost, researchTime, researchCap, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES, AGES } from '../data/units.ts';
+import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.ts';
+import { ITEMS } from '../data/items.ts';
 import { ABILITIES } from './abilities.js';
 import { updateUnit, stopMoving, finishOrder } from './behavior.js';
 import { PathGrid, BLOCK_BUILDING, BLOCK_GATE } from '../world/pathgrid.js';
@@ -13,7 +13,7 @@ import { Terrain } from '../world/terrain.js';
 import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, CITY_RADIUS } from '../world/layout.js';
 import { Fog } from './fog.js';
 import { Projectiles } from './projectiles.js';
-import { TEAM_COLORS, lightenHex } from '../data/colors.js';
+import { TEAM_COLORS, lightenHex } from '../data/colors.ts';
 import { CreepManager } from '../ai/creeps.js';
 import { LegionManager } from '../ai/legion.js';
 import { GeneralAI } from '../ai/general.js';

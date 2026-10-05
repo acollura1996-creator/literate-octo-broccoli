@@ -19,7 +19,7 @@ import { FogOfWar, registerFogOfWar } from './FogOfWar';
 import { registerLinearLighting } from './Lighting';
 import { ModelLibrary, type ModelInstance } from './ModelLibrary';
 import { UnitAssets, UnitView, ItemView, quatFromEulerXYZ } from './UnitView';
-import { ITEMS } from '../data/items.js';
+import { ITEMS } from '../data/items.ts';
 import { Effects } from './Effects';
 import { ProjectileView } from './Projectiles';
 import { Previews } from './Previews';

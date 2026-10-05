@@ -7,7 +7,7 @@ import { TerrainView, RoadMesh, FogTexture, buildCitadel } from './terrainView.j
 import { Previews } from './previews.js';
 import { modelIcon, Portrait } from '../ui/icons.js';
 import { MAP_SIZE } from '../world/layout.js';
-import { ITEMS } from '../data/items.js';
+import { ITEMS } from '../data/items.ts';
 
 const _tmp = new THREE.Vector3();
 

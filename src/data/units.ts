@@ -4,11 +4,15 @@
 //
 // armorType: light | medium | heavy | fortified | hero | unarmored
 // attackType: normal | pierce | siege | magic | hero | chaos
+import type { AgeDef, ArmorType, AttackType, Cost, Mood, UnitDef, UpgradeDef } from './types.ts';
 
-const U = {};
+/** A definition as written below: anything not given takes the defaults in `def`. */
+type DefInit = Partial<UnitDef> & { name: string };
 
-function def(id, d) {
-  U[id] = {
+const U: Record<string, UnitDef> = {};
+
+function def(id: string, d: DefInit): UnitDef {
+  const u: UnitDef = {
     id,
     kind: 'unit',
     model: id,
@@ -35,7 +39,8 @@ function def(id, d) {
     abilities: [],
     ...d,
   };
-  return U[id];
+  U[id] = u;
+  return u;
 }
 
 // ------------------------------------------------------------------- Ages
@@ -43,7 +48,7 @@ function def(id, d) {
 // town center. Every unit belongs to an age (`age`), and production buildings offer the units
 // of the current and the previous age. Town centers, houses, farms, walls, gates and towers
 // rebuild themselves in the style of each new age.
-export const AGES = [
+export const AGES: (AgeDef | null)[] = [
   null,
   { name: 'Stone Age', icon: '🪨' },
   { name: 'Bronze Age', icon: '🏺', cost: { gold: 200, lumber: 150 }, time: 40, requires: ['barracks'] },
@@ -358,7 +363,7 @@ def('graviton', {
 });
 
 // ------------------------------------------------------------ Empire buildings
-function building(id, d) {
+function building(id: string, d: DefInit): UnitDef {
   return def(id, {
     kind: 'building',
     armorType: 'fortified',
@@ -487,16 +492,16 @@ building('altar', {
 
 // Unlocks: a unit or structure of age N requires that age.
 for (const d of Object.values(U)) {
-  if (d.age > 1) d.requires = [`age${d.age}`, ...(d.requires ?? []).filter((r) => !/^age\d+$/.test(r))];
+  if (d.age && d.age > 1) d.requires = [`age${d.age}`, ...(d.requires ?? []).filter((r) => !/^age\d+$/.test(r))];
 }
 
 /** Structures a Peasant can build, split into the two build menus. */
-export const BUILD_MENUS = {
+export const BUILD_MENUS: Record<'basic' | 'advanced', string[]> = {
   basic: ['house', 'road', 'farm', 'wall', 'gate', 'lumberyard', 'barracks', 'scouttower', 'townhall'],
   advanced: ['research_center', 'stable', 'workshop', 'sanctum', 'factory', 'missile_silo'],
 };
 /** Roads are laid tile by tile (not units). */
-export const ROAD = {
+export const ROAD: { name: string; cost: Cost; hotkey: string; speedBonus: number; description: string } = {
   name: 'Road', cost: { gold: 2, lumber: 0 }, hotkey: 'R', speedBonus: 1.3,
   description: 'Drag to lay a road. Houses must touch a road connected to your town center. Units move faster on roads, and a well-paved city keeps its people happy.',
 };
@@ -507,7 +512,7 @@ export const ECONOMY = {
   // Taxes and rations have no upper limit: the people's mood keeps them in check.
   taxPerCitizen: 0.02, // gold per second per citizen per point of tax
   foodPerRation: 0.0033, // food per second per citizen per ration point
-  moods: [
+  moods: <Mood[]>[
     { min: 200, name: 'Utopia', icon: '🌟', color: '#ffe066', income: 1.6, growth: 2.2 },
     { min: 150, name: 'Ecstatic', icon: '🤩', color: '#9effc8', income: 1.45, growth: 1.9 },
     { min: 110, name: 'Devoted', icon: '🥰', color: '#8affa0', income: 1.35, growth: 1.7 },
@@ -518,7 +523,7 @@ export const ECONOMY = {
     { min: -Infinity, name: 'Hate', icon: '😡', color: '#ff5a5a', income: 0, growth: 0 },
   ],
   maxHappiness: 250,
-  hireFee: (level) => 120 + 45 * level,
+  hireFee: (level: number) => 120 + 45 * level,
   hireTime: 180,
   nuke: { cost: { gold: 800, lumber: 150 }, time: 90, radius: 9, damage: 1800, flight: 7 },
 };
@@ -526,7 +531,7 @@ export const ECONOMY = {
 // --------------------------------------------------------------------- Heroes
 // Hero stats: base damage + primary attribute. See data/heroes.js for
 // attributes and abilities.
-function hero(id, d) {
+function hero(id: string, d: DefInit): UnitDef {
   return def(id, {
     kind: 'unit',
     hero: true,
@@ -567,12 +572,12 @@ def('water_elemental', {
 });
 
 // --------------------------------------------------------------------- Creeps
-function creep(id, d) {
+function creep(id: string, d: DefInit): UnitDef {
   return def(id, { creep: true, hpRegen: 0.5, sight: 8, ...d });
 }
 creep('kobold', {
   name: 'Kobold', hp: 240, armor: 1, damage: [7, 8], attackCooldown: 1.35, speed: 2.7, radius: 0.35,
-  level: 1, bounty: [8, 12], food: 1, cost: { gold: 0 },
+  level: 1, bounty: [8, 12], food: 1, cost: { gold: 0, lumber: 0 },
 });
 creep('gnoll', {
   name: 'Gnoll Brute', hp: 330, armor: 1, damage: [11, 13], attackCooldown: 1.35, speed: 2.8,
@@ -617,7 +622,7 @@ creep('drake', {
 });
 
 // -------------------------------------------------------- Kalenden's Legion
-function legion(id, d) {
+function legion(id: string, d: DefInit): UnitDef {
   return def(id, { legion: true, hpRegen: 0.25, ...d });
 }
 legion('kalenden', {
@@ -639,8 +644,8 @@ legion('skeleton_archer', {
   attackCooldown: 1.6, range: 5.5, projectile: { kind: 'arrow', speed: 16, color: 0xb7ffb0 }, speed: 2.8,
   radius: 0.4, level: 2, bounty: [8, 11], undead: true,
 });
-U.dark_knight.undead = true;
-U.kalenden.undead = true;
+U['dark_knight']!.undead = true;
+U['kalenden']!.undead = true;
 
 building('kalenden_keep', {
   name: "Kalenden's Keep", hp: 6000, armor: 8, footprint: 6, sight: 12, legion: true, hpRegen: 5,
@@ -680,7 +685,7 @@ building('fountain', {
 
 export const UNITS = U;
 
-export const ATTACK_TABLE = {
+export const ATTACK_TABLE: Record<AttackType, Record<ArmorType, number>> = {
   //          light medium heavy fortified hero unarmored
   normal: { light: 1.0, medium: 1.5, heavy: 1.0, fortified: 0.7, hero: 1.0, unarmored: 1.0 },
   pierce: { light: 2.0, medium: 0.75, heavy: 1.0, fortified: 0.35, hero: 0.5, unarmored: 1.5 },
@@ -693,7 +698,7 @@ export const ATTACK_TABLE = {
 
 // Research Center upgrades. Every research has many levels; each age you reach unlocks two more
 // levels of each (RESEARCH_PER_AGE), and every level costs a little more than the last.
-export const UPGRADES = {
+export const UPGRADES: Record<string, UpgradeDef> = {
   weaponry: { name: 'Weaponry', icon: '🗡️', base: { gold: 90, lumber: 40 }, time: 30, effect: '+6% damage for your units and towers' },
   armor: { name: 'Armor Plating', icon: '🛡️', base: { gold: 90, lumber: 50 }, time: 30, effect: '+1 armor for your units' },
   vitality: { name: 'Vitality', icon: '❤️', base: { gold: 100, lumber: 40 }, time: 30, effect: '+6% health for your units' },
@@ -710,14 +715,14 @@ export const UPGRADES = {
 export const RESEARCH_IDS = Object.keys(UPGRADES);
 export const RESEARCH_PER_AGE = 2;
 /** Highest research level a general may reach in their current age. */
-export const researchCap = (p) => Math.max(1, p.tier) * RESEARCH_PER_AGE;
+export const researchCap = (p: { tier: number }): number => Math.max(1, p.tier) * RESEARCH_PER_AGE;
 /** Cost of researching level `lvl + 1` (lvl = levels already researched). */
-export function researchCost(id, lvl) {
-  const b = UPGRADES[id].base;
+export function researchCost(id: string, lvl: number): Cost {
+  const b = UPGRADES[id]!.base;
   const k = 1 + 0.6 * lvl;
   return { gold: Math.round((b.gold * k) / 5) * 5, lumber: Math.round((b.lumber * k) / 5) * 5 };
 }
-export const researchTime = (id, lvl) => Math.round(UPGRADES[id].time * (1 + 0.12 * lvl));
+export const researchTime = (id: string, lvl: number): number => Math.round(UPGRADES[id]!.time * (1 + 0.12 * lvl));
 
 /** Experience granted for killing a unit of a given level (Warcraft III-like table). */
 export const XP_BY_LEVEL = [0, 25, 40, 60, 85, 115, 150, 190, 235, 285, 340, 400, 460, 520, 600, 700];

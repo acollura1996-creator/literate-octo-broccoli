@@ -1,10 +1,12 @@
 // Gun muzzle positions per model, used to start shots at the barrel. Engine-free data.
 
+export type Vec3 = [number, number, number];
+
 /**
  * Muzzle offsets in model space ([x, y, z], model facing +Z) for units whose shots should leave
  * the barrel rather than the unit's chest.
  */
-export const MUZZLE = {
+export const MUZZLE: Record<string, Vec3 | Vec3[]> = {
   grenadier: [-0.204, 0.568, 0.195],
   musketeer: [0, 0.646, 1.031],
   cannon: [0, 0.676, 0.789],
