@@ -93,14 +93,14 @@ export class LegionManager {
 
   /**
    * Kalenden's power grows with the most advanced empire: from the Dark Age on, each age gives
-   * him, his citadel and his Legion +25% health, +15% damage and more armor.
+   * him, his citadel and its guards +25% health, +15% damage and more armor.
    */
   scaleWithAges() {
     const g = this.game;
     const top = Math.max(1, ...g.generals.filter((p) => !p.defeated).map((p) => p.tier || 1));
     const k = Math.max(0, top - 3);
     for (const u of g.legion.units.concat(g.legion.buildings)) {
-      if (u.dead) continue;
+      if (u.dead || u.wave) continue; // marching waves already grow with every wave
       const cur = u.buffs.get('dominion');
       if ((cur?.k ?? 0) === k) continue;
       const ratio = u.hp / u.maxHp;

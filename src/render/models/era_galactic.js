@@ -255,7 +255,7 @@ function spireFins(key, n, gap, rIn, rOut, h, taper) {
       s.absarc(0, 0, rOut, a0, a1, false);
       s.absarc(0, 0, rIn, a1, a0, true);
       s.closePath();
-      const g = new THREE.ExtrudeGeometry(s, { depth: h, bevelEnabled: false, curveSegments: 2 });
+      const g = new THREE.ExtrudeGeometry(s, { depth: h, bevelEnabled: false, curveSegments: 1 });
       g.rotateX(-HALF_PI);
       const p = g.attributes.position;
       for (let k = 0; k < p.count; k++) {
@@ -352,10 +352,10 @@ function unitResult(r, height, radius, extra = {}) {
 
 /** Sleek power-armour leg from the hip pivot: pearl thigh with team stripe, team knee guard, lilac shin, antigrav boot. */
 function voidLeg(lg, L, w, m, s) {
-  add(lg, geo.sphere(w * 0.5, 6, 4), m.void, [0, -0.01, 0]);
+  add(lg, geo.sphere(w * 0.5, 5, 3), m.void, [0, -0.01, 0]);
   add(lg, CG.frustum(1.28), m.pearl, [0, -L * 0.25, 0], null, [w, L * 0.44, w * 1.1]);
   add(lg, geo.box(0.022, L * 0.3, w * 0.7), m.team, [s * w * 0.6, -L * 0.24, 0]);
-  add(lg, geo.sphere(w * 0.42, 6, 4), m.void, [0, -L * 0.5, 0]);
+  add(lg, geo.sphere(w * 0.42, 5, 3), m.void, [0, -L * 0.5, 0]);
   add(lg, geo.box(w * 0.92, w * 0.85, 0.04), m.team, [0, -L * 0.5, w * 0.58], [-0.14, 0, 0]);
   add(lg, CG.frustum(1.3), m.lilac, [0, -L * 0.7, 0], null, [w * 0.84, L * 0.34, w * 0.98]);
   add(lg, geo.box(w * 1.12, L * 0.12, w * 1.72), m.gun, [0, -L + L * 0.075, w * 0.28]);
@@ -386,7 +386,7 @@ export function void_trooper(tc) {
   add(b, CG.frustum(0.8), m.void, [0, 0.43, 0], null, [0.17, 0.05, 0.14]);
   // swept pauldrons with team tops and iridescent edge fins
   for (const s of [1, -1]) {
-    add(b, geo.sphere(0.09, 8, 6), m.pearl, [s * 0.25, 0.39, 0], null, [1.3, 0.8, 1.2]);
+    add(b, geo.sphere(0.09, 7, 5), m.pearl, [s * 0.25, 0.39, 0], null, [1.3, 0.8, 1.2]);
     add(b, geo.box(0.16, 0.03, 0.17), m.team, [s * 0.262, 0.47, 0], [0, 0, -s * 0.34]);
     add(b, geo.box(0.022, 0.12, 0.17), m.lilac, [s * 0.35, 0.4, -0.02], [0.3, 0, -s * 0.22]);
   }
@@ -407,14 +407,14 @@ export function void_trooper(tc) {
   add(h, geo.box(0.026, 0.05, 0.2), m.team, [0, 0.2, -0.02], [0.12, 0, 0]);
   const halo = grp(h, 0, 0.2, -0.1);
   halo.rotation.x = -0.6;
-  add(halo, geo.torus(0.12, 0.014, 4, 18), m.pearl);
-  glowAdd(glow, halo, geo.torus(0.12, 0.007, 4, 18), m.violet, [0, 0, 0.01]);
+  add(halo, geo.torus(0.12, 0.014, 3, 14), m.pearl);
+  glowAdd(glow, halo, geo.torus(0.12, 0.007, 3, 14), m.violet, [0, 0, 0.01]);
   add(halo, mergedBoxes('galVtHaloFins', [[0.022, 0.07, 0.02, 0.1, 0.07, 0, 0, 0], [0.022, 0.07, 0.02, -0.1, 0.07, 0, 0, 0]]), m.pearl);
   // off arm (supports the barrel)
   const aL = r.armL;
   const eL = [-0.1, -0.21, 0.1], hL = [-0.335, -0.19, 0.27];
   beam(aL, [0, 0, 0], eL, 0.08, m.pearl);
-  add(aL, geo.sphere(0.045, 6, 4), m.void, eL);
+  add(aL, geo.sphere(0.045, 5, 3), m.void, eL);
   beam(aL, eL, hL, 0.088, m.pearl);
   beam(aL, lerp3(eL, hL, 0.35), lerp3(eL, hL, 0.75), 0.096, m.team);
   add(aL, geo.box(0.065, 0.07, 0.07), m.void, hL);
@@ -422,7 +422,7 @@ export function void_trooper(tc) {
   const w = r.weapon;
   const eR = [-0.005, -0.19, -0.03], hR = [0.115, -0.165, 0.085];
   beam(w, [0, 0, 0], eR, 0.08, m.pearl);
-  add(w, geo.sphere(0.045, 6, 4), m.void, eR);
+  add(w, geo.sphere(0.045, 5, 3), m.void, eR);
   beam(w, eR, hR, 0.088, m.pearl);
   beam(w, lerp3(eR, hR, 0.3), lerp3(eR, hR, 0.75), 0.096, m.team);
   add(w, geo.box(0.06, 0.07, 0.07), m.void, hR);
@@ -437,7 +437,7 @@ export function void_trooper(tc) {
   add(gun, geo.box(0.045, 0.06, 0.06), m.void, [0, -0.07, 0.22]);
   // exposed plasma core on top, held by chrome clamps
   glowAdd(glow, gun, geo.cyl(0.021, 0.021, 0.2, 8), m.magenta, [0, 0.07, 0.16], [HALF_PI, 0, 0]);
-  add(gun, mergedCyls('vtClamps', [0.07, 0.16, 0.25].map((z) => [0.03, 0.03, 0.022, 0, 0.07, z, HALF_PI, 0, 8])), m.chrome);
+  add(gun, mergedCyls('vtClamps', [0.07, 0.16, 0.25].map((z) => [0.03, 0.03, 0.022, 0, 0.07, z, HALF_PI, 0, 6])), m.chrome);
   // barrel + forked lance prongs with glowing tips
   add(gun, geo.cyl(0.022, 0.03, 0.3, 8), m.chrome, [0, 0, 0.48], [HALF_PI, 0, 0]);
   add(gun, mergedBoxes('vtProngs', [[0.016, 0.034, 0.34, 0.042, 0, 0.5, -0.07], [0.016, 0.034, 0.34, -0.042, 0, 0.5, 0.07]]), m.pearl);
@@ -534,14 +534,14 @@ function titanLeg(lg, H, s, m) {
   beam(lg, [0, -0.04, 0.02], K, 0.4, m.pearl, 0.46);
   add(lg, geo.box(0.05, 0.56, 0.4), m.team, [s * 0.22, -0.42, 0.08], [0.19, 0, 0]);
   add(lg, geo.box(0.42, 0.08, 0.5), m.lilac, [0, -0.2, 0.04], [0.19, 0, 0]);
-  add(lg, geo.sphere(0.21, 8, 6), m.void, K);
+  add(lg, geo.sphere(0.21, 6, 4), m.void, K);
   add(lg, geo.box(0.36, 0.34, 0.14), m.pearl, [0, K[1] + 0.03, K[2] + 0.17], [0.3, 0, 0]);
   add(lg, geo.box(0.16, 0.05, 0.04), m.violet, [0, K[1] + 0.06, K[2] + 0.25], [0.3, 0, 0]);
   beam(lg, K, A, 0.32, m.gun, 0.34);
   beam(lg, [0, K[1] - 0.12, K[2] + 0.12], [0, A[1] + 0.06, A[2] + 0.14], 0.38, m.pearl, 0.1);
   beam(lg, [0, K[1] - 0.2, K[2] + 0.17], [0, A[1] + 0.16, A[2] + 0.19], 0.16, m.team, 0.02);
   for (const t of [1, -1]) rod(lg, [t * 0.17, -0.12, -0.14], [t * 0.17, A[1] + 0.12, A[2] - 0.12], 0.03, m.chrome, 5);
-  add(lg, geo.sphere(0.16, 8, 6), m.void, A);
+  add(lg, geo.sphere(0.16, 6, 4), m.void, A);
   // foot: armoured wedge with toe cap, heel spur and a glowing antigrav sole
   add(lg, geo.box(0.5, 0.2, 0.82), m.gun, [0, -H + 0.12, 0.06]);
   add(lg, profileX('titanToe', [[0.12, 0], [0.56, 0], [0.56, 0.1], [0.3, 0.24], [0.12, 0.26]], 0.46), m.pearl, [0, -H + 0.02, 0]);
@@ -581,8 +581,8 @@ export function titan(tc) {
     add(body, geo.box(0.06, 0.42, 0.06), m.lilac, [s * 0.18, 0.94, 0.56], [-0.05, s * 0.42, 0]);
   }
   // reactor core: pearl ring, magenta inner ring, white-violet core (glow)
-  add(body, geo.torus(0.2, 0.06, 6, 12), m.pearl, [0, 0.9, 0.56], [-0.05, 0, 0]);
-  add(body, geo.torus(0.15, 0.025, 4, 12), m.magenta, [0, 0.9, 0.58], [-0.05, 0, 0]);
+  add(body, geo.torus(0.2, 0.06, 4, 10), m.pearl, [0, 0.9, 0.56], [-0.05, 0, 0]);
+  add(body, geo.torus(0.15, 0.025, 3, 10), m.magenta, [0, 0.9, 0.58], [-0.05, 0, 0]);
   glowAdd(glow, body, geo.ico(0.14, 0), m.white, [0, 0.9, 0.55]);
   add(body, geo.cyl(0.16, 0.16, 0.06, 8), m.void, [0, 0.9, 0.5], [HALF_PI, 0, 0]);
   // collar + sunken head with a glowing visor and a halo crown
@@ -594,8 +594,8 @@ export function titan(tc) {
   add(head, geo.box(0.04, 0.08, 0.36), m.team, [0, 0.29, -0.02]);
   const halo = grp(head, 0, 0.28, -0.24);
   halo.rotation.x = -0.6;
-  add(halo, geo.torus(0.26, 0.03, 4, 20), m.pearl);
-  glowAdd(glow, halo, geo.torus(0.26, 0.014, 4, 20), m.violet, [0, 0, 0.02]);
+  add(halo, geo.torus(0.26, 0.03, 3, 14), m.pearl);
+  glowAdd(glow, halo, geo.torus(0.26, 0.014, 3, 14), m.violet, [0, 0, 0.02]);
   // massive pauldrons with team tops, carrying tall pylons and floating crystals
   for (const s of [1, -1]) {
     const x = s * 0.78;
@@ -604,24 +604,24 @@ export function titan(tc) {
     add(body, geo.box(0.06, 0.3, 0.66), m.lilac, [x + s * 0.32, 1.26, 0], [0, 0, -s * 0.12]);
     const px = s * 0.8, pz = -0.14;
     add(body, geo.cyl(0.13, 0.16, 0.12, 6), m.gun, [px, 1.56, pz]);
-    add(body, geo.cyl(0.07, 0.12, 0.84, 6), m.pearl, [px, 1.98, pz]);
-    add(body, geo.cyl(0.11, 0.11, 0.08, 6), m.team, [px, 1.8, pz]);
-    add(body, geo.cyl(0.1, 0.075, 0.06, 6), m.chrome, [px, 2.42, pz]);
-    add(body, crystalGeo('titanPylon', 0.07, 0.14, 0.06, 0.08, 6), m.violet, [px, 2.56, pz]);
+    add(body, geo.cyl(0.07, 0.12, 0.7, 6), m.pearl, [px, 1.91, pz]);
+    add(body, geo.cyl(0.11, 0.11, 0.08, 6), m.team, [px, 1.78, pz]);
+    add(body, geo.cyl(0.1, 0.075, 0.06, 6), m.chrome, [px, 2.28, pz]);
+    add(body, crystalGeo('titanPylon', 0.07, 0.14, 0.06, 0.08, 6), m.violet, [px, 2.42, pz]);
   }
   // back: reactor spine with vents, halo ring
   add(body, geo.box(0.56, 0.6, 0.2), m.gun, [0, 0.98, -0.52]);
   add(body, mergedBoxes('titanVents', [-0.16, 0, 0.16].map((x) => [0.08, 0.36, 0.02, x, 0, 0])), m.violet, [0, 0.98, -0.625]);
-  add(body, geo.torus(0.5, 0.04, 4, 24), m.lilac, [0, 1.2, -0.66], [0.2, 0, 0]);
+  add(body, geo.torus(0.5, 0.04, 3, 16), m.lilac, [0, 1.2, -0.66], [0.2, 0, 0]);
   add(body, mergedBoxes('titanHaloStruts', [[0.06, 0.06, 0.2, 0.5, 0, 0.06], [0.06, 0.06, 0.2, -0.5, 0, 0.06]]), m.gun, [0, 1.2, -0.66]);
   // twin arm cannons (one group = parts.weapon), pivoted on the shoulder line
   const weapon = grp(body, 0, 1.18, 0);
   for (const s of [1, -1]) {
     const x = s * 0.98;
-    add(weapon, geo.sphere(0.2, 8, 6), m.void, [s * 0.86, 0, 0]);
+    add(weapon, geo.sphere(0.2, 6, 4), m.void, [s * 0.86, 0, 0]);
     add(weapon, geo.box(0.26, 0.48, 0.3), m.gun, [x, -0.28, 0]);
     add(weapon, geo.box(0.04, 0.36, 0.26), m.team, [x + s * 0.15, -0.26, 0]);
-    add(weapon, geo.sphere(0.17, 8, 6), m.void, [x, -0.54, 0]);
+    add(weapon, geo.sphere(0.17, 6, 4), m.void, [x, -0.54, 0]);
     // cannon housing
     add(weapon, profileX('titanCannon', [[-0.28, -0.2], [0.62, -0.2], [0.72, -0.08], [0.66, 0.16], [-0.18, 0.2], [-0.32, 0.04]], 0.34, 0.03), m.pearl, [x, -0.66, 0]);
     add(weapon, geo.box(0.03, 0.22, 0.7), m.team, [x + s * 0.17, -0.66, 0.2]);
@@ -758,13 +758,13 @@ export function galactic_citadel(tc) {
     spokes.push([0.05, 0.012, 0.36, Math.sin(a) * 1.4, 0, Math.cos(a) * 1.4, a]);
   }
   add(root, mergedBoxes('citSpokes', spokes), m.violet, [0, b, 0]);
-  glowAdd(glow, root, annulus(1.27, 1.33, 0.014, 32), m.white, [0, b, 0]);
+  glowAdd(glow, root, geo.ring(1.27, 1.34, 32), m.white, [0, b + 0.006, 0], [-HALF_PI, 0, 0]);
   // inner hall drum with window band and team cornice
-  add(root, lathe('citDrum', [[0.4, b], [1.26, b], [1.24, b + 0.5], [1.14, b + 0.78], [0.96, b + 0.9], [0.4, b + 0.9]], 32), m.pearl);
+  add(root, lathe('citDrum', [[0.4, b], [1.26, b], [1.24, b + 0.5], [1.14, b + 0.78], [0.96, b + 0.9], [0.4, b + 0.9]], 24), m.pearl);
   const winArcs = [];
   for (let k = 0; k < 8; k++) winArcs.push([k * (Math.PI / 4) + 0.2, Math.PI / 4 - 0.4]);
   add(root, latheArcs('citWin', [[1.252, b + 0.16], [1.272, b + 0.16], [1.262, b + 0.4], [1.242, b + 0.4]], winArcs, 2), m.white);
-  add(root, annulus(1.12, 1.2, 0.05, 32), m.team, [0, b + 0.78, 0]);
+  add(root, geo.cyl(1.2, 1.2, 0.05, 24), m.team, [0, b + 0.805, 0]);
   // four portals (cardinal) with team lintels
   for (let k = 0; k < 4; k++) {
     const g = grp(root, 0, b, 0, (k * Math.PI) / 2);
@@ -795,11 +795,6 @@ export function galactic_citadel(tc) {
   const cy = ty + TH;
   add(root, lathe('citCradle', [[0.2, cy - 0.06], [0.44, cy + 0.02], [0.66, cy + 0.2], [0.6, cy + 0.24], [0.4, cy + 0.12], [0.2, cy + 0.1]], 16), m.pearl);
   add(root, geo.cyl(0.42, 0.42, 0.03, 16), m.white, [0, cy + 0.11, 0]);
-  const prongs = [];
-  for (let k = 0; k < 4; k++) {
-    const a = Math.PI / 4 + (k * Math.PI) / 2;
-    prongs.push([0.06, 0.5, 0.1, Math.sin(a) * 0.62, cy + 0.42, Math.cos(a) * 0.62, a, 0]);
-  }
   add(root, geo.custom('gal:citProngs', () => {
     const list = [];
     for (let k = 0; k < 4; k++) {
@@ -829,15 +824,15 @@ export function galactic_citadel(tc) {
   const orbit = grp(root, 0, cy + 1.5, 0);
   const t1 = grp(orbit, 0, 0, 0);
   t1.rotation.set(0.28, 0, 0.1);
-  add(t1, geo.torus(1.12, 0.05, 5, 32), m.pearl, [0, 0, 0], [HALF_PI, 0, 0]);
-  glowAdd(glow, t1, geo.torus(1.05, 0.025, 4, 32), m.violet, [0, 0, 0], [HALF_PI, 0, 0]);
+  add(t1, geo.torus(1.12, 0.05, 4, 24), m.pearl, [0, 0, 0], [HALF_PI, 0, 0]);
+  glowAdd(glow, t1, geo.torus(1.05, 0.025, 3, 24), m.violet, [0, 0, 0], [HALF_PI, 0, 0]);
   add(t1, mergedBoxes('citNodes', [0, 1, 2].map((k) => {
     const a = (k * TAU) / 3;
     return [0.2, 0.12, 0.24, Math.sin(a) * 1.12, 0, Math.cos(a) * 1.12, a];
   })), m.team);
   const t2 = grp(orbit, 0, 0.55, 0);
   t2.rotation.set(-0.36, 0, -0.2);
-  add(t2, geo.torus(0.82, 0.04, 5, 28), m.lilac, [0, 0, 0], [HALF_PI, 0, 0]);
+  add(t2, geo.torus(0.82, 0.04, 4, 20), m.lilac, [0, 0, 0], [HALF_PI, 0, 0]);
   add(t2, mergedBoxes('citNodes2', [0, 1, 2].map((k) => {
     const a = (k * TAU) / 3 + 1;
     return [0.12, 0.12, 0.12, Math.sin(a) * 0.82, 0, Math.cos(a) * 0.82, a];
@@ -949,8 +944,8 @@ function forcePlinth(parent, m, w = 1, d = 1, x = 0, z = 0) {
 
 /** Hex relief plates centered on the four faces of the 1x1 plinth. */
 const plinthHexes = () => mergedCyls('forceHexes', [
-  [0.12, 0.12, 0.03, 0, 0.22, 0.497, HALF_PI, 0, 6], [0.12, 0.12, 0.03, 0, 0.22, -0.497, HALF_PI, 0, 6],
-  [0.12, 0.12, 0.03, 0.497, 0.22, 0, 0, HALF_PI, 6], [0.12, 0.12, 0.03, -0.497, 0.22, 0, 0, HALF_PI, 6],
+  [0.12, 0.12, 0.03, 0, 0.22, 0.488, HALF_PI, 0, 6], [0.12, 0.12, 0.03, 0, 0.22, -0.488, HALF_PI, 0, 6],
+  [0.12, 0.12, 0.03, 0.488, 0.22, 0, 0, HALF_PI, 6], [0.12, 0.12, 0.03, -0.488, 0.22, 0, 0, HALF_PI, 6],
 ]);
 
 /** Honeycomb cells on the four sides + top of the 1 x FIELD_H x 1 field block, origin at its center. */
@@ -981,10 +976,10 @@ export function wall_force(tc) {
   // hexagonal emitter pylon through the middle, crowned with a floating crystal
   const top = WALL_TOP + FIELD_H;
   add(root, geo.cyl(0.2, 0.22, 0.06, 6), m.lilac, [0, top + 0.03, 0]);
-  add(root, geo.cyl(0.11, 0.14, 0.3, 6), m.pearl, [0, top + 0.21, 0]);
-  add(root, geo.cyl(0.125, 0.13, 0.05, 6), m.team, [0, top + 0.16, 0]);
-  add(root, geo.cyl(0.13, 0.1, 0.04, 6), m.chrome, [0, top + 0.38, 0]);
-  glowAdd(glow, root, crystalGeo('forceTip', 0.06, 0.1, 0.04, 0.06, 6), m.violet, [0, top + 0.5, 0]);
+  add(root, geo.cyl(0.11, 0.14, 0.24, 6), m.pearl, [0, top + 0.16, 0]);
+  add(root, geo.cyl(0.125, 0.13, 0.05, 6), m.team, [0, top + 0.13, 0]);
+  add(root, geo.cyl(0.13, 0.1, 0.04, 6), m.chrome, [0, top + 0.3, 0]);
+  glowAdd(glow, root, crystalGeo('forceTip', 0.06, 0.1, 0.04, 0.06, 6), m.violet, [0, top + 0.42, 0]);
   return { root, parts: { glow }, height: 2.0, radius: 0.5 };
 }
 
@@ -1033,7 +1028,7 @@ export function gate_force(tc) {
     add(root, CG.frustum(0.84), m.lilac, [x, 0.36, 0], null, [pw, 0.16, 2 * GZ]);
     forcePlinth(root, m, pw, 1.12, x, 0);
     // pylon tower: outer face flush with x = +-1, team panels front and back with hex badges, emitter strip inside
-    const tw = pw - 0.03, tx = s * (1 - tw / 2), TH = 1.62;
+    const tw = pw - 0.03, tx = s * (1 - tw / 2), TH = 1.5;
     add(root, geo.box(tw, TH, 1.0), m.pearl, [tx, WALL_TOP + TH / 2, 0]);
     for (const sz of [1, -1]) {
       add(root, geo.box(tw - 0.1, 1.0, 0.02), m.team, [tx, WALL_TOP + 0.7, sz * 0.505]);

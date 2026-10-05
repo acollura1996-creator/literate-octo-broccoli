@@ -638,7 +638,8 @@ export class GeneralAI {
       const u = onWood.find((x) => !x.carry);
       if (u) g.issueOrder(u, { type: 'harvest', target: mine });
     }
-    const wanted = Math.min(26, 9 + p.tier * 2 + (p.gold > 2500 ? 4 : 0));
+    const woodHungry = p.gold > 2000 && p.lumber < 400;
+    const wanted = Math.min(woodHungry ? 40 : 26, 9 + p.tier * 2 + (p.gold > 2500 ? 4 : 0) + (woodHungry ? p.tier : 0));
     // Don't tie up the town center with Peasants when the next age is affordable.
     if (peasants.length < wanted && hall.trainQueue.length === 0 && !hall.upgrading && !this.ageReady) g.trainUnit(hall, 'peasant');
   }

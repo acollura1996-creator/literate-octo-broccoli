@@ -377,7 +377,7 @@ export function railgunner(tc) {
   add(b, geo.box(0.12, 0.014, 0.012), m.ledS, [0, 0.18, 0.131]);
   add(b, CG.frustum(0.82), m.comp, [0, 0.385, 0], null, [0.2, 0.05, 0.16]);
   for (const s of [1, -1]) {
-    add(b, geo.sphere(0.078, 8, 6), m.compM, [s * 0.235, 0.37, 0], null, [1.2, 0.78, 1.15]);
+    add(b, geo.sphere(0.078, 7, 5), m.compM, [s * 0.235, 0.37, 0], null, [1.2, 0.78, 1.15]);
     add(b, geo.box(0.12, 0.028, 0.14), m.team, [s * 0.25, 0.425, 0], [0, 0, -s * 0.3]);
   }
   // slim power pack: team flap, blue cells, whip antenna
@@ -387,8 +387,8 @@ export function railgunner(tc) {
   rod(b, [0.07, 0.35, -0.17], [0.085, 0.6, -0.2], 0.006, m.compD, 4);
   // smart helmet: dark shell, faceplate with the glowing HUD visor, team crest, sensor pods, helmet cam
   const h = r.head;
-  add(h, geo.sphere(0.084, 8, 6), mat(P.skin), [0, 0.09, 0.012]);
-  add(h, geo.sphere(0.106, 10, 7), m.comp, [0, 0.128, -0.012], null, [1.05, 0.86, 1.1]);
+  add(h, geo.sphere(0.084, 6, 4), mat(P.skin), [0, 0.09, 0.012]);
+  add(h, geo.sphere(0.106, 9, 6), m.comp, [0, 0.128, -0.012], null, [1.05, 0.86, 1.1]);
   add(h, geo.cyl(0.112, 0.118, 0.03, 10), m.compM, [0, 0.098, -0.012], null, [1, 1, 1.08]);
   add(h, geo.box(0.17, 0.085, 0.06), m.visor, [0, 0.1, 0.075]);
   glowAdd(glow, h, geo.box(0.16, 0.03, 0.02), m.led, [0, 0.112, 0.105]);
@@ -441,8 +441,8 @@ export function combat_drone(tc) {
     const x = sx * RX, z = sz * RZ;
     beam(craft, [sx * 0.13, 0.0, sz * 0.1], [x, RY, z], 0.075, m.team, 0.045);
     add(craft, geo.cyl(0.045, 0.05, 0.1, 8), m.compD, [x, RY - 0.02, z]);
-    add(craft, annulus(0.175, 0.205, 0.075, 16), m.pearl, [x, RY - 0.045, z]);
-    add(craft, annulus(0.2, 0.21, 0.03, 16), m.team, [x, RY - 0.01, z]);
+    add(craft, annulus(0.175, 0.205, 0.075, 14), m.pearl, [x, RY - 0.045, z]);
+    add(craft, annulus(0.2, 0.21, 0.03, 12), m.team, [x, RY - 0.01, z]);
     add(craft, mergedBoxes('dgDuctStruts', [[0.37, 0.014, 0.022, 0, 0, 0, Math.PI / 4], [0.37, 0.014, 0.022, 0, 0, 0, -Math.PI / 4]]), m.compD, [x, RY - 0.04, z]);
     const rot = grp(craft, x, RY + 0.035, z);
     add(rot, mergedBoxes('dgProp', [[0.33, 0.008, 0.045, 0, 0, 0, 0, 0.3], [0.33, 0.008, 0.045, 0, 0, 0, HALF_PI, 0.3]]), m.compD);
@@ -512,7 +512,9 @@ export function stealth_tank(tc) {
   const H = [[-0.48, 1.3], [0.48, 1.3], [0.8, 0.96], [0.8, -1.06], [0.6, -1.28], [-0.6, -1.28], [-0.8, -1.06], [-0.8, 0.96]];
   const hr = (y, sx, zf, zb) => [y, H.map(([x, z]) => [x * sx, z > 0 ? z * zf : z * zb])];
   const HR = [hr(0.25, 0.97, 0.88, 0.95), hr(0.42, 1, 1, 1), hr(0.56, 0.86, 0.74, 0.94), hr(0.62, 0.74, 0.62, 0.9)];
-  add(root, loftGeo('dgStealthHull', HR), m.comp);
+  const deck = mat(0x3d444d);
+  add(root, loftGeo('dgStealthHull', HR.slice(0, 3)), m.comp);
+  add(root, loftGeo('dgStealthDeck', HR.slice(2)), deck);
   add(root, loftGeo('dgStealthStripe', [ringAt(HR[1], HR[2], 0.1, 0.007), ringAt(HR[1], HR[2], 0.3, 0.007)]), m.team);
   add(root, loftGeo('dgStealthChine', [ringAt(HR[0], HR[1], 0.86, 0.006), ringAt(HR[0], HR[1], 1, 0.006)]), m.compM);
   // glacis: LED running lights, driver's sensor slit
@@ -522,7 +524,7 @@ export function stealth_tank(tc) {
   const dy = 0.62;
   const saw = [];
   for (let i = 0; i < 7; i++) saw.push([0.07, 0.01, 0.07, -0.45 + i * 0.15, 0, -0.62, Math.PI / 4]);
-  add(root, mergedBoxes('dgDeckSaw', [...saw, [0.96, 0.01, 0.42, 0, 0, -0.86]]), m.compM, [0, dy + 0.004, 0]);
+  add(root, mergedBoxes('dgDeckSaw', [...saw, [0.96, 0.01, 0.42, 0, 0, -0.86]]), m.comp, [0, dy + 0.004, 0]);
   const grille = [];
   for (let i = 0; i < 6; i++) grille.push([0.07, 0.012, 0.3, -0.3 + i * 0.12, 0, 0, 0.5]);
   add(root, mergedBoxes('dgDeckGrille', grille), m.compD, [0, dy + 0.012, -0.86]);
@@ -533,7 +535,7 @@ export function stealth_tank(tc) {
   const tr = (y, sx, zf, zb) => [y, T.map(([x, z]) => [x * sx, z > 0 ? z * zf : z * zb])];
   const TR = [tr(0, 0.88, 0.86, 0.94), tr(0.08, 1, 1, 1), tr(0.25, 0.78, 0.72, 0.9)];
   const turret = grp(root, 0, dy, -0.18);
-  add(turret, loftGeo('dgStealthTurret', TR), m.compM);
+  add(turret, loftGeo('dgStealthTurret', TR), mat(0x4e5661));
   add(turret, loftGeo('dgTurretStripe', [ringAt(TR[1], TR[2], 0.12, 0.012), ringAt(TR[1], TR[2], 0.34, 0.012)]), m.team);
   const roof = 0.25;
   add(turret, geo.box(0.42, 0.012, 0.26), m.team, [0.04, roof + 0.004, -0.3]);
@@ -587,8 +589,8 @@ export function digital_hub(tc) {
   const PZ = -0.45, PW = 3.3, PD = 2.5;
   add(root, roundSlab(PW - 0.12, PD - 0.12, 0.44, 0.3), glassD, [0, b, PZ]);
   const fins = [];
-  for (let i = 0; i < 11; i++) fins.push([0.04, 0.44, 0.04, -1.45 + i * 0.29, 0.22, PZ + PD / 2 - 0.05]);
-  for (let i = 0; i < 7; i++) fins.push([0.04, 0.44, 0.04, PW / 2 - 0.05, 0.22, PZ - 0.9 + i * 0.3], [0.04, 0.44, 0.04, -PW / 2 + 0.05, 0.22, PZ - 0.9 + i * 0.3]);
+  for (let i = 0; i < 11; i++) if (i < 4 || i > 6) fins.push([0.04, 0.44, 0.04, -1.45 + i * 0.29, 0.22, PZ + PD / 2 - 0.05]);
+  for (let i = 0; i < 6; i++) fins.push([0.04, 0.44, 0.04, PW / 2 - 0.05, 0.22, PZ - 0.75 + i * 0.3], [0.04, 0.44, 0.04, -PW / 2 + 0.05, 0.22, PZ - 0.75 + i * 0.3]);
   add(root, mergedBoxes('dgHubLobbyFins', fins), m.white, [0, b, 0]);
   add(root, roundSlab(PW, PD, 0.07, 0.36), m.white, [0, b + 0.44, PZ]);
   add(root, roundSlab(PW - 0.08, PD - 0.08, 0.26, 0.32), m.comp, [0, b + 0.51, PZ]);
@@ -613,7 +615,7 @@ export function digital_hub(tc) {
     add(lv, geo.box(w, LH - 0.06, w), i % 2 ? glassB : glassA, [0, (LH - 0.06) / 2, 0]);
     const mull = [];
     for (const u of [-w / 4, 0, w / 4]) {
-      mull.push([0.03, LH - 0.06, 0.03, u, (LH - 0.06) / 2, w / 2], [0.03, LH - 0.06, 0.03, u, (LH - 0.06) / 2, -w / 2]);
+      mull.push([0.03, LH - 0.06, 0.03, u, (LH - 0.06) / 2, w / 2]);
       mull.push([0.03, LH - 0.06, 0.03, w / 2, (LH - 0.06) / 2, u], [0.03, LH - 0.06, 0.03, -w / 2, (LH - 0.06) / 2, u]);
     }
     add(lv, mergedBoxes(`dgHubMull${w.toFixed(3)}`, mull), m.white);
@@ -626,10 +628,10 @@ export function digital_hub(tc) {
   add(crown, geo.box(wt, 0.14, wt), m.white, [0, 0.07, 0]);
   add(crown, geo.box(wt + 0.03, 0.05, wt + 0.03), m.team, [0, 0.09, 0]);
   add(crown, geo.cyl(0.46, 0.48, 0.05, 20), m.compD, [0, 0.165, 0]);
-  glowAdd(glow, crown, annulus(0.38, 0.43, 0.012, 20), m.led, [0, 0.19, 0]);
+  glowAdd(glow, crown, geo.ring(0.37, 0.43, 20), m.led, [0, 0.192, 0], [-HALF_PI, 0, 0]);
   add(crown, mergedBoxes('dgHubPadMark', [[0.42, 0.008, 0.05, 0, 0, 0, Math.PI / 4], [0.42, 0.008, 0.05, 0, 0, 0, -Math.PI / 4]]), m.white, [0, 0.192, 0]);
   miniDrone(crown, 0.0, 0.196, 0.0, 0.4, m);
-  const mastBase = [[0.46, 0.46, 1.42], [-0.46, -0.46, 0.98]];
+  const mastBase = [[0.44, 0.44, 1.04], [-0.44, -0.44, 0.72]];
   for (const [x, z, h] of mastBase) {
     add(crown, geo.box(0.12, 0.06, 0.12), m.comp, [x, 0.17, z]);
     add(crown, geo.cyl(0.018, 0.035, h, 6), m.pearl, [x, 0.2 + h / 2, z]);
@@ -739,9 +741,9 @@ export function house_digital(tc) {
   add(root, geo.box(Cm.w - 0.06, 0.06, Cm.d - 0.06), green, [Cm.x, ry + 0.06, Cm.z]);
   add(root, mergedBoxes('dgHomeShrubs', [[0.14, 0.09, 0.14, -0.25, 0, -0.18], [0.12, 0.08, 0.12, 0.18, 0, 0.12], [0.16, 0.1, 0.12, 0.2, 0, -0.22], [0.1, 0.07, 0.1, -0.22, 0, 0.18]]), greenD, [Cm.x, ry + 0.12, Cm.z]);
   // sensor / weather mast with a team pennant light
-  add(root, geo.cyl(0.012, 0.016, 0.42, 5), m.pearl, [Cm.x - 0.36, ry + 0.27, Cm.z - 0.3]);
-  add(root, geo.box(0.12, 0.012, 0.012), m.pearl, [Cm.x - 0.36, ry + 0.38, Cm.z - 0.3]);
-  add(root, geo.sphere(0.03, 6, 4), m.ledS, [Cm.x - 0.36, ry + 0.49, Cm.z - 0.3]);
+  add(root, geo.cyl(0.012, 0.016, 0.24, 5), m.pearl, [Cm.x - 0.36, ry + 0.16, Cm.z - 0.3]);
+  add(root, geo.box(0.12, 0.012, 0.012), m.pearl, [Cm.x - 0.36, ry + 0.22, Cm.z - 0.3]);
+  add(root, geo.sphere(0.03, 6, 4), m.ledS, [Cm.x - 0.36, ry + 0.29, Cm.z - 0.3]);
   // --- exposed roof of B: solar glass (right strip) and a glass-railed terrace (front strip)
   const sy = by + B.h;
   const sol = grp(root, 0.6, sy, -0.12);
@@ -817,11 +819,12 @@ export function research_3(tc) {
     return [0.16, 0.08, 0.02, Math.sin(a) * 0.7, 0, Math.cos(a) * 0.7, a];
   })), m.ledS, [0, b + 0.1, cz]);
   const dy = b + 0.3;
-  add(root, geo.cyl(0.62, 0.62, 0.02, 20), m.compD, [0, dy + 0.01, cz]);
+  add(root, geo.cyl(0.62, 0.62, 0.02, 20), m.pearl, [0, dy + 0.01, cz]);
+  add(root, geo.ring(0.4, 0.46, 20), m.ledS, [0, dy + 0.022, cz], [-HALF_PI, 0, 0]);
   add(root, geo.cyl(0.16, 0.22, 0.14, 8), m.compM, [0, dy + 0.07, cz]);
   add(root, geo.cyl(0.08, 0.1, 0.2, 8), m.pearl, [0, dy + 0.2, cz]);
-  glowAdd(glow, root, geo.ico(0.15, 0), glowMat(0x7ec4ff, 1.4), [0, dy + 0.42, cz]);
-  glowAdd(glow, root, geo.ico(0.085, 0), glowMat(0xeaf4ff, 1.5), [0, dy + 0.42, cz], [0.5, 0.3, 0]);
+  glowAdd(glow, root, geo.ico(0.17, 0), glowMat(0x7ec4ff, 1.4), [0, dy + 0.42, cz]);
+  glowAdd(glow, root, geo.ico(0.1, 0), glowMat(0xeaf4ff, 1.5), [0, dy + 0.42, cz], [0.5, 0.3, 0]);
   const gyro = grp(root, 0, dy + 0.42, cz);
   const gt = grp(gyro, 0, 0, 0);
   gt.rotation.z = 0.45;
@@ -848,10 +851,10 @@ export function research_3(tc) {
   // --- satellite dish mast (back right) with the dish (spin)
   const mx = 1.06, mz = -1.06;
   add(root, geo.box(0.42, 0.1, 0.42), m.comp, [mx, b + 0.05, mz], [0, Math.PI / 4, 0]);
-  add(root, geo.cyl(0.07, 0.12, 1.9, 6), m.white, [mx, b + 0.1 + 0.95, mz]);
+  add(root, geo.cyl(0.07, 0.12, 2.1, 6), m.white, [mx, b + 0.1 + 1.05, mz]);
   add(root, geo.cyl(0.125, 0.125, 0.08, 6), m.team, [mx, b + 0.6, mz]);
-  add(root, geo.cyl(0.1, 0.1, 0.06, 6), m.team, [mx, b + 1.5, mz]);
-  const dish = grp(root, mx, b + 2.0, mz);
+  add(root, geo.cyl(0.1, 0.1, 0.06, 6), m.team, [mx, b + 1.65, mz]);
+  const dish = grp(root, mx, b + 2.2, mz);
   add(dish, geo.cyl(0.09, 0.1, 0.1, 8), m.compM, [0, 0.05, 0]);
   add(dish, geo.box(0.06, 0.24, 0.06), m.compM, [0, 0.2, 0]);
   const dt = grp(dish, 0, 0.3, 0.02);
