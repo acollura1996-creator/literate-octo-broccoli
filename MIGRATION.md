@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M9 are done; see section 3.
+Status: **in progress.** Milestones M1–M10 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -22,7 +22,7 @@ recommendation.
 | D2 | **TypeScript strict** | About 19,000 lines of JavaScript, with dynamic objects everywhere (units and players gain properties at runtime). | All **new** code is strict TypeScript from day one. The engine-free simulation is converted **file by file**, so the game keeps running throughout: `allowJs` at first, then `.ts` with interfaces for Unit, Player, Order and Game. Milestone M11 finishes this. |
 | D3 | **Hand-painted textures** | The game has no textures today: everything is flat-coloured Lambert material. | Generate tileable **painterly textures procedurally** at load time (stone, wood, thatch, metal, cloth, leather, foliage, earth, skin). Apply them **triplanar** through a Babylon `MaterialPluginBase`, so baked models need no UV work. No external art assets are needed. |
 | D4 | **Unit acknowledgements** | There are no voice lines. All audio is synthesized with Web Audio: 36 effects plus procedural music. | Pre-render the existing synths into `AudioBuffer`s and play them as Babylon `StaticSound`s with spatial positioning. Add **new synthesized acknowledgement "barks"** (formant-synth grunts per unit type and age) for select, move and attack. These are new content, not ported content. |
-| D5 | **Windows installer** | This environment is Linux with no Wine and no Windows machine. | `electron-builder --win nsis` can cross-build the installer here (with `signAndEditExecutable: false`, since Wine isn't available to embed the icon). I'll check the unpacked app runs under Electron on Linux (Xvfb), and that the NSIS `.exe` is produced and well formed. **Installing and running the `.exe` has to be done on a Windows PC.** I can install Wine for a best-effort smoke test, but Electron under Wine is unreliable, so this item stays flagged. |
+| D5 | **Windows installer** | This environment is Linux with no Wine and no Windows machine. | `electron-builder --win nsis` can cross-build the installer here (with `signAndEditExecutable: false`, since Wine isn't available to embed the icon). I'll check the unpacked app runs under Electron on Linux (Xvfb), and that the NSIS `.exe` is produced and well formed. **Installing and running the `.exe` has to be done on a Windows PC.** I can install Wine for a best-effort smoke test, but Electron under Wine is unreliable, so this item stays flagged. **Outcome (M10):** electron-builder 26 embeds the icon without Wine, so only signing is off (`signExecutable: false`). The installer was built, installed, uninstalled and reinstalled under Wine 9. Electron doesn't draw a window under Wine, so **running the game from the `.exe` still has to be confirmed on Windows.** |
 | D6 | **Claude Artifact build** | `npm run build:artifact` builds a single-file web version, which is what's published at the claude.ai link. | Keep it working as a secondary target. Babylon's bundle is larger but still fits in one file. |
 | D7 | **Skeletal animation and AnimationGroups** | No model has a skeleton. Animation is procedural: the code rotates "part" nodes every frame. | Keep the procedural animation driver, ported to Babylon `TransformNode`s. `AnimationGroup` is used only where it helps (door swings, UI). The "baked vertex animation" step in milestone 9 doesn't apply; the performance work goes into instancing instead (see M9). |
 
@@ -189,8 +189,9 @@ src/
   main.ts     boot, title screen, fixed-step loop on engine.runRenderLoop.
 electron/
   main.ts     BrowserWindow (contextIsolation, sandbox, no nodeIntegration, single instance, F11
-              fullscreen, devtools only when !app.isPackaged), CSP, offline file:// loading.
-  preload.ts  contextBridge: { toggleFullscreen, isElectron, appVersion }.
+              and Alt+Enter fullscreen, devtools only when !app.isPackaged), CSP, offline loading
+              from the app:// protocol.
+  preload.ts  contextBridge: { isElectron, toggleFullscreen }.
 tools/
   bake-models.ts   runs the procedural builders (three.js, dev-only) → public/models/*.glb
   gallery.html     Babylon model gallery.
@@ -429,10 +430,22 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
 
   - The same benchmark at 120 units on High (shadows, SSAO, glow): 1,489 → 652 draw calls per frame. The glow pass went from 183 to 25 draws and the shadow cascades from about 1,116 to about 440. Screenshots of the M8 scenes on High show the same shadows as before.
   - **Real-GPU fps needs checking on real hardware.** This environment renders with SwiftShader on the CPU, so it can't show the frame rate a graphics card gives. The CPU-side cost per frame has dropped about 2.5×, and the first-run check keeps slower machines smooth.
-- [ ] **M10 – Package with Electron.**
-  - electron-builder NSIS `x64` installer, app icon, offline fonts.
-  - Check the unpacked app runs under Electron (Linux, Xvfb).
-  - Produce the Windows installer **(flag D5: run it on Windows to confirm)**.
+- [x] **M10 – Package with Electron.**
+  - [x] `npm run dist` builds `release/Heroes-and-Empires-Setup-0.1.0.exe`, an NSIS installer for x64 Windows (113 MB):
+    - per-user, no admin rights needed, with a choice of folder;
+    - Start-menu and desktop shortcuts;
+    - an uninstaller registered in *Apps & features*.
+  - [x] App icon: `build/icon.png` (512 × 512), embedded in the `.exe` at 16–256 px with the version info (product name, version, company). It is also the window and taskbar icon.
+  - [x] Smaller package: Vite bundles the whole game (Babylon, fonts and the three.js renderer that is still selectable), so those packages are now devDependencies. `app.asar` holds only `dist/` and `dist-electron/`: 97 MB → 10 MB.
+  - [x] Publishing is off (`publish: null`, `--publish never`); the game has no auto-updater.
+  - [x] Fullscreen: F11 (title screen and menus), Alt+Enter (anywhere) and the ⛶ button all toggle the window's fullscreen through the preload bridge. During a game F11 opens the Generals board, as before.
+  - Checked here:
+    - The packaged app (same `app.asar`, as an unpacked Linux build) runs under Xvfb: title screen, offline fonts, starting a game on High, AI generals playing, no errors. Fullscreen through F11, Alt+Enter and the button was checked in Electron.
+    - The installer `.exe` is a well-formed NSIS PE32 file, and the app `.exe` a PE32+ x64 GUI binary carrying the icon and version resources.
+    - Under Wine 9, a silent install (`/S /D=…`) puts 378 MB in the chosen folder with the uninstaller, both shortcuts and the *Apps & features* entry. The silent uninstall removes them, and a reinstall works.
+  - Not checked here **(flag D5)**: running the game from the installed `.exe`. Electron starts under Wine but draws no window (Wine has no DirectComposition), so this needs a Windows PC.
+  - Building on Linux needs Wine, 64- and 32-bit: electron-builder runs the uninstaller stub under it. Its downloadable Wine 11 bundle for Linux lacks the Windows-side DLLs, so it doesn't work. Building on Windows needs nothing extra (README).
+  - Testing under Wine needs one workaround in the Wine prefix: Wine's `powershell.exe` stub returns success for everything, so the installer's "is the game still running?" check always answers yes and the install aborts. With the stub removed, the installer falls back to `tasklist`. Real Windows runs the actual query.
 - [ ] **M11 – TypeScript simulation.** Convert `sim/` file by file to strict TypeScript with interfaces for the core entities. No behaviour changes: the simulation and scenario tests must pass after each file.
 - [ ] **M12 – Remove three.js.**
   - Drop the `?renderer=three` path and every three.js import from `src/`.
@@ -449,7 +462,7 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
 | `onBeforeCompile` string patches | Babylon shaders are structured differently. | `MaterialPluginBase` gives defined hook points. |
 | Live portrait (second `WebGLRenderer`) | Babylon prefers one engine. | `engine.registerView(canvas, camera)` renders a second camera into the portrait canvas. |
 | Procedural music on raw Web Audio | AudioEngineV2 hides some low-level scheduling. | Resolved in M7: the engine runs on audio.js's `AudioContext`, and the music stays a raw Web Audio scheduler on it. The engine's output is routed into the same compressor and master gain, through one internal property (`mainOut._inNode`) with a fallback. |
-| Windows `.exe` verification | No Windows or Wine here. | D5. |
+| Windows `.exe` verification | No Windows here; Electron draws no window under Wine. | D5: installer checked under Wine (install, uninstall, reinstall); running the game needs a Windows PC. |
 | Size of the strict-TypeScript conversion | About 19,000 lines of dynamic JavaScript. | Incremental `allowJs` → `.ts` (D2, M11). |
 | 200+ units at 60 fps on integrated GPUs | Many small meshes per unit. | Part instancing with instanced team colour; LOD (hide small details beyond a distance); quality presets. |
 | Headless verification | Screenshots use software rendering (SwiftShader), so fps numbers aren't representative. | Report draw calls, active meshes and CPU frame time from the benchmark scene. GPU fps must be checked on real hardware. |

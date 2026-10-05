@@ -219,10 +219,7 @@ function bindModals() {
   });
   $('btn-menu').addEventListener('click', () => toggleMenu());
   $('btn-quests').addEventListener('click', () => showQuests());
-  $('btn-fullscreen').addEventListener('click', () => {
-    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-    else document.documentElement.requestFullscreen?.().catch(() => game?.message('Fullscreen is not available here.', '#ccc'));
-  });
+  $('btn-fullscreen').addEventListener('click', toggleFullscreen);
   $('btn-sound').addEventListener('click', () => {
     setMuted(!isMuted());
     spatial?.setMuted(isMuted());
@@ -236,6 +233,12 @@ function bindModals() {
       perf.el?.remove();
       perf.el = null;
       perf.t0 = 0;
+      return;
+    }
+    // Alt+Enter: fullscreen, in or out of a game (F11 is the Generals board while playing).
+    if (e.altKey && e.key === 'Enter') {
+      e.preventDefault();
+      toggleFullscreen();
       return;
     }
     if (!running) return;
@@ -255,6 +258,16 @@ function bindModals() {
       setPaused(false);
     }
   });
+}
+
+/** The desktop app toggles the window itself (as F11 does there); browsers use the page API. */
+function toggleFullscreen() {
+  if (window.desktop?.toggleFullscreen) {
+    window.desktop.toggleFullscreen();
+    return;
+  }
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  else document.documentElement.requestFullscreen?.().catch(() => game?.message('Fullscreen is not available here.', '#ccc'));
 }
 
 function bindCameraOptions() {

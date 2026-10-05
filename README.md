@@ -38,6 +38,25 @@ The game needs WebGL2, a mouse and a keyboard. The game is being migrated to Typ
 Babylon.js; see [MIGRATION.md](MIGRATION.md) for the plan and progress. Until that finishes, the
 browser build defaults to the three.js renderer and the desktop build opens the Babylon renderer.
 
+### Windows desktop build
+
+`npm run dist` writes `release/Heroes-and-Empires-Setup-<version>.exe`, an NSIS installer for 64-bit
+Windows (the unpacked app is in `release/win-unpacked/`). It installs for the current user without
+admin rights, lets the player choose the folder, adds Start-menu and desktop shortcuts, and registers
+an uninstaller in *Apps & features*. The app icon comes from `build/icon.png`.
+
+- **On Windows** no other tools are needed.
+- **On Linux**, electron-builder runs a step of the NSIS build under Wine, 64- and 32-bit (on
+  Ubuntu: `sudo dpkg --add-architecture i386 && sudo apt install wine64 wine32:i386`).
+- The installer isn't code-signed, so on first run Windows SmartScreen may say "Windows protected
+  your PC": choose *More info → Run anyway*. To sign it, set `build.win.signExecutable` to `true`
+  in `package.json` and supply a certificate (`CSC_LINK` and `CSC_KEY_PASSWORD`).
+- Vite bundles the whole game, so every package is a devDependency and the installer ships only
+  `dist/` and `dist-electron/`.
+
+In the desktop app, **F11** or **Alt+Enter** toggles fullscreen (during a game F11 opens the
+Generals board, so use Alt+Enter or the ⛶ button). Developer tools are disabled in the installed app.
+
 ## The land of Kalenden
 
 The 256×256 map is four-fold symmetric, in a Lordaeron Summer style:

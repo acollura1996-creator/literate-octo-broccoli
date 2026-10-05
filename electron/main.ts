@@ -66,6 +66,8 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     backgroundColor: '#000000',
     title: 'Heroes & Empires',
+    // Window and taskbar icon (the installer embeds the same icon in the .exe).
+    icon: app.isPackaged ? path.join(process.resourcesPath, 'icon.png') : path.join(__dirname, '..', 'build', 'icon.png'),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
