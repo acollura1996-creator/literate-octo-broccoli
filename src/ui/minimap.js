@@ -1,5 +1,5 @@
 // The minimap: terrain, fog of war, unit dots, camera frustum and pings.
-import { MAP_SIZE } from '../world/layout.js';
+import { MAP_SIZE } from '../world/layout.ts';
 
 export class Minimap {
   constructor(canvas, game, view, input) {

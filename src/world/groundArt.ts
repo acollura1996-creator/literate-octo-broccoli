@@ -1,14 +1,14 @@
 // Engine-free art for the ground, shared by both renderers: the tiling detail map, the road
 // cobble texture and the road surface geometry. Textures are plain 2D canvases.
-import { valueNoise, mulberry32 } from './noise.js';
+import { valueNoise, mulberry32 } from './noise.ts';
 
 /** Grayscale tiling noise (R: fine blades and specks, G: soft blotches) for ground detail. */
-export function makeDetailCanvas() {
+export function makeDetailCanvas(): HTMLCanvasElement {
   const N = 256;
   const c = document.createElement('canvas');
   c.width = N;
   c.height = N;
-  const ctx = c.getContext('2d');
+  const ctx = c.getContext('2d')!;
   const img = ctx.createImageData(N, N);
   const rand = mulberry32(777);
   const fine = new Float32Array(N * N);
@@ -17,7 +17,7 @@ export function makeDetailCanvas() {
     for (let x = 0; x < N; x++) {
       // Short vertical streaks read as grass blades from the RTS camera.
       let v = 0;
-      for (let k = 0; k < 3; k++) v += fine[((y + k) % N) * N + x];
+      for (let k = 0; k < 3; k++) v += fine[((y + k) % N) * N + x]!;
       v = v / 3;
       // Tileable soft noise from wrapped value noise.
       const u = (x / N) * 8;
@@ -34,12 +34,12 @@ export function makeDetailCanvas() {
   return c;
 }
 
-function valueNoiseWrap(x, z, period) {
+function valueNoiseWrap(x: number, z: number, period: number): number {
   const xi = Math.floor(x);
   const zi = Math.floor(z);
   const fx = x - xi;
   const fz = z - zi;
-  const h = (a, b) => valueNoise(((a % period) + period) % period, ((b % period) + period) % period, 99);
+  const h = (a: number, b: number): number => valueNoise(((a % period) + period) % period, ((b % period) + period) % period, 99);
   const sx = fx * fx * (3 - 2 * fx);
   const sz = fz * fz * (3 - 2 * fz);
   const a = h(xi, zi);
@@ -50,11 +50,11 @@ function valueNoiseWrap(x, z, period) {
 }
 
 /** Small tiling road texture: cobbles with mortar lines (tinted per age by vertex colours). */
-export function makeCobbleCanvas() {
+export function makeCobbleCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 64;
-  const ctx = c.getContext('2d');
+  const ctx = c.getContext('2d')!;
   ctx.fillStyle = '#d9d2c2';
   ctx.fillRect(0, 0, 64, 64);
   let seed = 7;
@@ -84,7 +84,10 @@ export function makeCobbleCanvas() {
  * Returns typed arrays; `corners` lists each quad's four vertices in the order
  * (x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1), so each renderer chooses its own winding.
  */
-export function roadGeometry(roads, game) {
+export function roadGeometry<P>(
+  roads: { count: number; size: number; owner: ArrayLike<number>; colorFor(p: P | undefined): ArrayLike<number> },
+  game: { terrain: { heightAt(x: number, z: number): number }; generals: P[] },
+): { quads: number; positions: Float32Array; normals: Float32Array; uvs: Float32Array; colors: Float32Array } {
   const n = roads.count;
   const positions = new Float32Array(n * 12);
   const normals = new Float32Array(n * 12);
@@ -92,14 +95,15 @@ export function roadGeometry(roads, game) {
   const colors = new Float32Array(n * 12);
   const S = roads.size;
   const t = game.terrain;
-  const h = (x, z) => t.heightAt(x, z) + 0.05;
+  const h = (x: number, z: number): number => t.heightAt(x, z) + 0.05;
   let q = 0;
   for (let k = 0; k < roads.owner.length && q < n; k++) {
-    if (roads.owner[k] < 0) continue;
+    const owner = roads.owner[k]!;
+    if (owner < 0) continue;
     const x = k % S;
     const z = (k - x) / S;
-    const c = roads.colorFor(game.generals[roads.owner[k]]);
-    const corners = [[x, z], [x + 1, z], [x, z + 1], [x + 1, z + 1]];
+    const c = roads.colorFor(game.generals[owner]);
+    const corners: [number, number][] = [[x, z], [x + 1, z], [x, z + 1], [x + 1, z + 1]];
     corners.forEach(([cx, cz], i) => {
       positions.set([cx, h(cx, cz), cz], q * 12 + i * 3);
       // Normal from the terrain slope at the corner.

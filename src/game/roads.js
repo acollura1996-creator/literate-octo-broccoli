@@ -3,7 +3,7 @@
 // units move faster on roads. Roads are drawn as a mesh hugging the terrain;
 // their surface follows the owner's age (packed dirt, then cobbles, then
 // dressed paving).
-import { MAP_SIZE } from '../world/layout.js';
+import { MAP_SIZE } from '../world/layout.ts';
 import { ROAD } from '../data/units.ts';
 
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];

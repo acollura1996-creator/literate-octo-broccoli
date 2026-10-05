@@ -1,4 +1,5 @@
 // Grid-based pathing (1 cell = 1 world unit) with A* search and path smoothing.
+import type { Point } from '../game/hooks.ts';
 
 export const BLOCK_TREE = 1;
 export const BLOCK_BUILDING = 2;
@@ -9,45 +10,49 @@ export const BLOCK_GATE = 8;
 const SQRT2 = Math.SQRT2;
 
 class MinHeap {
-  constructor(cap) {
+  nodes: Int32Array;
+  keys: Float32Array;
+  size: number;
+
+  constructor(cap: number) {
     this.nodes = new Int32Array(cap);
     this.keys = new Float32Array(cap);
     this.size = 0;
   }
-  clear() {
+  clear(): void {
     this.size = 0;
   }
-  push(node, key) {
+  push(node: number, key: number): void {
     if (this.size >= this.nodes.length) this.grow();
     let i = this.size++;
     const nodes = this.nodes;
     const keys = this.keys;
     while (i > 0) {
       const p = (i - 1) >> 1;
-      if (keys[p] <= key) break;
-      nodes[i] = nodes[p];
-      keys[i] = keys[p];
+      if (keys[p]! <= key) break;
+      nodes[i] = nodes[p]!;
+      keys[i] = keys[p]!;
       i = p;
     }
     nodes[i] = node;
     keys[i] = key;
   }
-  pop() {
+  pop(): number {
     const nodes = this.nodes;
     const keys = this.keys;
-    const top = nodes[0];
+    const top = nodes[0]!;
     const n = --this.size;
     if (n > 0) {
-      const lastN = nodes[n];
-      const lastK = keys[n];
+      const lastN = nodes[n]!;
+      const lastK = keys[n]!;
       let i = 0;
       for (;;) {
         let c = 2 * i + 1;
         if (c >= n) break;
-        if (c + 1 < n && keys[c + 1] < keys[c]) c++;
-        if (keys[c] >= lastK) break;
-        nodes[i] = nodes[c];
-        keys[i] = keys[c];
+        if (c + 1 < n && keys[c + 1]! < keys[c]!) c++;
+        if (keys[c]! >= lastK) break;
+        nodes[i] = nodes[c]!;
+        keys[i] = keys[c]!;
         i = c;
       }
       nodes[i] = lastN;
@@ -55,7 +60,7 @@ class MinHeap {
     }
     return top;
   }
-  grow() {
+  grow(): void {
     const n = new Int32Array(this.nodes.length * 2);
     n.set(this.nodes);
     const k = new Float32Array(this.keys.length * 2);
@@ -66,7 +71,24 @@ class MinHeap {
 }
 
 export class PathGrid {
-  constructor(size) {
+  readonly size: number;
+  flags: Uint8Array;
+  /** 1 where a road speeds movement (and is preferred by A*). */
+  road: Uint8Array;
+  gateTeam: Int16Array;
+  passTeam: number;
+  g: Float32Array;
+  parent: Int32Array;
+  seen: Uint32Array;
+  closed: Uint32Array;
+  gen: number;
+  heap: MinHeap;
+  /** Bumped whenever blocking changes. */
+  version: number;
+  /** Nodes the last search expanded (a cost measure for the path budget). */
+  lastExpanded = 0;
+
+  constructor(size: number) {
     this.size = size;
     const n = size * size;
     this.flags = new Uint8Array(n);
@@ -84,35 +106,35 @@ export class PathGrid {
     this.version = 0; // bumped whenever blocking changes
   }
 
-  inBounds(cx, cz) {
+  inBounds(cx: number, cz: number): boolean {
     return cx >= 0 && cz >= 0 && cx < this.size && cz < this.size;
   }
 
-  walkable(cx, cz) {
+  walkable(cx: number, cz: number): boolean {
     if (cx < 0 || cz < 0 || cx >= this.size || cz >= this.size) return false;
     const i = cz * this.size + cx;
-    const f = this.flags[i];
+    const f = this.flags[i]!;
     return f === 0 || (f === BLOCK_GATE && this.gateTeam[i] === this.passTeam);
   }
 
-  walkableAt(x, z) {
+  walkableAt(x: number, z: number): boolean {
     return this.walkable(Math.floor(x), Math.floor(z));
   }
 
-  setFlag(cx, cz, flag, on) {
+  setFlag(cx: number, cz: number, flag: number, on: boolean): void {
     if (!this.inBounds(cx, cz)) return;
     const i = cz * this.size + cx;
-    if (on) this.flags[i] |= flag;
-    else this.flags[i] &= ~flag;
+    if (on) this.flags[i]! |= flag;
+    else this.flags[i]! &= ~flag;
     this.version++;
   }
 
   /** Set/clear a flag on a w*h rectangle of cells starting at (cx, cz). */
-  setRect(cx, cz, w, h, flag, on) {
+  setRect(cx: number, cz: number, w: number, h: number, flag: number, on: boolean): void {
     for (let z = cz; z < cz + h; z++) for (let x = cx; x < cx + w; x++) this.setFlag(x, z, flag, on);
   }
 
-  rectFree(cx, cz, w, h) {
+  rectFree(cx: number, cz: number, w: number, h: number): boolean {
     for (let z = cz; z < cz + h; z++) {
       for (let x = cx; x < cx + w; x++) {
         if (!this.inBounds(x, z) || this.flags[z * this.size + x] !== 0) return false;
@@ -122,11 +144,11 @@ export class PathGrid {
   }
 
   /** Nearest walkable cell center to (x, z) within maxR cells, or null. */
-  nearestWalkable(x, z, maxR = 12) {
+  nearestWalkable(x: number, z: number, maxR = 12): Point | null {
     const cx = Math.floor(x);
     const cz = Math.floor(z);
     if (this.walkable(cx, cz)) return { x, z };
-    let best = null;
+    let best: Point | null = null;
     let bestD = Infinity;
     for (let r = 1; r <= maxR; r++) {
       for (let dz = -r; dz <= r; dz++) {
@@ -148,7 +170,7 @@ export class PathGrid {
   }
 
   /** True if a straight line between two points only crosses walkable cells. */
-  lineWalkable(ax, az, bx, bz, halfWidth = 0.28) {
+  lineWalkable(ax: number, az: number, bx: number, bz: number, halfWidth = 0.28): boolean {
     const dx = bx - ax;
     const dz = bz - az;
     const len = Math.hypot(dx, dz);
@@ -170,12 +192,13 @@ export class PathGrid {
    * A* from (sx, sz) toward (gx, gz). Stops once within `range` of the goal.
    * Returns an array of {x, z} waypoints (excluding the start) or null.
    */
-  findPath(sx, sz, gx, gz, range = 0, maxNodes = 60000) {
+  findPath(sx: number, sz: number, gx: number, gz: number, range = 0, maxNodes = 60000): Point[] | null {
     const size = this.size;
-    let start = { x: sx, z: sz };
+    let start: Point = { x: sx, z: sz };
     if (!this.walkableAt(sx, sz)) {
-      start = this.nearestWalkable(sx, sz, 4);
-      if (!start) return null;
+      const near = this.nearestWalkable(sx, sz, 4);
+      if (!near) return null;
+      start = near;
     }
     let goalX = gx;
     let goalZ = gz;
@@ -204,7 +227,7 @@ export class PathGrid {
     const road = this.road;
     const gateTeam = this.gateTeam;
     const team = this.passTeam;
-    const blocked = (i) => flags[i] !== 0 && !(flags[i] === BLOCK_GATE && gateTeam[i] === team);
+    const blocked = (i: number): boolean => flags[i] !== 0 && !(flags[i] === BLOCK_GATE && gateTeam[i] === team);
     const heap = this.heap;
     heap.clear();
 
@@ -213,7 +236,7 @@ export class PathGrid {
     const s = scz * size + scx;
     const gcx = Math.floor(goalX);
     const gcz = Math.floor(goalZ);
-    const h = (cx, cz) => {
+    const h = (cx: number, cz: number): number => {
       const dx = Math.abs(cx - gcx);
       const dz = Math.abs(cz - gcz);
       return dx + dz + (SQRT2 - 2) * Math.min(dx, dz);
@@ -248,7 +271,7 @@ export class PathGrid {
         best = cur;
       }
       if (++expanded > maxNodes) break;
-      const gc = g[cur];
+      const gc = g[cur]!;
       for (let dz = -1; dz <= 1; dz++) {
         const nz = cz + dz;
         if (nz < 0 || nz >= size) continue;
@@ -265,7 +288,7 @@ export class PathGrid {
           }
           if (road[ni]) cost *= 0.75;
           const ng = gc + cost;
-          if (seen[ni] !== gen || ng < g[ni]) {
+          if (seen[ni] !== gen || ng < g[ni]!) {
             seen[ni] = gen;
             g[ni] = ng;
             parent[ni] = cur;
@@ -278,10 +301,10 @@ export class PathGrid {
     this.lastExpanded = expanded;
     const end = found >= 0 ? found : best;
     if (end === s && found < 0) return null;
-    const cells = [];
-    for (let c = end; c !== -1 && c !== s; c = parent[c]) cells.push(c);
+    const cells: number[] = [];
+    for (let c = end; c !== -1 && c !== s; c = parent[c]!) cells.push(c);
     cells.reverse();
-    const pts = cells.map((c) => {
+    const pts = cells.map((c): Point => {
       const cx = c % size;
       return { x: cx + 0.5, z: (c - cx) / size + 0.5 };
     });
@@ -290,9 +313,9 @@ export class PathGrid {
   }
 
   /** Greedy string-pulling: drop waypoints that are directly reachable. */
-  smooth(start, pts) {
+  smooth(start: Point, pts: Point[]): Point[] {
     if (pts.length <= 1) return pts;
-    const out = [];
+    const out: Point[] = [];
     let ax = start.x;
     let az = start.z;
     let i = 0;
@@ -302,14 +325,15 @@ export class PathGrid {
       const limit = Math.min(pts.length - 1, i + 40);
       j = i;
       for (let k = limit; k > i; k--) {
-        if (this.lineWalkable(ax, az, pts[k].x, pts[k].z)) {
+        if (this.lineWalkable(ax, az, pts[k]!.x, pts[k]!.z)) {
           j = k;
           break;
         }
       }
-      out.push(pts[j]);
-      ax = pts[j].x;
-      az = pts[j].z;
+      const pj = pts[j]!;
+      out.push(pj);
+      ax = pj.x;
+      az = pj.z;
       i = j + 1;
     }
     return out;

@@ -1,5 +1,5 @@
 // Fog of war and black mask for the human player (and allies in allied mode). Engine-free.
-import { MAP_SIZE } from '../world/layout.js';
+import { MAP_SIZE } from '../world/layout.ts';
 
 const VISIBLE = 255;
 const EXPLORED = 110;

@@ -1,7 +1,7 @@
 // Random events, as in the original map: every few minutes something happens somewhere in the
 // land of Kalenden: a bountiful harvest, a plague, a bandit raid, a merchant caravan laden
 // with gold, or a golden age for a happy empire.
-import { CENTER, rotate } from '../world/layout.js';
+import { CENTER, rotate } from '../world/layout.ts';
 import { DROP_TABLES } from '../data/items.ts';
 import { moodOf } from './empire.js';
 

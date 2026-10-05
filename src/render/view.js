@@ -6,7 +6,7 @@ import { ProjectileView } from './projectiles.js';
 import { TerrainView, RoadMesh, FogTexture, buildCitadel } from './terrainView.js';
 import { Previews } from './previews.js';
 import { modelIcon, Portrait } from '../ui/icons.js';
-import { MAP_SIZE } from '../world/layout.js';
+import { MAP_SIZE } from '../world/layout.ts';
 import { ITEMS } from '../data/items.ts';
 
 const _tmp = new THREE.Vector3();

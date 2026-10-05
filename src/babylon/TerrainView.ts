@@ -21,8 +21,8 @@ import type { UniformBuffer } from '@babylonjs/core/Materials/uniformBuffer';
 import type { Scene } from '@babylonjs/core/scene';
 // Side effect: thin instances on Mesh.
 import '@babylonjs/core/Meshes/thinInstanceMesh';
-import { WATER_LEVEL } from '../world/terrain.js';
-import { makeDetailCanvas, makeCobbleCanvas, roadGeometry } from '../world/groundArt.js';
+import { WATER_LEVEL } from '../world/terrain.ts';
+import { makeDetailCanvas, makeCobbleCanvas, roadGeometry } from '../world/groundArt.ts';
 import { FogOfWar } from './FogOfWar';
 import { paint, type PaintKind } from './Painterly';
 import type { GameLike, TerrainLike, TreeLike, DoodadLike, RoadsLike } from './types';

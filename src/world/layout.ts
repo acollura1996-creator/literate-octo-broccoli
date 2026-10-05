@@ -4,11 +4,43 @@
 // hold outposts (expansion gold mine, mercenary camp, arcane vault and a
 // fountain of health) guarded by powerful creeps.
 
+/** A map position [x, z]. */
+export type Vec2 = [number, number];
+
+/** A general's start location (one per corner). */
+export interface Base {
+  slot: number;
+  hall: Vec2;
+  mine: Vec2;
+  towers: Vec2[];
+  shop: Vec2;
+  /** Unit vector from the hall toward the map center. */
+  toCenter: Vec2;
+}
+export interface CampDef {
+  at: Vec2;
+  tier: number;
+  units: string[];
+}
+export interface NeutralDef {
+  type: string;
+  at: Vec2;
+  /** The gold mine at a start location (it holds less gold). */
+  startMine?: boolean;
+}
+export interface Layout {
+  bases: Base[];
+  camps: CampDef[];
+  neutrals: NeutralDef[];
+  /** Polylines of the map's dirt roads. */
+  roads: Vec2[][];
+}
+
 export const MAP_SIZE = 256;
 export const CENTER = MAP_SIZE / 2;
 
 /** Rotate a point around the map center by k quarter turns (NW -> NE -> SE -> SW). */
-export function rotate(p, k) {
+export function rotate(p: Vec2, k: number): Vec2 {
   let x = p[0] - CENTER;
   let z = p[1] - CENTER;
   for (let i = 0; i < k; i++) [x, z] = [-z, x];
@@ -20,7 +52,7 @@ export function rotate(p, k) {
 export const PLAYER_SLOTS = [3, 1, 0, 2];
 
 // --- North-west quadrant template (rotated for every corner) ------------------
-const BASE = {
+const BASE: { hall: Vec2; mine: Vec2; towers: Vec2[]; shop: Vec2 } = {
   hall: [46, 46], // town hall (4x4) / altar (3x3, snapped)
   mine: [39.5, 39.5],
   towers: [[55, 41], [41, 55]],
@@ -31,7 +63,7 @@ const BASE = {
 export const CITY_RADIUS = 24;
 
 // Creep camps: tier 1 easy ... tier 4 deadly.
-const QUAD_CAMPS = [
+const QUAD_CAMPS: CampDef[] = [
   { at: [84, 32], tier: 1, units: ['kobold', 'kobold', 'kobold'] },
   { at: [32, 84], tier: 1, units: ['gnoll', 'gnoll', 'gnoll_archer'] },
   { at: [64, 20], tier: 1, units: ['kobold', 'kobold', 'gnoll_archer'] },
@@ -44,7 +76,7 @@ const QUAD_CAMPS = [
 ];
 
 // --- North edge template (rotated for every edge) ----------------------------
-const EDGE = {
+const EDGE: { mine: Vec2; merc: Vec2; vault: Vec2; fountain: Vec2; camp: CampDef } = {
   mine: [CENTER + 0.5, 13.5],
   merc: [CENTER - 17.5, 22.5],
   vault: [CENTER + 18.5, 22.5],
@@ -53,7 +85,7 @@ const EDGE = {
 };
 
 // Center: Kalenden's citadel (offsets are relative to the map center).
-const C = (dx, dz) => [CENTER + dx, CENTER + dz];
+const C = (dx: number, dz: number): Vec2 => [CENTER + dx, CENTER + dz];
 export const CITADEL = {
   keep: C(0, 0),
   half: 13, // walls run from CENTER-13 to CENTER+13
@@ -74,15 +106,15 @@ export const CITADEL = {
 
 export const MOAT = { inner: 32, outer: 38, fordHalfWidth: 4 };
 
-function rotCamp(c, k) {
+function rotCamp(c: CampDef, k: number): CampDef {
   return { ...c, at: rotate(c.at, k) };
 }
 
 /** Build the full map description. */
-export function buildLayout() {
-  const bases = [];
-  const camps = [];
-  const neutrals = []; // { type, at }
+export function buildLayout(): Layout {
+  const bases: Base[] = [];
+  const camps: CampDef[] = [];
+  const neutrals: NeutralDef[] = [];
   for (let k = 0; k < 4; k++) {
     bases.push({
       slot: k,
@@ -91,7 +123,7 @@ export function buildLayout() {
       towers: BASE.towers.map((t) => rotate(t, k)),
       shop: rotate(BASE.shop, k),
       // Direction from the base toward the map center (for spawning units).
-      toCenter: (() => {
+      toCenter: ((): Vec2 => {
         const h = rotate(BASE.hall, k);
         const dx = CENTER - h[0];
         const dz = CENTER - h[1];
@@ -111,7 +143,7 @@ export function buildLayout() {
   }
 
   // Roads (polylines) used for terrain painting and to keep paths free of trees.
-  const roads = [];
+  const roads: Vec2[][] = [];
   const fordR = (MOAT.inner + MOAT.outer) / 2 / Math.SQRT2;
   for (let k = 0; k < 4; k++) {
     const hall = rotate(BASE.hall, k);

@@ -1,9 +1,51 @@
 // Terrain generation: heightmap, ground classification, the painted ground map (Lordaeron Summer
 // look with a blighted citadel), trees and decorative doodads. Engine-free: the meshes are built by
 // the renderers from this data.
-import { fbm, valueNoise, mulberry32, smoothstep, distToSegment } from './noise.js';
-import { MAP_SIZE, CENTER, CITADEL, MOAT } from './layout.js';
-import { BLOCK_TERRAIN, BLOCK_TREE } from './pathgrid.js';
+import { fbm, valueNoise, mulberry32, smoothstep, distToSegment } from './noise.ts';
+import { MAP_SIZE, CENTER, CITADEL, MOAT } from './layout.ts';
+import type { Layout } from './layout.ts';
+import { BLOCK_TERRAIN, BLOCK_TREE } from './pathgrid.ts';
+import type { PathGrid } from './pathgrid.ts';
+
+/** Linear-ish colour channels 0-1. */
+export type Rgb = [number, number, number];
+type Vec3 = [number, number, number];
+
+export interface Tree {
+  x: number;
+  z: number;
+  /** Cell it blocks. */
+  cx: number;
+  cz: number;
+  lumber: number;
+  alive: boolean;
+  /** 0 pine, 1 broadleaf, 2 dead (blight). */
+  species: number;
+  scale: number;
+  rot: number;
+  tint: Rgb;
+}
+
+/** A rock, bush or flower: position, size `s`, rotation, stretch and colour. */
+export interface Doodad {
+  x: number;
+  y: number;
+  z: number;
+  s: number;
+  rot: Vec3;
+  scale: Vec3;
+  color: Rgb;
+}
+export interface Doodads {
+  rocks: Doodad[];
+  bushes: Doodad[];
+  flowers: Doodad[];
+}
+interface FlatSpot {
+  x: number;
+  z: number;
+  radius: number;
+}
 
 export const WATER_LEVEL = -0.35;
 
@@ -16,7 +58,7 @@ const T_COBBLE = 4;
 const T_SHORE = 5;
 const T_BLIGHT = 6;
 
-const TYPE_COLORS = {
+const TYPE_COLORS: Record<number, Rgb> = {
   [T_GRASS]: [0.36, 0.56, 0.18],
   [T_FOREST]: [0.25, 0.4, 0.13],
   [T_ROAD]: [0.62, 0.5, 0.32],
@@ -26,7 +68,7 @@ const TYPE_COLORS = {
   [T_BLIGHT]: [0.3, 0.24, 0.33],
 };
 
-function moatInfo(x, z) {
+function moatInfo(x: number, z: number) {
   const dx = x - CENTER;
   const dz = z - CENTER;
   const r = Math.hypot(dx, dz);
@@ -48,7 +90,25 @@ function moatInfo(x, z) {
 }
 
 export class Terrain {
-  constructor(layout, grid, seed = 1337) {
+  readonly size: number;
+  readonly layout: Layout;
+  readonly grid: PathGrid;
+  readonly seed: number;
+  /** (MAP_SIZE + 1)² corner heights. */
+  heights: Float32Array;
+  /** Ground type per cell (T_*). */
+  types: Uint8Array;
+  /** Distance from each cell to the nearest map road. */
+  roadDist = new Float32Array(MAP_SIZE * MAP_SIZE);
+  trees: Tree[];
+  treeByCell = new Map<number, Tree>();
+  flatSpots: FlatSpot[];
+  /** Trees cut down, in order (renderers replay this list). */
+  felled: Tree[];
+  doodads: Doodads | null;
+  textureCanvas: HTMLCanvasElement | null = null;
+
+  constructor(layout: Layout, grid: PathGrid, seed = 1337) {
     this.size = MAP_SIZE;
     this.layout = layout;
     this.grid = grid;
@@ -58,16 +118,16 @@ export class Terrain {
     this.types = new Uint8Array(MAP_SIZE * MAP_SIZE);
     this.trees = [];
     this.flatSpots = [];
-    this.felled = []; // trees cut down, in order (renderers replay this list)
-    this.doodads = null; // { rocks, bushes, flowers } from scatterDoodads()
+    this.felled = [];
+    this.doodads = null;
   }
 
   /** Register a spot (center + radius) that should be flat (for buildings). */
-  addFlatSpot(x, z, radius) {
+  addFlatSpot(x: number, z: number, radius: number): void {
     this.flatSpots.push({ x, z, radius });
   }
 
-  rawHeight(x, z) {
+  rawHeight(x: number, z: number): number {
     let h = 0.45 + fbm(x * 0.035, z * 0.035, this.seed, 4) * 0.9 + fbm(x * 0.12, z * 0.12, this.seed + 3, 2) * 0.15;
     // Keep the open land above the waterline (only the moat holds water).
     if (h < 0.1) h = 0.1 - (0.1 - h) * 0.15;
@@ -89,7 +149,7 @@ export class Terrain {
     return h;
   }
 
-  generateHeights() {
+  generateHeights(): void {
     const n = MAP_SIZE + 1;
     for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) this.heights[z * n + x] = this.rawHeight(x, z);
     // Flatten building spots.
@@ -100,7 +160,7 @@ export class Terrain {
       for (let z = Math.floor(s.z - r0); z <= s.z + r0; z++) {
         for (let x = Math.floor(s.x - r0); x <= s.x + r0; x++) {
           if (x < 0 || z < 0 || x >= n || z >= n) continue;
-          sum += this.heights[z * n + x];
+          sum += this.heights[z * n + x]!;
           cnt++;
         }
       }
@@ -112,13 +172,13 @@ export class Terrain {
           const d = Math.hypot(x - s.x, z - s.z);
           const t = smoothstep(outer, s.radius, d);
           const i = z * n + x;
-          this.heights[i] = this.heights[i] * (1 - t) + target * t;
+          this.heights[i] = this.heights[i]! * (1 - t) + target * t;
         }
       }
     }
   }
 
-  heightAt(x, z) {
+  heightAt(x: number, z: number): number {
     const n = MAP_SIZE + 1;
     x = Math.min(MAP_SIZE - 0.001, Math.max(0, x));
     z = Math.min(MAP_SIZE - 0.001, Math.max(0, z));
@@ -127,15 +187,15 @@ export class Terrain {
     const fx = x - xi;
     const fz = z - zi;
     const h = this.heights;
-    const a = h[zi * n + xi];
-    const b = h[zi * n + xi + 1];
-    const c = h[(zi + 1) * n + xi];
-    const d = h[(zi + 1) * n + xi + 1];
+    const a = h[zi * n + xi]!;
+    const b = h[zi * n + xi + 1]!;
+    const c = h[(zi + 1) * n + xi]!;
+    const d = h[(zi + 1) * n + xi + 1]!;
     return a * (1 - fx) * (1 - fz) + b * fx * (1 - fz) + c * (1 - fx) * fz + d * fx * fz;
   }
 
   /** Classify every cell and mark unwalkable water in the path grid. */
-  classify() {
+  classify(): void {
     const { roads } = this.layout;
     for (let cz = 0; cz < MAP_SIZE; cz++) {
       for (let cx = 0; cx < MAP_SIZE; cx++) {
@@ -151,10 +211,11 @@ export class Terrain {
         let rd = Infinity;
         for (const road of roads) {
           for (let k = 0; k < road.length - 1; k++) {
-            rd = Math.min(rd, distToSegment(x, z, road[k][0], road[k][1], road[k + 1][0], road[k + 1][1]));
+            const a = road[k]!;
+            const b = road[k + 1]!;
+            rd = Math.min(rd, distToSegment(x, z, a[0], a[1], b[0], b[1]));
           }
         }
-        this.roadDist ??= new Float32Array(MAP_SIZE * MAP_SIZE);
         this.roadDist[i] = rd;
         if (t === T_GRASS) {
           if (rd < 1.4) t = T_ROAD;
@@ -174,7 +235,7 @@ export class Terrain {
   }
 
   /** Scatter forests. `keepClear(x, z)` returns true where trees must not grow. */
-  plantTrees(keepClear) {
+  plantTrees(keepClear: (x: number, z: number) => boolean): void {
     const rand = mulberry32(this.seed + 99);
     for (let cz = 1; cz < MAP_SIZE - 1; cz++) {
       for (let cx = 1; cx < MAP_SIZE - 1; cx++) {
@@ -184,7 +245,7 @@ export class Terrain {
         if (this.grid.flags[i] !== 0) continue;
         const t = this.types[i];
         if (t === T_ROAD || t === T_COBBLE || t === T_SHORE) continue;
-        if (this.roadDist[i] < 3.2) continue;
+        if (this.roadDist[i]! < 3.2) continue;
         if (keepClear(x, z)) continue;
         const edge = Math.min(x, z, MAP_SIZE - x, MAP_SIZE - z);
         const r = Math.hypot(x - CENTER, z - CENTER);
@@ -212,8 +273,9 @@ export class Terrain {
             species,
             scale: 0.7 + rand() * 0.3,
             rot: rand() * Math.PI * 2,
+            tint: [0, 0, 0], // set below, from its own random sequence
           });
-          this.types[i] = this.types[i] === T_GRASS ? T_FOREST : this.types[i];
+          this.types[i] = this.types[i] === T_GRASS ? T_FOREST : this.types[i]!;
           this.grid.setFlag(cx, cz, BLOCK_TREE, true);
         }
       }
@@ -229,7 +291,7 @@ export class Terrain {
     }
   }
 
-  treeAtCell(cx, cz) {
+  treeAtCell(cx: number, cz: number): Tree | null {
     const t = this.treeByCell.get(cz * MAP_SIZE + cx);
     return t && t.alive ? t : null;
   }
@@ -239,12 +301,12 @@ export class Terrain {
   // rocks, bushes and flowers. The meshes are built by the renderer (src/render/terrainView.js,
   // src/babylon/TerrainView.ts).
 
-  paintTexture() {
+  paintTexture(): HTMLCanvasElement {
     const RES = 2048;
     const canvas = document.createElement('canvas');
     canvas.width = RES;
     canvas.height = RES;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d')!;
     const img = ctx.createImageData(RES, RES);
     const data = img.data;
     const S = MAP_SIZE;
@@ -255,7 +317,7 @@ export class Terrain {
     for (let i = 0; i < S * S; i++) {
       const cx = i % S;
       const cz = (i - cx) / S;
-      const c = TYPE_COLORS[this.types[i]];
+      const c = TYPE_COLORS[this.types[i]!]!;
       const v = 0.92 + valueNoise(cx * 0.31, cz * 0.31, 3) * 0.16;
       const tint = fbm(cx * 0.05, cz * 0.05, 11, 2) * 0.06;
       cellCol[i * 3] = c[0] * v + tint * 0.4;
@@ -273,8 +335,8 @@ export class Terrain {
     for (let y = 0; y < NT; y++) {
       for (let x = 0; x < NT; x++) {
         let s = 0;
-        for (let k = -1; k <= 1; k++) s += fine[y * NT + ((x + k + NT) % NT)] + fine[((y + k + NT) % NT) * NT + x];
-        fine2[y * NT + x] = fine[y * NT + x] * 0.6 + (s / 6) * 0.4;
+        for (let k = -1; k <= 1; k++) s += fine[y * NT + ((x + k + NT) % NT)]! + fine[((y + k + NT) % NT) * NT + x]!;
+        fine2[y * NT + x] = fine[y * NT + x]! * 0.6 + (s / 6) * 0.4;
       }
     }
     // Low-frequency warp so borders between ground types look organic.
@@ -287,15 +349,15 @@ export class Terrain {
         warpZ[z * WN + x] = fbm(x * 0.25, z * 0.25, 57, 2) * 0.9;
       }
     }
-    const sampleBil = (arr, W, x, z) => {
+    const sampleBil = (arr: Float32Array, W: number, x: number, z: number): number => {
       const xi = Math.max(0, Math.min(W - 2, Math.floor(x)));
       const zi = Math.max(0, Math.min(W - 2, Math.floor(z)));
       const fx = Math.min(1, Math.max(0, x - xi));
       const fz = Math.min(1, Math.max(0, z - zi));
-      const a = arr[zi * W + xi];
-      const b = arr[zi * W + xi + 1];
-      const c = arr[(zi + 1) * W + xi];
-      const d = arr[(zi + 1) * W + xi + 1];
+      const a = arr[zi * W + xi]!;
+      const b = arr[zi * W + xi + 1]!;
+      const c = arr[(zi + 1) * W + xi]!;
+      const d = arr[(zi + 1) * W + xi + 1]!;
       return a + (b - a) * fx + (c - a) * fz + (a - b - c + d) * fx * fz;
     };
 
@@ -322,12 +384,12 @@ export class Terrain {
         const w10 = fx * (1 - fz);
         const w01 = (1 - fx) * fz;
         const w11 = fx * fz;
-        let r = cellCol[i00] * w00 + cellCol[i10] * w10 + cellCol[i01] * w01 + cellCol[i11] * w11;
-        let g = cellCol[i00 + 1] * w00 + cellCol[i10 + 1] * w10 + cellCol[i01 + 1] * w01 + cellCol[i11 + 1] * w11;
-        let b = cellCol[i00 + 2] * w00 + cellCol[i10 + 2] * w10 + cellCol[i01 + 2] * w01 + cellCol[i11 + 2] * w11;
+        let r = cellCol[i00]! * w00 + cellCol[i10]! * w10 + cellCol[i01]! * w01 + cellCol[i11]! * w11;
+        let g = cellCol[i00 + 1]! * w00 + cellCol[i10 + 1]! * w10 + cellCol[i01 + 1]! * w01 + cellCol[i11 + 1]! * w11;
+        let b = cellCol[i00 + 2]! * w00 + cellCol[i10 + 2]! * w10 + cellCol[i01 + 2]! * w01 + cellCol[i11 + 2]! * w11;
         const ci = i00 / 3;
-        const cw = cobbleW[ci] * w00 + cobbleW[ci + 1] * w10 + cobbleW[ci + S] * w01 + cobbleW[ci + S + 1] * w11;
-        const fn = fine2[(py & (NT - 1)) * NT + (px & (NT - 1))];
+        const cw = cobbleW[ci]! * w00 + cobbleW[ci + 1]! * w10 + cobbleW[ci + S]! * w01 + cobbleW[ci + S + 1]! * w11;
+        const fn = fine2[(py & (NT - 1)) * NT + (px & (NT - 1))]!;
         let m = 0.86 + fn * 0.28;
         if (cw > 0.3) {
           // Cobblestone pattern.
@@ -353,7 +415,7 @@ export class Terrain {
   }
 
   /** Remove a chopped-down tree (the renderers turn it into a stump). */
-  fellTree(tree) {
+  fellTree(tree: Tree): void {
     if (!tree.alive) return;
     tree.alive = false;
     this.felled.push(tree);
@@ -362,18 +424,19 @@ export class Terrain {
   }
 
   /** Scatter rocks, bushes and flowers; each entry has a position, rotation, scale and colour. */
-  scatterDoodads() {
+  scatterDoodads(): Doodads {
     const rand = mulberry32(this.seed + 31);
-    const rocks = [];
-    const bushes = [];
-    const flowers = [];
+    type Spot = { x: number; z: number; s: number };
+    const rocks: Spot[] = [];
+    const bushes: Spot[] = [];
+    const flowers: Spot[] = [];
     for (let i = 0; i < Math.round(2600 * (MAP_SIZE / 160) ** 2); i++) {
       const x = 2 + rand() * (MAP_SIZE - 4);
       const z = 2 + rand() * (MAP_SIZE - 4);
       const cx = Math.floor(x);
       const cz = Math.floor(z);
       const ci = cz * MAP_SIZE + cx;
-      if (this.grid.flags[ci] & BLOCK_TERRAIN) continue;
+      if (this.grid.flags[ci]! & BLOCK_TERRAIN) continue;
       const t = this.types[ci];
       if (t === T_ROAD || t === T_COBBLE) continue;
       const h = this.heightAt(x, z);
@@ -389,27 +452,28 @@ export class Terrain {
         else if (roll < 0.36) flowers.push({ x, z, s: 0.5 + rand() * 0.6 });
       }
     }
-    // Placement: y offset (in units of the doodad's scale), rotation, stretch and colour.
-    const place = (list, yOff, colorFn) => {
-      for (const d of list) {
-        d.y = this.heightAt(d.x, d.z) + yOff * d.s;
-        d.rot = [rand() * 0.4, rand() * Math.PI * 2, rand() * 0.3];
-        d.scale = [d.s, d.s * (0.7 + rand() * 0.5), d.s];
-        d.color = colorFn();
-      }
-    };
-    place(rocks, 0.3, () => {
+    // Placement: y offset (in units of the doodad's scale), rotation, stretch and colour (the
+    // random draws happen in this order: rocks, bushes, flowers; per doodad rot, scale, colour).
+    const place = (list: Spot[], yOff: number, colorFn: () => Rgb): Doodad[] =>
+      list.map((d) => ({
+        ...d,
+        y: this.heightAt(d.x, d.z) + yOff * d.s,
+        rot: [rand() * 0.4, rand() * Math.PI * 2, rand() * 0.3],
+        scale: [d.s, d.s * (0.7 + rand() * 0.5), d.s],
+        color: colorFn(),
+      }));
+    const placedRocks = place(rocks, 0.3, () => {
       const v = 0.45 + rand() * 0.2;
       return [v, v * 0.97, v * 0.92];
     });
-    place(bushes, 0.5, () => [0.18 + rand() * 0.1, 0.38 + rand() * 0.12, 0.12]);
-    const pal = [[1, 0.9, 0.3], [1, 1, 1], [0.9, 0.4, 0.8], [0.5, 0.6, 1], [1, 0.5, 0.3]];
-    place(flowers, 0, () => pal[Math.floor(rand() * pal.length)]);
-    this.doodads = { rocks, bushes, flowers };
+    const placedBushes = place(bushes, 0.5, () => [0.18 + rand() * 0.1, 0.38 + rand() * 0.12, 0.12]);
+    const pal: Rgb[] = [[1, 0.9, 0.3], [1, 1, 1], [0.9, 0.4, 0.8], [0.5, 0.6, 1], [1, 0.5, 0.3]];
+    const placedFlowers = place(flowers, 0, () => pal[Math.floor(rand() * pal.length)]!);
+    this.doodads = { rocks: placedRocks, bushes: placedBushes, flowers: placedFlowers };
     return this.doodads;
   }
 
-  isNearFlatSpot(x, z) {
+  isNearFlatSpot(x: number, z: number): boolean {
     for (const s of this.flatSpots) if (Math.hypot(x - s.x, z - s.z) < s.radius + 1.5) return true;
     return false;
   }

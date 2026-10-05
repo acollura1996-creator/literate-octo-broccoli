@@ -1,6 +1,6 @@
 // Deterministic random numbers and value noise for map generation.
 
-export function mulberry32(seed) {
+export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return function rand() {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -11,17 +11,17 @@ export function mulberry32(seed) {
   };
 }
 
-function hash2(x, z, seed) {
+function hash2(x: number, z: number, seed: number): number {
   let h = (x * 374761393 + z * 668265263 + seed * 2147483647) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
 }
 
-const smooth = (t) => t * t * (3 - 2 * t);
+const smooth = (t: number): number => t * t * (3 - 2 * t);
 
 /** 2D value noise in [0, 1). */
-export function valueNoise(x, z, seed = 0) {
+export function valueNoise(x: number, z: number, seed = 0): number {
   const xi = Math.floor(x);
   const zi = Math.floor(z);
   const xf = smooth(x - xi);
@@ -34,7 +34,7 @@ export function valueNoise(x, z, seed = 0) {
 }
 
 /** Fractal value noise in roughly [-1, 1]. */
-export function fbm(x, z, seed = 0, octaves = 4) {
+export function fbm(x: number, z: number, seed = 0, octaves = 4): number {
   let sum = 0;
   let amp = 1;
   let norm = 0;
@@ -48,12 +48,12 @@ export function fbm(x, z, seed = 0, octaves = 4) {
   return sum / norm;
 }
 
-export function smoothstep(e0, e1, x) {
+export function smoothstep(e0: number, e1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
 }
 
-export function distToSegment(px, pz, ax, az, bx, bz) {
+export function distToSegment(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
   const dx = bx - ax;
   const dz = bz - az;
   const len2 = dx * dx + dz * dz;

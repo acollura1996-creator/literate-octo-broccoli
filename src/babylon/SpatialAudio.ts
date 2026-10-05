@@ -18,7 +18,7 @@ import type { AudioBus } from '@babylonjs/core/AudioV2/abstractAudio/audioBus';
 import type { StaticSound, IStaticSoundOptions } from '@babylonjs/core/AudioV2/abstractAudio/staticSound';
 import { Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import * as synth from '../audio.js';
-import { CENTER } from '../world/layout.js';
+import { CENTER } from '../world/layout.ts';
 
 /** Full volume within this ground distance of the camera target, silent beyond FAR (as before). */
 const NEAR = 14;

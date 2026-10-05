@@ -5,7 +5,7 @@
 import { TargetCamera } from '@babylonjs/core/Cameras/targetCamera';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { Scene } from '@babylonjs/core/scene';
-import { MAP_SIZE } from '../world/layout.js';
+import { MAP_SIZE } from '../world/layout.ts';
 
 export interface HeightSource {
   heightAt(x: number, z: number): number;

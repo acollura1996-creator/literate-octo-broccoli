@@ -1,9 +1,9 @@
 // three.js meshes for the terrain data (src/world/terrain.js): the painted ground with its detail
 // map, the moat water, instanced trees and doodads, the road surface and the fog-of-war texture.
 import * as THREE from 'three';
-import { MAP_SIZE } from '../world/layout.js';
-import { WATER_LEVEL } from '../world/terrain.js';
-import { makeDetailCanvas, makeCobbleCanvas, roadGeometry } from '../world/groundArt.js';
+import { MAP_SIZE } from '../world/layout.ts';
+import { WATER_LEVEL } from '../world/terrain.ts';
+import { makeDetailCanvas, makeCobbleCanvas, roadGeometry } from '../world/groundArt.ts';
 import { fogUniforms, patchFog, mat, geo } from './assets.js';
 import { createModel } from './models.js';
 

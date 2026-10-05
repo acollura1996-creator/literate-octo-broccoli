@@ -6,8 +6,8 @@ import { Roads } from '../game/roads.js';
 import { ITEMS } from '../data/items.ts';
 import { ABILITIES } from '../game/abilities.js';
 import { canCast, findNearestTree } from '../game/behavior.js';
-import { CENTER, CITADEL, MAP_SIZE } from '../world/layout.js';
-import { distToSegment } from '../world/noise.js';
+import { CENTER, CITADEL, MAP_SIZE } from '../world/layout.ts';
+import { distToSegment } from '../world/noise.ts';
 
 const WISHLIST = {
   str: ['claws6', 'ring2', 'gauntlets', 'boots', 'periapt', 'claws12', 'belt', 'ring5', 'crown', 'mask_death'],
