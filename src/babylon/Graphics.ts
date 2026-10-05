@@ -1,4 +1,5 @@
-// The Reforged look (M8): HDR rendering with ACES tone mapping, bloom, day/night colour grading,
+// The Reforged look (M8, regraded in M13): HDR rendering with neutral tone mapping, bloom, day/night
+// colour grading,
 // distance haze, cascaded soft shadows, ambient occlusion and a glow layer for emissive parts, in
 // three quality presets.
 //
@@ -72,10 +73,11 @@ const GRADES: Grade[] = [
   { h: 0, gHue: 222, gDen: 0, sat: -10, hiHue: 215, hiDen: 30, hiSat: 20, shHue: 228, shDen: 45, shSat: 30, exposure: 2.1, haze: [0.04, 0.06, 0.12] },
   { h: 5, gHue: 222, gDen: 0, sat: -10, hiHue: 215, hiDen: 30, hiSat: 20, shHue: 228, shDen: 45, shSat: 30, exposure: 2.0, haze: [0.06, 0.08, 0.15] },
   // Dawn and dusk: warm highlights, violet shade (golden hour before the 18:00 nightfall).
-  { h: 7, gHue: 30, gDen: 12, sat: 0, hiHue: 28, hiDen: 40, hiSat: 30, shHue: 250, shDen: 28, shSat: 14, exposure: 1.3, haze: [0.78, 0.6, 0.5] },
-  { h: 9.5, gHue: 40, gDen: 0, sat: -10, hiHue: 42, hiDen: 12, hiSat: 10, shHue: 215, shDen: 12, shSat: 8, exposure: 1.28, haze: [0.7, 0.78, 0.86] },
-  { h: 15, gHue: 40, gDen: 0, sat: -10, hiHue: 42, hiDen: 12, hiSat: 10, shHue: 215, shDen: 12, shSat: 8, exposure: 1.28, haze: [0.7, 0.78, 0.86] },
-  { h: 17, gHue: 25, gDen: 15, sat: 0, hiHue: 24, hiDen: 45, hiSat: 32, shHue: 255, shDen: 30, shSat: 15, exposure: 1.3, haze: [0.85, 0.58, 0.45] },
+  // Day: saturated and warm, Warcraft III's bold colours; shade leans blue.
+  { h: 7, gHue: 30, gDen: 12, sat: 10, hiHue: 28, hiDen: 40, hiSat: 30, shHue: 250, shDen: 28, shSat: 14, exposure: 1.15, haze: [0.78, 0.6, 0.5] },
+  { h: 9.5, gHue: 40, gDen: 3, sat: 12, hiHue: 42, hiDen: 16, hiSat: 14, shHue: 220, shDen: 16, shSat: 10, exposure: 1.12, haze: [0.7, 0.78, 0.86] },
+  { h: 15, gHue: 40, gDen: 3, sat: 12, hiHue: 42, hiDen: 16, hiSat: 14, shHue: 220, shDen: 16, shSat: 10, exposure: 1.12, haze: [0.7, 0.78, 0.86] },
+  { h: 17, gHue: 25, gDen: 15, sat: 12, hiHue: 24, hiDen: 45, hiSat: 32, shHue: 255, shDen: 30, shSat: 15, exposure: 1.15, haze: [0.85, 0.58, 0.45] },
   { h: 18.6, gHue: 222, gDen: 0, sat: -10, hiHue: 215, hiDen: 30, hiSat: 20, shHue: 228, shDen: 45, shSat: 30, exposure: 2.0, haze: [0.08, 0.08, 0.16] },
   { h: 24, gHue: 222, gDen: 0, sat: -10, hiHue: 215, hiDen: 30, hiSat: 20, shHue: 228, shDen: 45, shSat: 30, exposure: 2.1, haze: [0.04, 0.06, 0.12] },
 ];
@@ -280,8 +282,9 @@ export class Graphics {
       pl.imageProcessingEnabled = true;
       const ip = pl.imageProcessing;
       ip.toneMappingEnabled = true;
-      ip.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
-      ip.contrast = 1.1;
+      // Khronos PBR Neutral keeps hues and saturation (ACES greys out bold colours).
+      ip.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_KHR_PBR_NEUTRAL;
+      ip.contrast = 1.15;
       ip.colorCurvesEnabled = true;
       ip.colorCurves = this.curves;
       ip.vignetteEnabled = true;

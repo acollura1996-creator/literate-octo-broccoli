@@ -18,8 +18,10 @@ import '@babylonjs/core/Meshes/thinInstanceMesh';
 import { T_DIRT, T_FOREST, T_GRASS, T_SHORE, WATER_LEVEL } from '../world/terrain.ts';
 import { BLOCK_BUILDING, BLOCK_GATE } from '../world/pathgrid.ts';
 import { FoliagePlugin, boulderGeo, broadleafGeo, bushGeo, deadTreeGeo, flowerGeo, foliageMask, foliageMaterial, geoMesh, grassTuftGeo, pineGeo } from './Foliage';
-import { makeCobbleCanvas, roadGeometry } from '../world/groundArt.ts';
+import { roadGeometry } from '../world/groundArt.ts';
+import { paintRoadCobbles } from './GroundPaint';
 import { GroundSplatPlugin } from './GroundMaterial';
+import { modelGround } from './MergedModel';
 import { FogOfWar } from './FogOfWar';
 import type { Game } from '../game/game.ts';
 import type { Roads } from '../game/roads.ts';
@@ -200,6 +202,11 @@ export class TerrainView {
     this.mask.wrapU = this.mask.wrapV = Texture.CLAMP_ADDRESSMODE;
     foliageMask.texture = this.mask;
     foliageMask.size = S;
+    // Heights for the models' ground-contact shading (MergedModel.ts).
+    const heights = this.keep(new RawTexture(new Float32Array(terrain.heights), S + 1, S + 1, Constants.TEXTUREFORMAT_R, scene, false, false, Texture.NEAREST_SAMPLINGMODE, Constants.TEXTURETYPE_FLOAT));
+    heights.wrapU = heights.wrapV = Texture.CLAMP_ADDRESSMODE;
+    modelGround.texture = heights;
+    modelGround.size = S + 1;
     this.buildGround();
     this.buildWater();
     this.buildTrees();
@@ -234,6 +241,7 @@ export class TerrainView {
 
   dispose(): void {
     if (foliageMask.texture === this.mask) foliageMask.texture = null;
+    if (modelGround.texture && this.disposables.includes(modelGround.texture)) modelGround.texture = null;
     for (const d of this.disposables) d.dispose();
     this.disposables.length = 0;
     this.treeSlots.clear();
@@ -576,7 +584,7 @@ export class RoadView {
     this.mesh = new Mesh('roads', scene);
     this.mesh.isPickable = false;
     this.material = mat(scene, 'roads', Color3.White());
-    this.texture = canvasTexture('road-cobbles', makeCobbleCanvas(), scene, true);
+    this.texture = canvasTexture('road-cobbles', paintRoadCobbles(), scene, true);
     this.material.diffuseTexture = this.texture;
     // Drawn over the ground (three.js used a polygon offset of -2).
     this.material.zOffset = -2;

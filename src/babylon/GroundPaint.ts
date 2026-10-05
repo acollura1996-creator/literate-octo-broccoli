@@ -705,6 +705,36 @@ export function foliagePixels(size = GROUND_TEX_SIZE): Uint8Array {
   return out;
 }
 
+/**
+ * Player-built roads: light, neutral cobbles with dark joints (each age tints them: packed dirt,
+ * cobbles, paving, asphalt). The tile covers two map cells.
+ */
+export function paintRoadCobbles(size = 256): HTMLCanvasElement {
+  const p = new Painter(size, mulberry32(0x0ad5));
+  const N = size;
+  p.fill([30, 6, 34], 0.05);
+  const rows = 6;
+  const H = N / rows;
+  for (let row = 0; row < rows; row++) {
+    const widths: number[] = [];
+    let sum = 0;
+    while (sum < N - 30) {
+      const w = p.r(32, 60);
+      widths.push(w);
+      sum += w;
+    }
+    const k = N / sum;
+    let x = p.r(0, N);
+    for (const w0 of widths) {
+      const w = w0 * k;
+      p.slab(x + w / 2, (row + 0.5) * H, w - 4, H - 4, [p.r(25, 45), p.r(4, 10), p.r(74, 88)], 1);
+      x += w;
+    }
+  }
+  for (let i = 0; i < 400; i++) p.dot(p.r(0, N), p.r(0, N), p.r(0.5, 1.2), p.col([30, 10, p.rand() < 0.5 ? 92 : 55], 0.6));
+  return p.albedo;
+}
+
 export interface GroundPainting {
   layer: GroundLayer;
   albedo: HTMLCanvasElement;

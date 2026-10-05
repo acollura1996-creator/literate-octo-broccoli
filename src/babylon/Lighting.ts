@@ -45,6 +45,9 @@ export class LinearLightingPlugin extends MaterialPluginBase {
         #else
           color.rgb = clamp(litBase * diffuseColor + emissiveColor + vAmbientColor, 0.0, litMax) * baseColor.rgb * baseAmbientColor;
         #endif
+          // Painterly light (M13): sunlit surfaces a touch warm, shaded ones cool.
+          float lightL = dot(litBase, vec3(0.299, 0.587, 0.114));
+          color.rgb *= mix(vec3(0.9, 0.95, 1.1), vec3(1.05, 1.0, 0.93), smoothstep(0.45, 1.05, lightL));
         }
       #endif`,
       // HDR pipeline: blending happens in linear space, where a translucent overlay looks far

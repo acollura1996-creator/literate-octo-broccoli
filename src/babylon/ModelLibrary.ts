@@ -20,7 +20,16 @@ import '@babylonjs/core/Meshes/instancedMesh';
 import '@babylonjs/loaders/glTF/2.0';
 import modelsUrl from '../generated/models.glb?url';
 import { classifyColor, paint, paintParams, type PainterlyPlugin } from './Painterly';
-import { MergedModelPlugin } from './MergedModel';
+import { MergedModelPlugin, STYLE_KIND, creaseNormals } from './MergedModel';
+import { UNITS } from '../data/units.ts';
+
+/** Models of buildings (painted with brick, plank, thatch and tile structure; MergedModel.ts). */
+const BUILDING_MODELS = new Set<string>(['wall_segment', 'wall_tower', 'construction']);
+for (const d of Object.values(UNITS)) {
+  if (d.kind !== 'building') continue;
+  BUILDING_MODELS.add(d.model);
+  for (const m of d.ageModels ?? []) BUILDING_MODELS.add(m);
+}
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
@@ -247,6 +256,8 @@ export class ModelLibrary {
       const albedo: number[] = [];
       const teamB: number[] = [];
       const paintW: number[] = [];
+      const style: number[] = [];
+      const building = BUILDING_MODELS.has(t.id) ? 1 : 0;
       let cast = false;
       let receive = false;
       for (const m of g.meshes) {
@@ -275,25 +286,31 @@ export class ModelLibrary {
         const a4 = info.team ? [0, 0, 0, info.team[0]] : [toGamma(info.base[0]), toGamma(info.base[1]), toGamma(info.base[2]), 0];
         const b4 = info.team ? [info.team[1], info.team[2], info.team[3], pp.scale] : [0, 0, 0, pp.scale];
         const n = p.length / 3;
+        const kindId = STYLE_KIND[kind];
         for (let i = 0; i < n; i++) {
           albedo.push(a4[0]!, a4[1]!, a4[2]!, a4[3]!);
           teamB.push(b4[0]!, b4[1]!, b4[2]!, b4[3]!);
           paintW.push(pp.weights[0], pp.weights[1], pp.weights[2], pp.weights[3]);
+          style.push(building, kindId, 0, 0);
         }
         const ex = (m.metadata?.gltf?.extras ?? {}) as { castShadow?: boolean; receiveShadow?: boolean };
         cast ||= !!ex.castShadow;
         receive ||= !!ex.receiveShadow;
       }
       if (!pos.length) continue;
+      // Smooth shading with crisp edges (M13): the baked parts carry no normals.
+      const sm = creaseNormals(pos, idx, [albedo, teamB, paintW, style]);
       const merged = new Mesh(`${g.anchor.name}#merged${g.doubleSided ? '2' : ''}`, this.scene);
       merged.sideOrientation = Material.CounterClockWiseSideOrientation;
       const vd = new VertexData();
-      vd.positions = pos;
-      vd.indices = idx;
+      vd.positions = sm.pos;
+      vd.indices = sm.idx;
+      vd.normals = sm.normals;
       vd.applyToMesh(merged, false);
-      merged.setVerticesData('mAlbedo', albedo, false, 4);
-      merged.setVerticesData('mTeamB', teamB, false, 4);
-      merged.setVerticesData('mPaint', paintW, false, 4);
+      merged.setVerticesData('mAlbedo', sm.attrs[0]!, false, 4);
+      merged.setVerticesData('mTeamB', sm.attrs[1]!, false, 4);
+      merged.setVerticesData('mPaint', sm.attrs[2]!, false, 4);
+      merged.setVerticesData('mStyle', sm.attrs[3]!, false, 4);
       merged.parent = g.anchor;
       merged.material = this.mergedMaterial(g.doubleSided);
       merged.metadata = { gltf: { extras: { castShadow: cast, receiveShadow: receive } } };

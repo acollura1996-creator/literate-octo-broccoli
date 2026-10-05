@@ -20,6 +20,7 @@ import { ModelLibrary, type ModelInstance } from './ModelLibrary';
 import { UnitAssets, UnitView, ItemView, quatFromEulerXYZ } from './UnitView';
 import { ITEMS } from '../data/items.ts';
 import { Effects } from './Effects';
+import { MergedModelPlugin } from './MergedModel';
 import { ProjectileView } from './Projectiles';
 import { Previews } from './Previews';
 import { UiRenderer } from './UiRenderer';
@@ -372,6 +373,9 @@ export class BabylonView {
     this.hemi.diffuse.set(0.81 - night * 0.35, 0.9 - night * 0.3, 1.0);
     this.hemi.groundColor.set(0.35 - night * 0.15, 0.29 - night * 0.12, 0.19 + night * 0.05);
     this.hemi.specular = Color3.Black();
+    // Rim light on models (MergedModel.ts): the sky's colour, by day.
+    const rim = 0.22 + 0.2 * dayness;
+    MergedModelPlugin.rim = [this.hemi.diffuse.r * rim, this.hemi.diffuse.g * rim, this.hemi.diffuse.b * rim];
     const ang = ((hour - 6) / 12) * Math.PI;
     const sx = Math.cos(ang) * 30;
     const sy = 45 + Math.abs(Math.sin(ang)) * 20;

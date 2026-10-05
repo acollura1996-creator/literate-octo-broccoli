@@ -1,35 +1,4 @@
-// Engine-free art for the roads: the cobble texture and the road surface geometry. Textures are
-// plain 2D canvases.
-
-/** Small tiling road texture: cobbles with mortar lines (tinted per age by vertex colours). */
-export function makeCobbleCanvas(): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 64;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#d9d2c2';
-  ctx.fillRect(0, 0, 64, 64);
-  let seed = 7;
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let row = 0; row < 4; row++) {
-    for (let col = 0; col < 4; col++) {
-      const x = col * 16 + (row % 2) * 8;
-      const y = row * 16;
-      const v = 200 + Math.floor(rnd() * 50);
-      ctx.fillStyle = `rgb(${v},${v - 6},${v - 18})`;
-      ctx.beginPath();
-      ctx.roundRect?.(x + 1.5, y + 1.5, 13, 13, 4);
-      if (!ctx.roundRect) ctx.rect(x + 1.5, y + 1.5, 13, 13);
-      ctx.fill();
-      if (x + 16 > 64) {
-        ctx.beginPath();
-        ctx.rect(x - 64 + 1.5, y + 1.5, 13, 13);
-        ctx.fill();
-      }
-    }
-  }
-  return c;
-}
+// Engine-free road surface geometry (the renderer paints the road texture: GroundPaint.ts).
 
 /**
  * Road surface: one quad per road tile hugging the terrain, tinted by its owner's age.

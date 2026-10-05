@@ -24,7 +24,7 @@ const KINDS: Record<PaintKind, { w: [number, number, number, number]; strength: 
   stone: { w: [0.65, 0, 0, 0.35], strength: 0.2, scale: 0.55 },
   wood: { w: [0, 0.75, 0, 0.25], strength: 0.2, scale: 0.6 },
   thatch: { w: [0, 0.6, 0.2, 0.2], strength: 0.24, scale: 1.4 },
-  metal: { w: [0.15, 0, 0, 0.85], strength: 0.1, scale: 0.7 },
+  metal: { w: [0, 0, 0, 1], strength: 0.09, scale: 0.7 },
   gold: { w: [0, 0, 0, 1], strength: 0.12, scale: 0.8 },
   cloth: { w: [0, 0, 0.6, 0.4], strength: 0.14, scale: 1.1 },
   leather: { w: [0.2, 0, 0.5, 0.3], strength: 0.16, scale: 0.9 },
