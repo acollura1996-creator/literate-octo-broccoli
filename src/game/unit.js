@@ -131,6 +131,8 @@ export class Unit {
 
   get maxHp() {
     let hp = this.isHero ? 100 + 25 * this.str : (this.def.hpByAge?.[this.ageLevel - 1] ?? this.def.hp);
+    const up = this.owner?.upgrades;
+    if (up && !this.isHero) hp *= this.isBuilding ? 1 + 0.1 * (up.masonry || 0) : 1 + 0.06 * (up.vitality || 0);
     hp += this.itemStat('hp') + (this.mods.hp || 0);
     if (this.owner?.handicap && !this.isBuilding) hp *= this.owner.handicap;
     return Math.round(hp);
@@ -141,6 +143,7 @@ export class Unit {
   }
   get hpRegen() {
     let r = this.isHero ? 0.25 + 0.05 * this.str : this.def.hpRegen;
+    if (!this.isHero && !this.isBuilding && this.owner?.upgrades?.medicine) r += 0.4 * this.owner.upgrades.medicine;
     return r + this.itemStat('hpRegen') + (this.mods.hpRegen || 0);
   }
   get manaRegen() {
@@ -150,7 +153,7 @@ export class Unit {
   get armor() {
     let a = this.def.armorByAge?.[this.ageLevel - 1] ?? this.def.armor;
     if (this.isHero) a += this.agi * 0.3;
-    else if (!this.isBuilding && this.owner?.upgrades) a += this.owner.upgrades.armor * 2;
+    else if (!this.isBuilding && this.owner?.upgrades) a += this.owner.upgrades.armor || 0;
     return a + this.itemStat('armor') + (this.mods.armor || 0);
   }
   /** Projectile fired by this unit (towers change ammunition with the ages). */
@@ -162,8 +165,8 @@ export class Unit {
     if (!d) return null;
     let bonus = this.itemStat('damage') + (this.mods.damage || 0);
     if (this.isHero) bonus += this[this.heroDef.primary];
-    else if (!this.isBuilding && this.owner?.upgrades) bonus += this.owner.upgrades.weapons * 2;
     let mult = 1;
+    if (!this.isHero && this.owner?.upgrades?.weaponry) mult *= 1 + 0.06 * this.owner.upgrades.weaponry;
     if (this.projectile && this.mods.rangedPct) mult += this.mods.rangedPct;
     if (this.owner?.damageMult && !this.isBuilding) mult *= this.owner.damageMult;
     return [Math.round((d[0] + bonus) * mult), Math.round((d[1] + bonus) * mult)];
@@ -177,7 +180,8 @@ export class Unit {
   get speed() {
     let s = this.def.speed + this.itemStat('speed');
     s *= this.mods.speedMul || 1;
-    return Math.min(5.5, s);
+    if (!this.isHero && this.owner?.upgrades?.mobility) s *= 1 + 0.04 * this.owner.upgrades.mobility;
+    return Math.min(7, s);
   }
   get range() {
     return this.def.range;

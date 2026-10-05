@@ -73,6 +73,20 @@ function makeMesh(kind, color) {
       g.userData.spin = spin;
       break;
     }
+    case 'javelin': {
+      const shaft = new THREE.Mesh(geo.box(0.035, 0.035, 1.0), mat(0x8b6b3e, { noFog: true }));
+      const tip = new THREE.Mesh(geo.cone(0.045, 0.2, 4), mat(0x9aa0a6, { noFog: true }));
+      tip.rotation.x = Math.PI / 2;
+      tip.position.z = 0.58;
+      g.add(shaft, tip);
+      break;
+    }
+    case 'flame': {
+      g.add(new THREE.Mesh(geo.sphere(0.2, 8, 6), mat(0xffd27a, { emissive: 0xff8a00, emissiveIntensity: 1.6, noFog: true })));
+      g.add(new THREE.Mesh(geo.sphere(0.38, 8, 6), mat(0xff6a1a, { transparent: true, opacity: 0.5, emissive: 0xff4a00, noFog: true })));
+      g.userData.trail = 'flame';
+      break;
+    }
     case 'stone': {
       const m = new THREE.Mesh(geo.dodeca(0.13, 0), mat(0x8a8276, { noFog: true }));
       g.add(m);
@@ -175,11 +189,11 @@ export class Projectiles {
     const from = o.from;
     const { x: sx, y: sy, z: sz } = this.muzzleOf(from);
     if (from.def.firearm || from.projectile?.kind === 'bullet' || from.projectile?.kind === 'laser') {
-      const c = o.kind === 'laser' || o.kind === 'plasma' ? o.color ?? 0x6af7ff : 0xffd27a;
+      const c = o.kind === 'laser' || o.kind === 'plasma' || o.kind === 'rail' ? o.color ?? 0x6af7ff : o.kind === 'flame' ? 0xff8a2a : 0xffd27a;
       g.hooks.fx?.muzzle(sx, sy, sz, c, o.kind === 'shell' || o.kind === 'cannonball' ? 0.45 : 0.22);
       if (o.kind === 'shell' || o.kind === 'cannonball') g.hooks.fx?.puff(sx, sy, sz, 0xcfc8bc, 0.4, 1.0);
     }
-    if (o.kind === 'laser') return this.beam(o, sx, sy, sz);
+    if (o.kind === 'laser' || o.kind === 'rail') return this.beam(o, sx, sy, sz, o.kind === 'rail' ? 1.8 : 1);
     const mesh = makeMesh(o.kind, o.color);
     mesh.position.set(sx, sy, sz);
     this.scene.add(mesh);
@@ -203,7 +217,7 @@ export class Projectiles {
   }
 
   /** Lasers hit instantly: draw a beam that fades out. */
-  beam(o, sx, sy, sz) {
+  beam(o, sx, sy, sz, width = 1) {
     const g = this.game;
     const t = o.target;
     const tx = t.x;
@@ -216,8 +230,8 @@ export class Projectiles {
     const m = beamMat(c, 0.9);
     const core = beamMat(0xffffff, 0.95);
     const mesh = new THREE.Group();
-    const outer = new THREE.Mesh(geo.box(0.09, 0.09, 1), m);
-    const inner = new THREE.Mesh(geo.box(0.035, 0.035, 1), core);
+    const outer = new THREE.Mesh(geo.box(0.09 * width, 0.09 * width, 1), m);
+    const inner = new THREE.Mesh(geo.box(0.035 * width, 0.035 * width, 1), core);
     mesh.add(outer, inner);
     mesh.scale.set(1, 1, len);
     mesh.position.set((sx + tx) / 2, (sy + ty) / 2, (sz + tz) / 2);
@@ -292,7 +306,8 @@ export class Projectiles {
         p.trailT = (p.trailT ?? 0) + dt;
         if (p.trailT > 0.04) {
           p.trailT = 0;
-          g.hooks.fx?.puff(prev.x, prev.y, prev.z, 0xc8c2b8, 0.16, 0.6);
+          if (p.mesh.userData.trail === 'flame') g.hooks.fx?.puff(prev.x, prev.y, prev.z, 0x4a3a30, 0.18, 0.5);
+          else g.hooks.fx?.puff(prev.x, prev.y, prev.z, 0xc8c2b8, 0.16, 0.6);
         }
       }
       p.mesh.visible = g.fog.isVisible(p.x, p.z);

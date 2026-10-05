@@ -1322,3 +1322,10 @@ body:not(.mode-empire) .empire-only {
 .sb-row.mercenary .sb-tag {
   color: #ffd27a;
 }
+
+.stat.research-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}

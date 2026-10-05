@@ -69,6 +69,7 @@ export class Empires {
       if (b.dead || b.underConstruction || !b.def.foodRateByAge) continue;
       produced += b.def.foodRateByAge[b.ageLevel - 1];
     }
+    produced *= 1 + 0.1 * (p.upgrades?.agriculture ?? 0);
     produced *= g.events?.harvestMult(p) ?? 1;
     const eaten = p.citizens * p.rations * ECONOMY.foodPerRation;
     p.foodProduced = produced;
@@ -87,15 +88,18 @@ export class Empires {
     const houses = this.housesOf(p).filter((b) => b.roadConnected).length;
     const roads = g.roads.countOf(p);
     const roadBonus = clamp((roads / Math.max(3, houses)) * 3 - 6, -6, 18);
-    let target = 55 + (p.rations - 10) * 3 - (p.tax - 3) * 7 + roadBonus - p.unrest;
+    // Rations please the people (less so once they are already well fed); every point of tax angers them.
+    const r = p.rations;
+    const rationJoy = r <= 20 ? (r - 10) * 3 : 30 + (r - 20) * 1.5;
+    let target = 55 + rationJoy - (p.tax - 3) * 7 + roadBonus - p.unrest + 3 * (p.upgrades?.civics ?? 0);
     if (p.starving) target -= 35;
     if (p.citizens > p.housing + 0.5) target -= 10;
     // Big cities are harder to keep content (roads help).
     p.crowding = Math.min(15, Math.max(0, (p.citizens - 80) / 25));
     target -= p.crowding;
     p.roadBonus = roadBonus;
-    p.happinessTarget = clamp(target, 0, 100);
-    const rate = p.starving ? 4 : 2;
+    p.happinessTarget = clamp(target, 0, ECONOMY.maxHappiness);
+    const rate = (p.starving ? 4 : 2) + Math.abs(p.happinessTarget - p.happiness) * 0.02;
     const before = moodOf(p.happiness);
     p.happiness += clamp(p.happinessTarget - p.happiness, -rate * dt, rate * dt);
     const mood = moodOf(p.happiness);
@@ -114,7 +118,7 @@ export class Empires {
     if (mood.name === 'Hate') p.citizens = Math.max(0, p.citizens - 0.08 * dt);
 
     // Taxes: no income while the people starve or hate you.
-    const mult = p.starving ? 0 : mood.income * (g.events?.incomeMult(p) ?? 1) * (p.isHuman ? 1 : p.handicap ?? 1);
+    const mult = p.starving ? 0 : mood.income * (g.events?.incomeMult(p) ?? 1) * (1 + 0.05 * (p.upgrades?.commerce ?? 0)) * (p.isHuman ? 1 : p.handicap ?? 1);
     p.taxRate = p.citizens * p.tax * ECONOMY.taxPerCitizen * mult;
     const gold = p.taxRate * dt;
     p.gold += gold;
@@ -162,10 +166,10 @@ export class Empires {
 
   // ------------------------------------------------------------ settings
   setTax(p, v) {
-    p.tax = clamp(Math.round(v), 0, ECONOMY.taxMax);
+    p.tax = Math.max(0, Math.round(v)); // no upper limit
   }
   setRations(p, v) {
-    p.rations = clamp(Math.round(v), 0, ECONOMY.rationsMax);
+    p.rations = Math.max(0, Math.round(v)); // no upper limit
   }
 
   // ---------------------------------------------------------------- ages

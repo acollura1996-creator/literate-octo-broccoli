@@ -1,7 +1,7 @@
 // The Game: owns the world state and runs the simulation.
 import * as THREE from 'three';
 import { Unit } from './unit.js';
-import { UNITS, ATTACK_TABLE, UPGRADES, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES, AGES } from '../data/units.js';
+import { UNITS, ATTACK_TABLE, UPGRADES, RESEARCH_IDS, researchCost, researchTime, researchCap, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES, AGES } from '../data/units.js';
 import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.js';
 import { ITEMS } from '../data/items.js';
 import { ABILITIES } from './abilities.js';
@@ -195,7 +195,7 @@ export class Game {
       foodUsed: 0,
       foodCap: 0,
       tier: 0,
-      upgrades: { weapons: 0, armor: 0, lumber: 0 },
+      upgrades: Object.fromEntries(RESEARCH_IDS.map((id) => [id, 0])),
       units: [],
       buildings: [],
       hero: null,
@@ -570,7 +570,7 @@ export class Game {
     if (!proj) {
       const heavy = u.def.radius >= 0.65 || u.def.boss;
       this.sound(heavy ? 'heavyHit' : 'swordHit', t.x, t.z, 0.45);
-    } else if (proj.kind === 'arrow' || proj.kind === 'axe' || proj.kind === 'bullet') {
+    } else if (proj.kind === 'arrow' || proj.kind === 'axe' || proj.kind === 'bullet' || proj.kind === 'javelin') {
       this.sound('arrowHit', t.x, t.z, 0.3);
     }
     this.hooks.fx?.hit(t, proj ? proj.color ?? (proj.kind === 'bullet' ? 0xffe28a : 0xffffff) : 0xffeecc);
@@ -812,12 +812,12 @@ export class Game {
   }
 
   hasRequirement(p, req) {
-    const age = /^age(\d)$/.exec(req);
+    const age = /^age(\d+)$/.exec(req);
     if (age) return p.tier >= Number(age[1]);
     return p.buildings.some((b) => !b.dead && !b.underConstruction && (b.type === req || (req === 'scouttower' && b.type === 'guardtower')));
   }
   requirementName(req) {
-    const m = /^age(\d)$/.exec(req);
+    const m = /^age(\d+)$/.exec(req);
     if (m) return AGE_NAMES[Number(m[1])];
     return UNITS[req]?.name ?? req;
   }
@@ -841,7 +841,7 @@ export class Game {
         if (b.def.foodProvided) cap += b.def.foodProvided;
         if (b.def.housing) housing += b.def.housing;
         if (b.def.housingByAge && b.roadConnected) {
-          const h = b.def.housingByAge[b.ageLevel - 1];
+          const h = b.def.housingByAge[b.ageLevel - 1] + (p.upgrades?.housing ?? 0);
           cap += h;
           housing += h;
         }
@@ -954,7 +954,7 @@ export class Game {
     }
     const f = b.buildersThisFrame === 0 ? 1 : 0.6;
     b.buildersThisFrame++;
-    const speed = b.owner.isHuman ? 1 : [0.85, 1, 1.15][this.difficulty];
+    const speed = (b.owner.isHuman ? 1 : [0.85, 1, 1.15][this.difficulty]) * (1 + 0.1 * (b.owner.upgrades?.masonry ?? 0));
     const dp = (dt * f * speed) / b.def.buildTime;
     b.buildProgress = Math.min(1, b.buildProgress + dp);
     b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.9 * dp);
@@ -1122,18 +1122,22 @@ export class Game {
     this.computeFood(b.owner);
   }
 
+  /** Can `upg` be researched one more level by p right now (ignoring cost)? */
+  researchState(p, upg) {
+    const lvl = p.upgrades[upg] ?? 0;
+    return { lvl, cap: researchCap(p), busy: !!p.researchingUpg?.[upg] };
+  }
+
   startResearch(b, upg) {
     const p = b.owner;
-    const U = UPGRADES[upg];
-    const lvl = p.upgrades[upg];
-    if (b.researching || b.underConstruction || lvl >= (U.levels ?? 3)) return false;
-    if (p.researchingUpg?.[upg]) return false;
-    if (p.tier < U.tier[lvl]) {
-      if (p.isHuman) this.message(`Requires the ${AGE_NAMES[U.tier[lvl]]}.`, '#ff8080');
+    const { lvl, cap, busy } = this.researchState(p, upg);
+    if (b.researching || b.underConstruction || busy) return false;
+    if (lvl >= cap) {
+      if (p.isHuman) this.message(`Advance to the next age to research ${UPGRADES[upg].name} further.`, '#ff8080');
       return false;
     }
-    if (!this.spend(p, U.cost[lvl])) return false;
-    b.researching = { upg, time: 0, total: U.time[lvl] };
+    if (!this.spend(p, researchCost(upg, lvl))) return false;
+    b.researching = { upg, time: 0, total: researchTime(upg, lvl) };
     (p.researchingUpg ||= {})[upg] = true;
     return true;
   }
@@ -1142,7 +1146,7 @@ export class Game {
     if (!b.researching) return;
     const p = b.owner;
     const { upg } = b.researching;
-    this.refund(p, UPGRADES[upg].cost[p.upgrades[upg]]);
+    this.refund(p, researchCost(upg, p.upgrades[upg]));
     p.researchingUpg[upg] = false;
     b.researching = null;
   }
@@ -1151,11 +1155,16 @@ export class Game {
     const p = b.owner;
     const { upg } = b.researching;
     b.researching = null;
+    // Health research keeps every unit's health fraction.
+    const scale = upg === 'vitality' || upg === 'masonry';
+    const before = scale ? new Map([...p.units, ...p.buildings].map((u) => [u, u.maxHp])) : null;
     p.upgrades[upg]++;
     p.researchingUpg[upg] = false;
+    if (before) for (const [u, m] of before) if (!u.dead) u.hp = Math.min(u.maxHp, u.hp * (u.maxHp / m));
+    if (upg === 'housing') this.computeFood(p);
     if (p.isHuman) {
       this.sound('buildComplete', b.x, b.z);
-      this.message(`Research complete: ${UPGRADES[upg].name[p.upgrades[upg] - 1]}.`, '#9fe89f');
+      this.message(`Research complete: ${UPGRADES[upg].name} level ${p.upgrades[upg]} (${UPGRADES[upg].effect}).`, '#9fe89f');
     }
   }
 

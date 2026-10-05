@@ -72,7 +72,7 @@ export class GameEvents {
     const victims = this.empires().filter((p) => p.citizens >= 15);
     const p = pick(victims);
     const hardy = p.rations >= 14;
-    const loss = Math.round(p.citizens * (hardy ? 0.1 : 0.2));
+    const loss = Math.round(p.citizens * (hardy ? 0.1 : 0.2) * Math.pow(0.85, p.upgrades?.medicine ?? 0));
     p.citizens -= loss;
     p.unrest += hardy ? 6 : 15;
     if (p.isHuman) {

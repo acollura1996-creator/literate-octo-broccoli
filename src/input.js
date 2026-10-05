@@ -870,7 +870,7 @@ export class Input {
     if (btn) {
       e.preventDefault();
       if (!btn.disabled) {
-        btn.onClick();
+        btn.onClick(e);
         this.game.sound('click', undefined, undefined, 0.4);
       } else g.sound('error');
     }

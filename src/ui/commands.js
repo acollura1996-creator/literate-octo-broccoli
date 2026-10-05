@@ -1,5 +1,5 @@
 // Builds the 4x3 command card for the current selection.
-import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES, AGES, ECONOMY } from '../data/units.js';
+import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES, AGES, ECONOMY, researchCost, researchTime, researchCap } from '../data/units.js';
 import { moodOf } from '../game/empire.js';
 import { ITEMS, SHOP_STOCK } from '../data/items.js';
 import { ABILITIES, requiredHeroLevel } from '../game/abilities.js';
@@ -73,7 +73,7 @@ export function getCommands(game, input) {
     const order = input.cardMenu === 'build' ? BUILD_MENUS.basic : BUILD_MENUS.advanced;
     const keys = {
       house: 'H', road: 'R', farm: 'F', wall: 'W', gate: 'G', lumberyard: 'L', barracks: 'B', scouttower: 'T', townhall: 'N',
-      blacksmith: 'S', stable: 'E', sanctum: 'A', workshop: 'K', factory: 'Y', missile_silo: 'M',
+      research_center: 'C', stable: 'E', sanctum: 'A', workshop: 'K', factory: 'Y', missile_silo: 'M',
     };
     order.forEach((type, i) => {
       const pos = { x: i % 4, y: Math.floor(i / 4) };
@@ -166,7 +166,7 @@ export function getCommands(game, input) {
       });
       return B;
     }
-    if (u.upgrading || u.researching) {
+    if (u.upgrading || (u.researching && !u.def.researches?.includes(u.researching.upg))) {
       B.push({
         id: 'cancelup', x: 3, y: 2, hotkey: 'Escape', keyLabel: 'Esc', icon: '✖', name: 'Cancel',
         onClick: () => (u.upgrading ? game.cancelUpgrade(u) : game.cancelResearch(u)),
@@ -194,21 +194,34 @@ export function getCommands(game, input) {
     });
     (u.def.researches ?? []).forEach((upg, i) => {
       const U = UPGRADES[upg];
-      const lvl = p.upgrades[upg];
-      if (lvl >= (U.levels ?? 3)) return;
+      const lvl = p.upgrades[upg] ?? 0;
+      const cap = researchCap(p);
+      const x = i % 4;
+      const y = Math.floor(i / 4);
+      // The research in progress becomes its own Cancel button.
+      if (u.researching?.upg === upg) {
+        B.push({
+          id: `cancelresearch:${upg}`, x, y, hotkey: 'Escape', keyLabel: 'Esc', icon: U.icon, iconBg: '#7a2a2a', label: '✖',
+          name: `Cancel ${U.name} level ${lvl + 1}`, tooltip: 'Cancels the research and refunds its cost.',
+          progress: u.researching.time / u.researching.total,
+          onClick: () => game.cancelResearch(u),
+        });
+        return;
+      }
       const busy = p.researchingUpg?.[upg];
+      const maxed = lvl >= cap;
       B.push({
         id: `research:${upg}`,
-        x: i,
-        y: 0,
-        hotkey: U.hotkey,
+        x,
+        y,
+        hotkey: GRID_KEYS[y][x],
         icon: U.icon,
-        iconBg: '#555',
-        name: `Research ${U.name[lvl]}`,
-        tooltip: `${U.description}${p.tier < U.tier[lvl] ? `<br><span class="req">Requires the ${AGE_NAMES[U.tier[lvl]]}.</span>` : ''}`,
-        cost: costLine(U.cost[lvl]),
+        iconBg: '#3a4a5a',
+        name: `Research ${U.name} - [Level ${lvl + 1}]`,
+        tooltip: `${U.effect} per level.<br><span class="dim">Level ${lvl} of ${cap} available in the ${AGE_NAMES[Math.max(1, p.tier)]} · ${researchTime(upg, lvl)}s</span>${maxed ? '<br><span class="req">Advance to the next age to research further.</span>' : ''}${busy ? '<br><span class="dim">Being researched at another Research Center.</span>' : ''}`,
+        cost: maxed ? '' : costLine(researchCost(upg, lvl)),
         level: lvl,
-        disabled: !!u.researching || busy || p.tier < U.tier[lvl],
+        disabled: !!u.researching || busy || maxed || !game.canAfford(p, researchCost(upg, lvl)),
         onClick: () => game.startResearch(u, upg),
       });
     });
@@ -244,26 +257,27 @@ export function getCommands(game, input) {
         });
       }
       const mood = moodOf(p.happiness);
-      const econ = `<br><span class="dim">Citizens ${Math.floor(p.citizens)}/${p.housing} · Mood ${mood.icon} ${mood.name} · Tax ${p.tax} · Rations ${p.rations}</span>`;
+      const econ = `<br><span class="dim">Citizens ${Math.floor(p.citizens)}/${p.housing} · Mood ${mood.icon} ${mood.name} · Tax ${p.tax} · Rations ${p.rations}</span><br><span class="dim">There is no limit. Hold Shift to change by 5.</span>`;
+      const step = (e) => (e?.shiftKey ? 5 : 1);
       B.push({
         id: 'tax-', x: 0, y: 1, hotkey: 'Z', icon: '💰', iconBg: '#3a5a3a', label: '−', name: `Lower Taxes (now ${p.tax})`,
         tooltip: `Lower taxes make your people happier but bring in less gold.${econ}`,
-        disabled: p.tax <= 0, onClick: () => game.empires.setTax(p, p.tax - 1),
+        disabled: p.tax <= 0, onClick: (e) => game.empires.setTax(p, p.tax - step(e)),
       });
       B.push({
         id: 'tax+', x: 1, y: 1, hotkey: 'X', icon: '💰', iconBg: '#6a4a2a', label: '+', name: `Raise Taxes (now ${p.tax})`,
         tooltip: `Each citizen pays more gold, but heavy taxes anger your people. No taxes are paid while they starve or hate you.${econ}`,
-        disabled: p.tax >= ECONOMY.taxMax, onClick: () => game.empires.setTax(p, p.tax + 1),
+        onClick: (e) => game.empires.setTax(p, p.tax + step(e)),
       });
       B.push({
         id: 'rations-', x: 2, y: 1, hotkey: 'C', icon: '🍞', iconBg: '#5a4a2a', label: '−', name: `Smaller Rations (now ${p.rations})`,
         tooltip: `Citizens eat less food, but meager rations make them unhappy.${econ}`,
-        disabled: p.rations <= 0, onClick: () => game.empires.setRations(p, p.rations - 1),
+        disabled: p.rations <= 0, onClick: (e) => game.empires.setRations(p, p.rations - step(e)),
       });
       B.push({
         id: 'rations+', x: 3, y: 1, hotkey: 'V', icon: '🍞', iconBg: '#3a5a3a', label: '+', name: `Bigger Rations (now ${p.rations})`,
         tooltip: `Well-fed citizens are happier and resist plague, but eat more of your food.${econ}`,
-        disabled: p.rations >= ECONOMY.rationsMax, onClick: () => game.empires.setRations(p, p.rations + 1),
+        onClick: (e) => game.empires.setRations(p, p.rations + step(e)),
       });
       B.push({
         id: 'hiremenu', x: 1, y: 0, hotkey: 'H', icon: '🤝', iconBg: '#4a3a6a', name: 'Hire a Hero',
@@ -332,7 +346,7 @@ export function getCommands(game, input) {
       B.push({ id: 'return', x: 2, y: 1, hotkey: 'R', icon: '⤺', iconBg: '#5a4a2a', name: 'Return Resources', tooltip: 'Return carried resources to the nearest town center.', onClick: () => input.orderWorkersReturn() });
     }
     B.push({ id: 'buildmenu', x: 0, y: 2, hotkey: 'B', icon: '🔨', iconBg: '#5a4a3a', name: 'Build Basic Structure', tooltip: 'Houses, roads, farms, walls, gates, the Lumber Yard, Barracks, towers and town centers.', onClick: () => (input.cardMenu = 'build') });
-    B.push({ id: 'buildmenu2', x: 1, y: 2, hotkey: 'V', icon: '🏛️', iconBg: '#4a4a5a', name: 'Build Advanced Structure', tooltip: 'Stable, Blacksmith, Workshop, Arcane Sanctum, Factory and Missile Silo. These unlock in later ages.', onClick: () => (input.cardMenu = 'build2') });
+    B.push({ id: 'buildmenu2', x: 1, y: 2, hotkey: 'V', icon: '🏛️', iconBg: '#4a4a5a', name: 'Build Advanced Structure', tooltip: 'Research Center, Stable, Workshop, Arcane Sanctum, Factory and Missile Silo. Most unlock in later ages.', onClick: () => (input.cardMenu = 'build2') });
   }
   if (u.isHero && !u.isIllusion) {
     if (u.skillPoints > 0) {

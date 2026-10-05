@@ -240,7 +240,8 @@ export function blockingStructure(game, u) {
 
 const SHOT_SOUND = {
   rock: 'explosion', stone: 'arrowShoot', arrow: 'arrowShoot', axe: 'arrowShoot', bullet: 'gunshot', grenade: 'arrowShoot',
-  cannonball: 'cannon', shell: 'cannon', rocket: 'rocket', laser: 'laser', plasma: 'laser',
+  cannonball: 'cannon', shell: 'cannon', rocket: 'rocket', laser: 'laser', plasma: 'laser', javelin: 'arrowShoot',
+  flame: 'fire', rail: 'laser',
 };
 
 function deliverAttack(game, u, t) {
@@ -566,7 +567,8 @@ export function findNearestTree(game, x, z, maxR = 14) {
 }
 
 function carryCap(u, kind) {
-  return kind === 'lumber' ? 10 + 2 * (u.owner.upgrades?.lumber ?? 0) : 10;
+  const up = u.owner.upgrades;
+  return 10 + 2 * ((kind === 'lumber' ? up?.forestry : up?.mining) ?? 0);
 }
 
 function doHarvest(game, u, dt) {
@@ -593,7 +595,7 @@ function doHarvest(game, u, dt) {
     if (h.phase === 'inside') {
       h.timer -= dt;
       if (h.timer <= 0) {
-        const amt = Math.min(10, mine.goldLeft);
+        const amt = Math.min(carryCap(u, 'gold'), mine.goldLeft);
         mine.goldLeft -= amt;
         u.carry = { kind: 'gold', amount: amt };
         exitMine(game, u, mine);
@@ -644,7 +646,7 @@ function doHarvest(game, u, dt) {
     turnToward(u, angleTo(u, tree.x, tree.z), dt);
     h.timer -= dt;
     if (h.timer <= 0) {
-      h.timer = 1.0;
+      h.timer = 1.0 / (1 + 0.1 * (u.owner.upgrades?.forestry ?? 0));
       const amt = Math.min(2, tree.lumber);
       tree.lumber -= amt;
       u.carry = { kind: 'lumber', amount: (u.carry?.kind === 'lumber' ? u.carry.amount : 0) + amt };
@@ -698,7 +700,7 @@ function doReturn(game, u, dt) {
   }
   const drop = nearestDropOff(game, u);
   if (!drop) {
-    if (u.owner.isHuman) game.message('You need a Town Hall to return resources to.', '#f88');
+    if (u.owner.isHuman) game.message('You need a town center to return resources to.', '#f88');
     u.harvest = null;
     finishOrder(game, u);
     return;

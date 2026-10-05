@@ -1,7 +1,7 @@
 // Computer-controlled rival generals. Each plays either the Hero path
 // (level up on creeps, buy items, hire mercenaries, raid and hunt Kalenden)
 // or the Empire path (gather, build a base, train an army and attack).
-import { UNITS, UPGRADES, ROAD, AGES, ECONOMY } from '../data/units.js';
+import { UNITS, UPGRADES, ROAD, AGES, ECONOMY, researchCost, researchCap } from '../data/units.js';
 import { Roads } from '../game/roads.js';
 import { ITEMS } from '../data/items.js';
 import { ABILITIES } from '../game/abilities.js';
@@ -773,7 +773,7 @@ export class GeneralAI {
       this.extendStreets(6);
     }
     // A wall across the approach to the town, with a gate, once in the Feudal Age.
-    if (p.tier >= 3 && !this.wallPlanned && g.time > 400 && p.lumber > 260 && p.gold > 90) this.planFrontWall(hall, peasants);
+    if (p.tier >= 4 && !this.wallPlanned && g.time > 400 && p.lumber > 260 && p.gold > 90) this.planFrontWall(hall, peasants);
   }
 
   /**
@@ -797,12 +797,12 @@ export class GeneralAI {
     }
     // Rations: tighten them while hungry, be generous with a full granary.
     if ((p.starving || (p.food < 60 && p.foodRate < 0)) && p.rations > 4) E.setRations(p, p.rations - 1);
-    else if (p.food > 350 && p.foodRate > 0 && p.rations < (p.food > 1500 ? 17 : 13)) E.setRations(p, p.rations + 1);
+    else if (p.food > 350 && p.foodRate > 0 && p.rations < (p.food > 3000 ? 25 : p.food > 1500 ? 17 : 13)) E.setRations(p, p.rations + 1);
     else if (p.food < 150 && p.foodRate < 0 && p.rations > 10) E.setRations(p, p.rations - 1);
     // Taxes: as high as the people will happily bear.
     if (p.happiness < 45 && p.tax > 1) E.setTax(p, p.tax - 1);
     else if (p.happinessTarget < 58 && p.tax > 2) E.setTax(p, p.tax - 1);
-    else if (p.happinessTarget > 70 && p.happiness > 62 && p.tax < 8) E.setTax(p, p.tax + 1);
+    else if (p.happinessTarget > 70 && p.happiness > 62 && p.tax < 16) E.setTax(p, p.tax + 1);
     // Nuclear missiles.
     for (const b of p.buildings) {
       if (b.dead || b.underConstruction || !b.def.nukes) continue;
@@ -966,24 +966,29 @@ export class GeneralAI {
       { type: 'lumberyard', n: 1, at: 25 },
       { type: 'farm', n: 1, at: 35 },
       { type: 'barracks', n: 1, at: 60 },
-      { age: 2, at: 150 },
-      { type: 'stable', n: 1, at: 190 },
-      { type: 'blacksmith', n: 1, at: 230 },
-      { type: 'scouttower', n: 1, at: 260 },
-      { age: 3, at: 300 },
-      { type: 'workshop', n: 1, at: 340 },
-      { type: 'barracks', n: 2, at: 380 },
-      { type: 'sanctum', n: 1, at: 420 },
-      { age: 4, at: 460 },
-      { age: 5, at: 620 },
-      { type: 'scouttower', n: 2, at: 660 },
-      { age: 6, at: 800 },
-      { type: 'factory', n: 1, at: 820 },
-      { age: 7, at: 980 },
-      { type: 'missile_silo', n: 1, at: 1020 },
-      { type: 'factory', n: 2, at: 1150 },
-      { age: 8, at: 1200 },
-      { type: 'barracks', n: 3, at: 1300 },
+      { type: 'research_center', n: 1, at: 90 },
+      { age: 2, at: 130 },
+      { type: 'stable', n: 1, at: 170 },
+      { type: 'scouttower', n: 1, at: 200 },
+      { age: 3, at: 230 },
+      { type: 'workshop', n: 1, at: 260 },
+      { type: 'barracks', n: 2, at: 300 },
+      { age: 4, at: 330 },
+      { type: 'sanctum', n: 1, at: 360 },
+      { age: 5, at: 430 },
+      { age: 6, at: 540 },
+      { type: 'scouttower', n: 2, at: 560 },
+      { age: 7, at: 660 },
+      { type: 'factory', n: 1, at: 680 },
+      { type: 'research_center', n: 2, at: 700 },
+      { age: 8, at: 780 },
+      { age: 9, at: 900 },
+      { type: 'missile_silo', n: 1, at: 930 },
+      { type: 'factory', n: 2, at: 990 },
+      { age: 10, at: 1020 },
+      { age: 11, at: 1140 },
+      { type: 'barracks', n: 3, at: 1200 },
+      { age: 12, at: 1280 },
     ];
     for (const step of plan) {
       if (t < step.at) continue;
@@ -1128,13 +1133,21 @@ export class GeneralAI {
       } else if (b.type === 'workshop') {
         pick = choose(b);
         if (pick && (counts[pick] || 0) >= 2) pick = null;
-      } else if (b.type === 'blacksmith' && !b.researching) {
-        const upg = p.upgrades.weapons <= p.upgrades.armor ? 'weapons' : 'armor';
-        const lvl = p.upgrades[upg];
-        if (lvl < UPGRADES[upg].levels && food >= 10 && p.tier >= UPGRADES[upg].tier[lvl] && g.canAfford(p, UPGRADES[upg].cost[lvl]) && p.lumber > 200) g.startResearch(b, upg);
-      } else if (b.def.dropOff === 'lumber' && !b.researching) {
-        const lvl = p.upgrades.lumber;
-        if (lvl < 2 && p.tier >= UPGRADES.lumber.tier[lvl] && p.gold > UPGRADES.lumber.cost[lvl].gold + 250) g.startResearch(b, 'lumber');
+      } else if (b.def.researches && !b.researching) {
+        // Research Center: keep every line moving, economy first.
+        const order = ['forestry', 'commerce', 'housing', 'agriculture', 'weaponry', 'vitality', 'armor', 'mining', 'civics', 'masonry', 'mobility', 'medicine'];
+        const cap = researchCap(p);
+        let best = null;
+        for (const id of order) {
+          if (p.upgrades[id] >= cap || p.researchingUpg?.[id]) continue;
+          if (!best || p.upgrades[id] < p.upgrades[best]) best = id;
+        }
+        if (best) {
+          const c = researchCost(best, p.upgrades[best]);
+          const r = this.reserve;
+          const spare = !r || (p.gold - c.gold >= (r.gold ?? 0) && p.lumber - c.lumber >= (r.lumber ?? 0));
+          if (spare && g.canAfford(p, c) && p.lumber > c.lumber + 60) g.startResearch(b, best);
+        }
       }
       if (!pick || !g.canAfford(p, UNITS[pick].cost)) continue;
       // Keep money aside for the next age or building, unless the army is tiny or we are under attack.

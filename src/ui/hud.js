@@ -296,7 +296,7 @@ export class Hud {
           this.game.sound('error');
           return;
         }
-        b.onClick();
+        b.onClick(e);
         this.game.sound('click', undefined, undefined, 0.4);
         this.cardSig = '';
       });
@@ -395,7 +395,7 @@ export class Hud {
       }
       if (u.researching) {
         const up = UPGRADES[u.researching.upg];
-        parts.push(`<div class="progress"><div class="pl">Researching ${up.name[u.owner.upgrades[u.researching.upg]]}</div><div class="bar"><i style="width:${(u.researching.time / u.researching.total) * 100}%"></i></div></div>`);
+        parts.push(`<div class="progress"><div class="pl">Researching ${up.name} level ${(u.owner.upgrades[u.researching.upg] ?? 0) + 1}</div><div class="bar"><i style="width:${(u.researching.time / u.researching.total) * 100}%"></i></div></div>`);
       }
       if (u.trainQueue.length) {
         const q0 = u.trainQueue[0];
@@ -442,6 +442,10 @@ export class Hud {
           stats.push(`<div class="stat dim">Tax ${o.tax} → ${Math.round(o.taxRate * 60)} gold/min · Rations ${o.rations} → ${Math.round(o.foodEaten * 60)} food/min · Farms ${Math.round(o.foodProduced * 60)} food/min</div>`);
           if (o.starving) stats.push('<div class="stat warn">Your people are starving: no taxes are paid.</div>');
         }
+      }
+      if (u.def.researches && !u.underConstruction && u.owner === g.human) {
+        const lv = u.def.researches.map((id) => `<span title="${UPGRADES[id].name}: ${UPGRADES[id].effect}">${UPGRADES[id].icon}${u.owner.upgrades[id] ?? 0}</span>`).join(' ');
+        stats.push(`<div class="stat research-levels">${lv}</div>`);
       }
       if (u.def.nukes && !u.underConstruction) {
         stats.push(`<div class="stat ${u.nukeReady ? 'warn' : 'dim'}">${u.nukeReady ? '☢️ Nuclear missile armed' : u.nukeBuild ? 'Building a nuclear missile…' : 'No missile armed'}</div>`);
