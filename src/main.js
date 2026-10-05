@@ -11,7 +11,7 @@ import { HEROES, HERO_IDS } from './data/heroes.js';
 import { UNITS } from './data/units.js';
 import { ABILITIES } from './game/abilities.js';
 import { TEAM_COLORS } from './render/assets.js';
-import { initAudio, playSfx, startMusic, stopMusic, setMuted, isMuted } from './audio.js';
+import { initAudio, playSfx, playBark, barkVoice, startMusic, stopMusic, setMuted, isMuted } from './audio.js';
 import { GeneralAI } from './ai/general.js';
 import { Roads } from './game/roads.js';
 
@@ -94,6 +94,8 @@ let endShown = false;
 // The renderer: three.js by default, Babylon.js with `?renderer=babylon` (migration in progress,
 // see MIGRATION.md). Resolved before boot.
 let ViewClass = View;
+/** The Babylon.js audio backend (src/babylon/SpatialAudio.ts) with the Babylon renderer; null with three.js. */
+let spatial = null;
 
 function ensureView() {
   if (view) return;
@@ -132,8 +134,8 @@ function buildTitle() {
     btn.addEventListener('click', () => {
       settings.heroId = id;
       list.querySelectorAll('.heroc').forEach((b) => b.classList.toggle('selected', b.dataset.hero === id));
-      initAudio();
-      playSfx('click', 0.6);
+      initSound();
+      sfx('click', 0.6);
     });
     list.appendChild(btn);
   }
@@ -142,8 +144,8 @@ function buildTitle() {
       settings.mode = b.dataset.mode;
       document.querySelectorAll('.path').forEach((x) => x.classList.toggle('selected', x === b));
       $('hero-pick').classList.toggle('hidden', settings.mode !== 'hero');
-      initAudio();
-      playSfx('click', 0.6);
+      initSound();
+      sfx('click', 0.6);
     });
   });
   $('btn-add-rival').addEventListener('click', () => {
@@ -155,7 +157,7 @@ function buildTitle() {
   });
   $('btn-start').addEventListener('click', () => {
     settings.difficulty = $('opt-difficulty').value;
-    initAudio();
+    initSound();
     startGame();
   });
   $('btn-help').addEventListener('click', () => openModal('modal-help'));
@@ -188,7 +190,7 @@ function bindModals() {
   $('modal-menu').addEventListener('click', (e) => {
     const act = e.target.dataset?.act;
     if (!act) return;
-    playSfx('click', 0.6);
+    sfx('click', 0.6);
     if (act === 'resume') {
       closeModal('modal-menu');
       setPaused(false);
@@ -223,6 +225,7 @@ function bindModals() {
   });
   $('btn-sound').addEventListener('click', () => {
     setMuted(!isMuted());
+    spatial?.setMuted(isMuted());
     $('btn-sound').textContent = isMuted() ? '🔇' : '🔊';
   });
   window.addEventListener('keydown', (e) => {
@@ -321,7 +324,14 @@ function startGame() {
     });
 }
 
-function soundHook(name, vol = 1, x, z) {
+/** Create or resume the audio (call from user gestures). */
+function initSound() {
+  if (initAudio()) spatial?.start();
+}
+
+/** Play a sound effect, at a map position when given (fading with distance from the camera target). */
+function sfx(name, vol = 1, x, z) {
+  if (spatial?.play(name, vol, x, z)) return;
   if (x !== undefined && view) {
     const t = view.cam.target;
     const d = Math.hypot(t.x - x, t.z - z);
@@ -329,6 +339,12 @@ function soundHook(name, vol = 1, x, z) {
     if (vol < 0.03) return;
   }
   playSfx(name, vol);
+}
+
+/** A unit acknowledges a selection or an order ('select' | 'move' | 'attack'). */
+function bark(u, kind) {
+  const voice = barkVoice(u?.def);
+  if (voice && !spatial?.bark(voice, kind)) playBark(voice, kind);
 }
 
 function createGame() {
@@ -341,7 +357,7 @@ function createGame() {
     onItemTaken: (it) => view.removeItem(it),
     isOnScreen: (x, z) => view.isOnScreen(x, z),
     centerOn: (x, z) => input?.centerOn(x, z),
-    sound: soundHook,
+    sound: sfx,
     onGameOver: (over) => {
       setTimeout(() => showEnd(over), 2500);
     },
@@ -364,6 +380,7 @@ function createGame() {
     input.cardMenu = null;
   } else {
     input = new Input(game, view, $('gl'));
+    input.onBark = bark;
     bindCameraOptions();
   }
   overlay.game = game;
@@ -393,6 +410,11 @@ function createGame() {
   paused = false;
   setPaused(false);
   startMusic();
+  if (spatial) {
+    spatial.startAmbience(game);
+    const own = new Set(['worker', game.human.hero ? barkVoice(game.human.hero.def) : 'caveman']);
+    spatial.prepareBarks([...own]);
+  }
   running = true;
   lastFrame = performance.now();
 }
@@ -402,6 +424,7 @@ function quitToTitle() {
   closeModal('modal-end');
   teardown();
   stopMusic();
+  spatial?.stopAmbience();
   $('hud').classList.add('hidden');
   $('screen-title').classList.remove('hidden');
 }
@@ -443,6 +466,7 @@ function frame(now) {
     }
     input.update(realDt);
     view.render(paused ? 0 : realDt * speed);
+    spatial?.update(view.cam);
     overlay.draw();
     hud.update(realDt);
     hud.renderPortrait(now / 1000);
@@ -492,6 +516,7 @@ function launch() {
   // The Babylon view loads its models first (view.ready); the three.js view has nothing to wait for.
   ensureView();
   Promise.resolve(view.ready).then(() => {
+    spatial?.prerender();
     if (hot?.ready) hot.ready(boot);
     else boot(hot?.data ?? {});
     autostart();
@@ -499,9 +524,10 @@ function launch() {
 }
 
 if (params.get('renderer') === 'babylon') {
-  import('./babylon/BabylonView.ts')
-    .then((m) => {
+  Promise.all([import('./babylon/BabylonView.ts'), import('./babylon/SpatialAudio.ts')])
+    .then(([m, a]) => {
       ViewClass = m.BabylonView;
+      spatial = new a.SpatialAudio();
       launch();
     })
     .catch((e) => {
@@ -510,3 +536,5 @@ if (params.get('renderer') === 'babylon') {
     });
 } else launch();
 window.__setSpeed = (s) => (speed = s);
+window.__initSound = initSound;
+window.__audio = () => spatial;

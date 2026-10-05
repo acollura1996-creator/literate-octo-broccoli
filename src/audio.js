@@ -39,6 +39,8 @@ let muted = false;
 let masterVolume = 0.6;
 let musicVolume = 0.35;
 let resumeRequestedAt = -1e9;
+/** Set when a sound sends to the reverb (lets the offline renderer skip the reverb when unused). */
+let wetUsed = false;
 
 /** Active, counted sfx voices in start order (oldest first). */
 const voices = [];
@@ -49,9 +51,15 @@ const nameStats = new Map();
 // Small utilities
 // ---------------------------------------------------------------------------
 
+/**
+ * The random source of every synth. It is swapped for a seeded generator while a sound is rendered
+ * offline, so a variant can be measured and then rendered identically (see renderOffline).
+ */
+let rnd = Math.random;
+
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
-const rand = (a, b) => a + Math.random() * (b - a);
-const pick = (arr) => arr[(Math.random() * arr.length) | 0];
+const rand = (a, b) => a + rnd() * (b - a);
+const pick = (arr) => arr[(rnd() * arr.length) | 0];
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -68,7 +76,7 @@ function makeNoiseBuffer(seconds) {
   const len = Math.floor(ctx.sampleRate * seconds);
   const buf = ctx.createBuffer(1, len, ctx.sampleRate);
   const d = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  for (let i = 0; i < len; i++) d[i] = rnd() * 2 - 1;
   return buf;
 }
 
@@ -88,7 +96,7 @@ function makeImpulse(seconds, decay) {
       }
       const x = i / len;
       const k = 0.7 - 0.55 * x; // tail gets darker over time
-      lp += (Math.random() * 2 - 1 - lp) * k;
+      lp += (rnd() * 2 - 1 - lp) * k;
       d[i] = lp * Math.pow(1 - x, decay);
     }
   }
@@ -376,11 +384,12 @@ function noiseNode(v, t0, t1, dest, rate = 1) {
   s.loop = true;
   if (rate !== 1) s.playbackRate.value = rate;
   s.connect(dest);
-  return runSource(v, s, t0, t1, Math.random() * (noiseBuf.duration - 0.05));
+  return runSource(v, s, t0, t1, rnd() * (noiseBuf.duration - 0.05));
 }
 
 /** Send part of a voice to the shared reverb. */
 function wet(v, amount) {
+  wetUsed = true;
   if (!reverbIn) return;
   const g = gainNode(v, amount, reverbIn);
   v.out.connect(g);
@@ -517,7 +526,7 @@ function crackle(v, t, dur, count, peak, hp, dest) {
   const g = gainNode(v, 0, dest);
   const f = biquad(v, 'highpass', hp, 0.8, g);
   const times = [];
-  for (let i = 0; i < count; i++) times.push(t + Math.random() * dur);
+  for (let i = 0; i < count; i++) times.push(t + rnd() * dur);
   times.sort((x, y) => x - y);
   g.gain.setValueAtTime(0, t);
   for (const tt of times) {
@@ -633,7 +642,7 @@ function sMagicHit(v, t, out) {
   fmBell(v, t, 880 * p, 3.5, 600, 0.22, 0.45, out);
   thump(v, t, 320 * p, 90 * p, 0.4, 0.12, out);
   for (let i = 0; i < 3; i++) {
-    ping(v, t + 0.02 + Math.random() * 0.15, rand(2200, 4800), 0.07, rand(0.12, 0.25), out);
+    ping(v, t + 0.02 + rnd() * 0.15, rand(2200, 4800), 0.07, rand(0.12, 0.25), out);
   }
 }
 
@@ -686,7 +695,7 @@ function sFrost(v, t, out) {
   wet(v, 0.5);
   const scale = [88, 91, 93, 95, 98, 100, 103];
   for (let i = 0; i < 7; i++) {
-    const tt = t + i * 0.055 + Math.random() * 0.04;
+    const tt = t + i * 0.055 + rnd() * 0.04;
     const f = mtof(pick(scale));
     const decay = rand(0.2, 0.45);
     ping(v, tt, f, rand(0.05, 0.1), decay, out, 'sine', 0.001);
@@ -1076,8 +1085,8 @@ const SFX = {
   teleport: { fn: sTeleport, prio: 2, max: 2 },
   horn: { fn: sHorn, prio: 3, max: 1, gap: 1 },
   warning: { fn: sWarning, prio: 3, max: 1, gap: 0.8 },
-  victory: { fn: sVictory, prio: 4, max: 1, gap: 2 },
-  defeat: { fn: sDefeat, prio: 4, max: 1, gap: 2 },
+  victory: { fn: sVictory, prio: 4, max: 1, gap: 2, duck: 3.4 },
+  defeat: { fn: sDefeat, prio: 4, max: 1, gap: 2, duck: 3.4 },
   bladestorm: { fn: sBladestorm, prio: 1, max: 2, gap: 0.3 },
   roar: { fn: sRoar, prio: 3, max: 1, gap: 0.8, gain: 0.85 },
   gunshot: { fn: sGunshot, prio: 0, max: 4, gap: 0.03, gain: 0.7 },
@@ -1094,9 +1103,13 @@ const SFX = {
  * and throttled calls are silently ignored.
  */
 export function playSfx(name, volume = 1) {
-  if (muted || !canPlay()) return;
   const def = Object.prototype.hasOwnProperty.call(SFX, name) ? SFX[name] : null;
-  if (!def) return;
+  if (def) startVoice(name, def, volume, def.fn);
+}
+
+/** Start one synthesized voice, subject to the per-name limits and voice stealing. */
+function startVoice(name, def, volume, fn) {
+  if (muted || !canPlay()) return;
   const vol = toUnit(volume, 1);
   if (vol < 0.01) return;
 
@@ -1121,7 +1134,7 @@ export function playSfx(name, volume = 1) {
 
   const t = now + START_DELAY;
   try {
-    def.fn(v, t, out);
+    fn(v, t, out);
   } catch {
     for (const s of v.sources) {
       try {
@@ -1224,7 +1237,7 @@ function genMelody(prog) {
       const last = c === 3 && k === rh.length - 1;
       let deg;
       // 3/4: downbeats always land on a chord tone, other quarter beats often do
-      const strong = on % STEPS_PER_BAR === 0 || (on % 2 === 0 && Math.random() < 0.5);
+      const strong = on % STEPS_PER_BAR === 0 || (on % 2 === 0 && rnd() < 0.5);
       if (last || strong) {
         // nearest chord tone (or the root to end the phrase)
         const cands = [];
@@ -1232,7 +1245,7 @@ function genMelody(prog) {
           if (last ? (((d - root) % 7) + 7) % 7 === 0 : isChordTone(d, root)) cands.push(d);
         }
         cands.sort((x, y) => Math.abs(x - prev) - Math.abs(y - prev));
-        deg = cands.length > 1 && !last && Math.random() < 0.3 ? cands[1] : cands[0];
+        deg = cands.length > 1 && !last && rnd() < 0.3 ? cands[1] : cands[0];
       } else {
         deg = prev + pick([-1, 1, 1, -1, 2, -2]);
         if (deg < MEL_LO) deg = MEL_LO + 1;
@@ -1249,15 +1262,15 @@ function newCycle(cyc) {
   music.cycle = cyc;
   let pi = 0;
   if (cyc > 0) {
-    do pi = (Math.random() * PROGS.length) | 0;
+    do pi = (rnd() * PROGS.length) | 0;
     while (pi === music.lastProg);
   }
   music.lastProg = pi;
   music.prog = PROGS[pi];
   const intro = cyc === 0;
   music.flags = {
-    melody: !intro && Math.random() < 0.7,
-    drums: !intro && Math.random() < 0.65,
+    melody: !intro && rnd() < 0.7,
+    drums: !intro && rnd() < 0.65,
     arp: [pick(ARPS), pick(ARPS)],
     density: intro ? 0.75 : rand(0.8, 1),
   };
@@ -1337,12 +1350,12 @@ function scheduleStep(step, t, silent) {
   const bar = Math.floor(inChord / STEPS_PER_BAR);
   const sb = s % STEPS_PER_BAR;
   const f = music.flags;
-  const hum = () => (Math.random() - 0.5) * 0.012;
+  const hum = () => (rnd() - 0.5) * 0.012;
 
   if (inChord === 0) mPad(t, [root - 7, root - 5, root - 3].map(degMidi), STEPS_PER_CHORD * STEP);
 
   const off = f.arp[bar][sb];
-  if (off !== null && (sb === 0 || Math.random() < f.density)) {
+  if (off !== null && (sb === 0 || rnd() < f.density)) {
     mPluck(t + (sb === 0 ? 0 : hum()), degMidi(root + off), ARP_VEL[sb] * rand(0.85, 1.1));
   }
 
@@ -1353,9 +1366,9 @@ function scheduleStep(step, t, silent) {
 
   if (f.drums) {
     if (sb === 0) mDoum(t, bar === 0 ? 1 : 0.8);
-    else if (sb === 3 && Math.random() < 0.35) mDoum(t, 0.5);
-    else if ((sb === 2 || sb === 4) && Math.random() < 0.75) mTek(t, sb === 4 ? 0.8 : 0.6);
-    else if (sb === 5 && bar === 1 && Math.random() < 0.4) mTek(t, 0.5);
+    else if (sb === 3 && rnd() < 0.35) mDoum(t, 0.5);
+    else if ((sb === 2 || sb === 4) && rnd() < 0.75) mTek(t, sb === 4 ? 0.8 : 0.6);
+    else if (sb === 5 && bar === 1 && rnd() < 0.4) mTek(t, 0.5);
   }
 }
 
@@ -1468,4 +1481,758 @@ export function stopMusic() {
       }
     }
   }, (fade + 2) * 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Unit acknowledgements ("barks"): short gibberish phrases from a small formant
+// synthesizer, in the spirit of Warcraft III's unit responses. A buzzing
+// glottal source runs through three band-pass formants that glide between
+// vowel targets; consonants are noise bursts, gaps and formant transitions.
+// Each unit type maps to a voice (pitch, vocal-tract size, roughness and a
+// radio or robot filter in the later ages). Vehicles and summons answer with
+// engines, bleeps, a trumpet or bubbles instead.
+// ---------------------------------------------------------------------------
+
+/** Formant frequencies (Hz) of an adult male voice; scaled by the voice's `size`. */
+const VOWELS = {
+  a: [740, 1180, 2500],
+  e: [480, 1850, 2550],
+  i: [310, 2250, 2950],
+  o: [520, 900, 2450],
+  u: [340, 820, 2300],
+};
+const FORMANT_AMP = [1, 0.6, 0.3];
+const FORMANT_Q = [7, 10, 14];
+/** Where the formants start for a consonant (F1, F2, F3) before gliding to the vowel. */
+const LOCUS = {
+  b: [250, 800, 2300], p: [250, 800, 2300], m: [250, 900, 2300], w: [300, 700, 2200], f: [300, 1000, 2400],
+  v: [300, 1000, 2400], d: [300, 1700, 2600], t: [300, 1700, 2600], n: [260, 1600, 2600], l: [350, 1100, 2700],
+  th: [300, 1500, 2600], s: [300, 1600, 2600], z: [300, 1600, 2600], g: [300, 2000, 2400], k: [300, 2000, 2400],
+  y: [300, 2200, 2950], j: [300, 1900, 2600], ch: [300, 1900, 2600], sh: [300, 1900, 2600], r: [420, 1250, 1650],
+  h: null,
+};
+/** Consonant class and duration (s). */
+const CONS = {
+  h: ['h', 0.06], s: ['fric', 0.08], sh: ['fric', 0.08], f: ['fric', 0.06], th: ['fric', 0.06], ch: ['fric', 0.07],
+  z: ['vfric', 0.06], v: ['vfric', 0.05], p: ['stop', 0.06], t: ['stop', 0.06], k: ['stop', 0.065],
+  b: ['vstop', 0.045], d: ['vstop', 0.045], g: ['vstop', 0.05], j: ['vstop', 0.06],
+  m: ['nasal', 0.06], n: ['nasal', 0.055], l: ['glide', 0.05], r: ['glide', 0.05], w: ['glide', 0.05], y: ['glide', 0.045],
+};
+/** Noise of fricatives: [band centre, Q, level]. */
+const HISS = {
+  s: [6200, 1.8, 0.22], sh: [3000, 1.6, 0.3], ch: [3000, 1.6, 0.3], f: [4500, 0.5, 0.08], th: [5000, 0.5, 0.07],
+  z: [5800, 1.8, 0.12], v: [4000, 0.5, 0.05],
+};
+/** Release burst of stops: [band centre, Q, level]. */
+const BURST = {
+  p: [900, 1, 0.25], b: [800, 1, 0.12], t: [4200, 1.2, 0.3], d: [3600, 1.2, 0.15], k: [2300, 2, 0.3],
+  g: [2100, 2, 0.15], j: [3000, 1.5, 0.12],
+};
+
+const PHRASES = {
+  soldier: {
+    select: ['YE-es?', 'RE-dy?', 'mi-LORD?', 'WHA-at?', 'SIR?', 'hm-MM?'],
+    move: ['MO-ving.', 'rai-ta-WEI.', 'o-KEI.', 'YES sir.', 'on-mai-WEI.', 'az-yu-WISH.'],
+    attack: ['ha-AH!', 'for-KA-ra!', 'a-TAK!', 'CHAR-ja!', 'tu-AR-mas!', 'RAAH!'],
+  },
+  worker: {
+    select: ['YE-es?', 'mi-LORD?', 'MOR-wurk?', 'hm?', 'WHAT?'],
+    move: ['o-KEI.', 'JOB-dan.', 'YUP.', 'WUR-kin.', 'al-RAIT.'],
+    attack: ['HAH!', 'ok-OK!', 'if-ai-MUST!'],
+  },
+  caveman: {
+    select: ['UG?', 'hu-UH?', 'GA?', 'oo-GA?'],
+    move: ['UG-ga.', 'oo-GA.', 'BA-du.', 'HUP.'],
+    attack: ['RAAH!', 'UG-ga-BUG!', 'GRA-ah!', 'HAA-ga!'],
+  },
+  mystic: {
+    select: ['YE-es?', 'ai-LIS-en.', 'SPIK.', 'the-LAIT?'],
+    move: ['SO-bi-it.', 'AZ-yu-WISH.', 'ai-GO.', 'of-KORS.'],
+    attack: ['BI-GON!', 'BURN!', 'for-the-LAIT!', 'FIL-mai-RATH!'],
+  },
+  radio: {
+    select: ['GO-a-HED.', 'RO-ger?', 'SAR-jent?', 'STAN-din-BAI.'],
+    move: ['RO-ger.', 'KO-pi.', 'MO-vin-AUT.', 'ON-it.', 'WIL-ko.'],
+    attack: ['en-GEI-jin!', 'O-pen-FAI-er!', 'TAR-get-SAI-ted!', 'LOK-and-LOD!'],
+  },
+  robot: {
+    select: ['a-WEI-tin-IN-put.', 'SIS-tems-ON-lain.', 'RE-di.'],
+    move: ['AF-fir-ma-tiv.', 'KO-or-di-nets-LOKT.', 'PRO-sid-in.'],
+    attack: ['TAR-get-ak-WAI-erd!', 'EK-se-kyu-tin!', 'ter-mi-NEIT!'],
+  },
+  hero: {
+    select: ['ai-AM-RE-di.', 'WOT-iz-it?', 'SPIK.', 'YES?', 'mai-LIJ?'],
+    move: ['AT-wans.', 'LID-on.', 'ai-SHAL-GO.', 'SO-bi-IT.'],
+    attack: ['for-ON-or!', 'tu-BAT-tel!', 'DAI!', 'yu-WIL-FOL!'],
+  },
+};
+
+/**
+ * Voices. Speakers: f0 (Hz), size (formant scale: <1 bigger, >1 smaller vocal tract), rough (growl),
+ * tempo, breath, wet (reverb), vib (vibrato), fx ('radio' | 'robot') and level. Others: `type`.
+ */
+const VOICES = {
+  man: { f0: 118, size: 1, rough: 0.08, words: 'soldier' },
+  heavy: { f0: 98, size: 0.93, rough: 0.2, tempo: 0.92, words: 'soldier' },
+  worker: { f0: 138, size: 1.04, rough: 0.04, tempo: 1.1, words: 'worker' },
+  caveman: { f0: 92, size: 0.9, rough: 0.32, tempo: 0.85, words: 'caveman' },
+  mystic: { f0: 150, size: 1.03, rough: 0, tempo: 0.9, breath: 0.08, wet: 0.3, level: 0.85, words: 'mystic' },
+  sorceress: { f0: 215, size: 1.17, rough: 0, tempo: 0.95, breath: 0.1, wet: 0.3, level: 0.6, words: 'mystic' },
+  radio: { f0: 122, size: 1, rough: 0.1, tempo: 1.15, level: 0.85, words: 'radio', fx: 'radio' },
+  robot: { f0: 104, size: 0.95, rough: 0, tempo: 1, level: 0.55, words: 'robot', fx: 'robot' },
+  paladin: { f0: 106, size: 0.95, rough: 0.06, tempo: 0.9, wet: 0.25, words: 'hero' },
+  archmage: { f0: 128, size: 0.98, rough: 0.12, tempo: 0.85, breath: 0.06, wet: 0.3, vib: 1.6, level: 0.8, words: 'hero' },
+  blademaster: { f0: 112, size: 0.97, rough: 0.15, tempo: 1.05, wet: 0.2, words: 'hero' },
+  mountainking: { f0: 84, size: 0.88, rough: 0.36, tempo: 0.95, wet: 0.2, words: 'hero' },
+  ranger: { f0: 205, size: 1.16, rough: 0.02, wet: 0.25, level: 0.8, words: 'hero' },
+  engine: { type: 'engine' },
+  droid: { type: 'droid' },
+  trumpet: { type: 'trumpet' },
+  bubbles: { type: 'bubbles' },
+};
+
+/** Which voice a unit type answers with (null: it doesn't). */
+export function barkVoice(def) {
+  if (!def || def.kind === 'building') return null;
+  if (def.hero) return VOICES[def.id] ? def.id : 'paladin';
+  if (def.id === 'water_elemental') return 'bubbles';
+  if (def.id === 'war_elephant') return 'trumpet';
+  const age = def.age ?? 0;
+  if (def.vehicle) return age >= 10 ? 'droid' : 'engine';
+  if (def.worker) return 'worker';
+  if (def.id === 'sorceress') return 'sorceress';
+  if (def.attackType === 'magic' && age <= 6) return 'mystic';
+  if (age === 1) return 'caveman';
+  if (age >= 11) return 'robot';
+  if (age >= 8) return 'radio';
+  if (def.armorType === 'heavy' || def.cavalry) return 'heavy';
+  return 'man';
+}
+
+function parsePhrase(text) {
+  const last = text.trim().slice(-1);
+  const tone = last === '?' ? 'ask' : last === '!' ? 'shout' : 'say';
+  const syl = [];
+  for (const word of text.replace(/[?!.,]/g, '').split(/[-\s]+/)) {
+    if (!word) continue;
+    const stress = word !== word.toLowerCase();
+    let w = word.toLowerCase();
+    while (w) {
+      const m = /^([^aeiou]*)([aeiou]*)([^aeiou]*)/.exec(w);
+      const onset = m[1];
+      const vowels = m[2];
+      let coda = m[3];
+      w = w.slice(m[0].length);
+      if (w && coda) {
+        // Consonants between two vowels start the next syllable (all but the first of a cluster).
+        const keep = coda.length >= 2 ? 1 : 0;
+        w = coda.slice(keep) + w;
+        coda = coda.slice(0, keep);
+      }
+      syl.push({ onset: consUnit(onset), glide: liquidIn(onset), vowels: vowels.slice(0, 2), coda: consUnit(coda), stress });
+    }
+  }
+  return { tone, syl };
+}
+
+function consUnit(cluster) {
+  if (!cluster) return '';
+  const two = cluster.slice(0, 2);
+  if (two === 'ch' || two === 'sh' || two === 'th') return two;
+  return CONS[cluster[0]] ? cluster[0] : '';
+}
+
+/** A liquid after the first consonant of an onset ("gr", "pl"): its locus colours the transition. */
+function liquidIn(cluster) {
+  for (let i = 1; i < cluster.length; i++) if ('rlwy'.includes(cluster[i])) return cluster[i];
+  return '';
+}
+
+/** Speak `text` with voice `vc`. */
+function speak(v, t, vc, text, out) {
+  const { tone, syl } = parsePhrase(text);
+  const shout = tone === 'shout';
+  const tempo = vc.tempo || 1;
+  const size = vc.size || 1;
+  const breath = vc.breath || 0;
+  const n = syl.length;
+
+  // Timeline.
+  let cur = t + 0.01;
+  const plan = syl.map((s, i) => {
+    const lastSyl = i === n - 1;
+    const on = s.onset ? CONS[s.onset] : null;
+    const co = s.coda ? CONS[s.coda] : null;
+    const vlen = ((s.stress ? 0.2 : 0.13) * (lastSyl ? 1.3 : 1) * (shout ? 1.1 : 1)) / tempo;
+    const p = { s, i, t0: cur, v0: cur + (on ? on[1] : 0.02), on, co, last: lastSyl };
+    p.v1 = p.v0 + vlen;
+    p.end = p.v1 + (co ? co[1] : 0);
+    cur = p.end + 0.015;
+    return p;
+  });
+  const end = cur + 0.15;
+
+  // Signal chain: glottal source -> voicing gain -> three formants -> mix -> effect -> out.
+  const mix = gainNode(v, 1, null);
+  const fxOut = voiceFx(v, t, end, vc, shout, mix, out);
+  const bank = gainNode(v, 1.2 * (vc.level || 1), mix);
+  const vox = gainNode(v, 0, null);
+  const asp = gainNode(v, breath, null);
+  const filters = [0, 1, 2].map((k) => {
+    const g = gainNode(v, FORMANT_AMP[k], bank);
+    const f = biquad(v, 'bandpass', VOWELS.e[k] * size, FORMANT_Q[k], g);
+    vox.connect(f);
+    asp.connect(f);
+    return f;
+  });
+  noiseNode(v, t, end, asp);
+
+  const f0 = vc.f0 * (shout ? 1.3 : 1);
+  const oscs = [[oscNode(v, vc.fx === 'robot' ? 'square' : 'sawtooth', f0, t, end, vox), 1]];
+  const o2 = oscNode(v, 'sawtooth', f0, t, end, gainNode(v, 0.5, vox));
+  o2.detune.value = 7;
+  oscs.push([o2, 1]);
+  if (vc.rough) oscs.push([oscNode(v, 'square', f0 / 2, t, end, gainNode(v, vc.rough * 0.6, vox)), 0.5]);
+  const lfo = oscNode(v, 'sine', rand(5, 6), t, end, null);
+  const lg = gainNode(v, 6 + 10 * (vc.vib || 0), null);
+  lfo.connect(lg);
+  for (const [o] of oscs) lg.connect(o.detune);
+
+  const setPitch = (time, k, ramp) => {
+    for (const [o, r] of oscs) {
+      if (ramp) o.frequency.linearRampToValueAtTime(f0 * k * r, time);
+      else o.frequency.setValueAtTime(f0 * k * r, time);
+    }
+  };
+  const setForm = (time, freqs, ramp) => {
+    filters.forEach((f, k) => {
+      const hz = freqs[k] * size;
+      if (ramp) f.frequency.linearRampToValueAtTime(hz, time);
+      else f.frequency.setValueAtTime(hz, time);
+    });
+  };
+
+  const first = plan[0];
+  setForm(t, LOCUS[first.s.onset] || VOWELS[first.s.vowels[0]] || LOCUS.m, false);
+  setPitch(t, shout ? 1.1 : 1.06, false);
+  vox.gain.setValueAtTime(0, t);
+  const G = vox.gain;
+  const A = asp.gain;
+
+  for (const p of plan) {
+    const { s, on, co } = p;
+    const k = n > 1 ? p.i / (n - 1) : 0;
+    const peak = (s.stress ? 1 : 0.72) * (shout ? 1.25 : 1);
+    const pitch = tone === 'shout' ? 1 + (s.stress ? 0.15 : 0) - 0.1 * k : tone === 'ask' ? 1 + (s.stress ? 0.08 : 0) : 1.06 - 0.18 * k + (s.stress ? 0.1 : 0);
+    const vowel = s.vowels ? VOWELS[s.vowels[0]] : LOCUS.m;
+    const kind = on ? on[0] : 'none';
+
+    // Onset: formants start at the consonant's locus (or the liquid's in a cluster) and glide to the vowel.
+    const locus = LOCUS[s.glide] || LOCUS[s.onset];
+    if (locus) setForm(p.t0 + 0.012, locus, true);
+    else setForm(p.t0 + 0.012, vowel, true);
+    if (kind === 'fric' || kind === 'stop' || kind === 'h') {
+      G.linearRampToValueAtTime(0, p.t0 + 0.012);
+      G.setValueAtTime(0, p.v0);
+    } else if (kind === 'vstop') {
+      G.linearRampToValueAtTime(0.12 * peak, p.t0 + 0.012);
+      G.setValueAtTime(0.12 * peak, p.v0 - 0.01);
+    } else if (kind === 'nasal') {
+      G.linearRampToValueAtTime(0.3 * peak, p.t0 + 0.02);
+      G.setValueAtTime(0.3 * peak, p.v0);
+    } else if (kind === 'glide' || kind === 'vfric') {
+      G.linearRampToValueAtTime(0.5 * peak, p.t0 + 0.02);
+      G.setValueAtTime(0.5 * peak, p.v0);
+    } else {
+      G.linearRampToValueAtTime(0.4 * peak, p.t0 + 0.012);
+    }
+    if (HISS[s.onset]) {
+      const [freq, Q, lvl] = HISS[s.onset];
+      noiseBurst(v, p.t0, { type: 'bandpass', freq, Q, a: 0.015, peak: lvl * peak, d: Math.max(0.02, p.v0 - p.t0 - 0.01), dest: mix });
+    }
+    if (BURST[s.onset]) {
+      const [freq, Q, lvl] = BURST[s.onset];
+      noiseBurst(v, p.v0 - 0.025, { type: 'bandpass', freq, Q, a: 0.001, peak: lvl * peak, d: 0.02, dest: mix });
+    }
+    if (kind === 'h' || kind === 'stop') {
+      // Aspiration through the formants.
+      A.setValueAtTime(breath, p.t0);
+      A.linearRampToValueAtTime(kind === 'h' ? 0.5 : 0.25, p.t0 + 0.015);
+      A.setValueAtTime(kind === 'h' ? 0.5 : 0.25, p.v0);
+      A.linearRampToValueAtTime(breath, p.v0 + 0.03);
+    }
+
+    // Vowel (a two-letter vowel glides to its second target).
+    setPitch(p.v0 + 0.03, pitch, true);
+    setForm(p.v0 + 0.045, vowel, true);
+    G.linearRampToValueAtTime(peak * (s.vowels ? 1 : 0.5), p.v0 + 0.025);
+    if (s.vowels.length > 1) {
+      setForm(p.v0 + (p.v1 - p.v0) * 0.45, vowel, true);
+      setForm(p.v0 + (p.v1 - p.v0) * 0.9, VOWELS[s.vowels[1]], true);
+    }
+    G.linearRampToValueAtTime(peak * (s.vowels ? 0.85 : 0.45), p.v1);
+    if (p.last) {
+      const finalPitch = tone === 'ask' ? 1.38 : tone === 'shout' ? 1.02 : 0.82;
+      setPitch(tone === 'ask' ? p.v1 : p.end + 0.05, finalPitch, true);
+    }
+
+    // Coda.
+    const ck = co ? co[0] : 'none';
+    if (LOCUS[s.coda]) setForm(p.end, LOCUS[s.coda], true);
+    if (ck === 'nasal' || ck === 'glide') {
+      G.linearRampToValueAtTime(0.3 * peak, p.v1 + 0.02);
+      G.linearRampToValueAtTime(p.last ? 0 : 0.25 * peak, p.end + 0.01);
+    } else if (ck === 'stop' || ck === 'fric' || ck === 'h') {
+      G.linearRampToValueAtTime(0, p.v1 + 0.02);
+    } else if (ck === 'vstop' || ck === 'vfric') {
+      G.linearRampToValueAtTime(0.12 * peak, p.v1 + 0.015);
+      G.linearRampToValueAtTime(0, p.end);
+    } else {
+      G.linearRampToValueAtTime(p.last ? 0 : 0.35 * peak, p.end + (p.last ? 0.06 : 0.015));
+    }
+    if (HISS[s.coda]) {
+      const [freq, Q, lvl] = HISS[s.coda];
+      noiseBurst(v, p.v1, { type: 'bandpass', freq, Q, a: 0.012, peak: lvl * peak, d: Math.max(0.03, p.end - p.v1), dest: mix });
+    }
+    if (BURST[s.coda]) {
+      const [freq, Q, lvl] = BURST[s.coda];
+      noiseBurst(v, p.end - 0.015, { type: 'bandpass', freq, Q, a: 0.001, peak: lvl * peak * 0.8, d: 0.025, dest: mix });
+    }
+  }
+  G.linearRampToValueAtTime(0, plan[n - 1].end + 0.08);
+  if (vc.wet) wet(v, vc.wet);
+  return fxOut;
+}
+
+/** The voice's effect from `mix` to `out`: shout drive, a radio, or a robot's ring modulator. */
+function voiceFx(v, t, end, vc, shout, mix, out) {
+  if (vc.fx === 'radio') {
+    const hp = biquad(v, 'highpass', 500, 0.8, null);
+    const lp = biquad(v, 'lowpass', 2800, 1.2, null);
+    mix.connect(hp);
+    hp.connect(lp);
+    const drive = gainNode(v, 2.2, shaper(v, gainNode(v, 0.45, out)));
+    lp.connect(drive);
+    // Squelch at the start and the end of the transmission.
+    noiseBurst(v, t, { type: 'bandpass', freq: 2500, Q: 0.8, a: 0.002, peak: 0.12, d: 0.05, dest: out });
+    noiseBurst(v, end - 0.12, { type: 'bandpass', freq: 2200, Q: 0.7, a: 0.004, peak: 0.16, d: 0.09, dest: out });
+    ping(v, end - 0.03, 1800, 0.05, 0.03, out, 'square');
+    return out;
+  }
+  if (vc.fx === 'robot') {
+    const ring = gainNode(v, 0, gainNode(v, 0.9, out));
+    mix.connect(ring);
+    oscNode(v, 'sine', 70, t, end, ring.gain);
+    mix.connect(gainNode(v, 0.35, out));
+    return out;
+  }
+  if (shout || vc.rough > 0.25) {
+    mix.connect(gainNode(v, 1.6, shaper(v, gainNode(v, 0.55, out))));
+    return out;
+  }
+  mix.connect(out);
+  return out;
+}
+
+/** Vehicles before the Digital Age: an engine revving (move), idling (select) or roaring (attack). */
+function engineBark(v, t, kind, out) {
+  const dur = kind === 'select' ? 0.55 : kind === 'move' ? 0.9 : 0.8;
+  const stop = t + dur + 0.05;
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t, 0.04, 0.12, dur - 0.25, 0.22);
+  const lp = biquad(v, 'lowpass', 500, 3, g);
+  const drive = gainNode(v, 2.5, shaper(v, lp));
+  const o = oscNode(v, 'sawtooth', 42, t, stop, drive);
+  const o2 = oscNode(v, 'square', 21, t, stop, gainNode(v, 0.5, drive));
+  const [f1, f2] = kind === 'select' ? [42, 52] : kind === 'move' ? [40, 85] : [48, 105];
+  for (const [osc, r] of [[o, 1], [o2, 0.5]]) {
+    osc.frequency.setValueAtTime(f1 * r, t);
+    if (kind === 'select') {
+      osc.frequency.linearRampToValueAtTime(f2 * r, t + 0.12);
+      osc.frequency.linearRampToValueAtTime(f1 * r, t + 0.35);
+    } else osc.frequency.exponentialRampToValueAtTime(f2 * r, t + dur * 0.7);
+  }
+  sweep(lp.frequency, t, 350, kind === 'select' ? 600 : 1400, dur * 0.7);
+  noiseBurst(v, t, { type: 'lowpass', freq: 400, a: 0.05, peak: 0.08, d: dur, dest: out });
+  if (kind !== 'move') metal(v, t + 0.02, 320, [1, 2.76, 5.4], [0.2, 0.12, 0.06], [0.12, 0.08, 0.05], out);
+}
+
+/** Digital Age vehicles and later: droid bleeps. */
+function droidBark(v, t, kind, out) {
+  const r = rand(0.85, 1.15);
+  const notes =
+    kind === 'select'
+      ? [[0, 1300, 1900, 0.07], [0.09, 1900, 1500, 0.06]]
+      : kind === 'move'
+        ? [[0, 900, 1400, 0.06], [0.08, 1400, 1400, 0.05], [0.15, 2100, 2100, 0.08]]
+        : [[0, 2600, 700, 0.22], [0.25, 700, 1800, 0.1]];
+  const lp = biquad(v, 'lowpass', 3200, 0.7, out);
+  for (const [dt, a, b, d] of notes) {
+    const tt = t + dt;
+    const g = gainNode(v, 0, lp);
+    swell(g.gain, tt, 0.006, 0.22, d - 0.02, 0.03);
+    const o = oscNode(v, 'square', a * r, tt, tt + d + 0.05, g);
+    sweep(o.frequency, tt, a * r, b * r, d);
+  }
+  if (kind === 'attack') {
+    const g = gainNode(v, 0, out);
+    swell(g.gain, t, 0.01, 0.18, 0.18, 0.06);
+    const o = oscNode(v, 'sawtooth', 110, t, t + 0.3, g);
+    oscNode(v, 'square', 30, t, t + 0.3, gainNode(v, 40, o.frequency));
+  }
+}
+
+/** The war elephant's trumpet. */
+function trumpetBark(v, t, kind, out) {
+  const dur = kind === 'attack' ? 1 : kind === 'move' ? 0.5 : 0.65;
+  const f = rand(330, 380) * (kind === 'attack' ? 1.15 : 1);
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t, 0.06, 0.32, dur - 0.2, 0.18);
+  const bp = biquad(v, 'bandpass', 1100, 1.2, g);
+  const drive = gainNode(v, 2, shaper(v, bp));
+  const o = oscNode(v, 'sawtooth', f * 0.8, t, t + dur + 0.05, drive);
+  o.frequency.linearRampToValueAtTime(f * 1.25, t + dur * 0.3);
+  o.frequency.linearRampToValueAtTime(f * 1.05, t + dur);
+  oscNode(v, 'sine', 7, t, t + dur + 0.05, gainNode(v, 30, o.detune));
+  noiseBurst(v, t, { type: 'bandpass', freq: 2000, Q: 0.8, a: 0.05, peak: 0.1, d: dur, dest: out });
+}
+
+/** The water elemental: bubbles and a wash. */
+function bubbleBark(v, t, kind, out) {
+  const count = kind === 'attack' ? 10 : 6;
+  const spread = kind === 'attack' ? 0.5 : 0.4;
+  for (let i = 0; i < count; i++) {
+    const tt = t + rand(0, spread);
+    const f = rand(300, 900);
+    const g = gainNode(v, 0, out);
+    perc(g.gain, tt, 0.003, rand(0.16, 0.36), rand(0.04, 0.09));
+    const o = oscNode(v, 'sine', f, tt, tt + 0.12, g);
+    sweep(o.frequency, tt, f, f * rand(1.8, 2.8), 0.06);
+  }
+  noiseBurst(v, t, { type: 'lowpass', freq: 700, a: 0.08, peak: 0.2, d: 0.5, dest: out });
+  if (kind === 'attack') noiseBurst(v, t, { type: 'bandpass', freq: 400, freqTo: 2000, Q: 1, a: 0.1, peak: 0.15, d: 0.4, dest: out });
+}
+
+/** Number of distinct lines a voice has for `kind`. */
+export function barkLines(voiceId, kind) {
+  const vc = VOICES[voiceId];
+  if (!vc) return 0;
+  return vc.type ? 3 : PHRASES[vc.words][kind].length;
+}
+
+function sBark(v, t, out, voiceId, kind, line) {
+  const vc = VOICES[voiceId] || VOICES.man;
+  if (vc.type === 'engine') return engineBark(v, t, kind, out);
+  if (vc.type === 'droid') return droidBark(v, t, kind, out);
+  if (vc.type === 'trumpet') return trumpetBark(v, t, kind, out);
+  if (vc.type === 'bubbles') return bubbleBark(v, t, kind, out);
+  const lines = PHRASES[vc.words][kind] || PHRASES[vc.words].select;
+  speak(v, t, vc, line != null ? lines[line % lines.length] : pick(lines), out);
+}
+
+/** Barks share one voice slot: a unit doesn't talk over another. */
+export const BARK = { prio: 3, max: 1, gap: 0.3 };
+
+/** A unit acknowledges a selection or an order (kind: 'select' | 'move' | 'attack'). */
+export function playBark(voiceId, kind, volume = 0.8) {
+  if (!VOICES[voiceId]) return;
+  startVoice('bark', BARK, volume, (v, t, out) => sBark(v, t, out, voiceId, kind));
+}
+
+// ---------------------------------------------------------------------------
+// Ambience: rendered offline into seamless loops (wind, crickets, the citadel's
+// drone) and one-shot bird calls, played by the Babylon.js audio backend.
+// ---------------------------------------------------------------------------
+
+/** Noise from a buffer as long as the sound itself (the shared 2 s buffer would repeat audibly). */
+function longNoise(v, t, dur, dest) {
+  const len = Math.ceil(ctx.sampleRate * (dur + 0.1));
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = rnd() * 2 - 1;
+  const s = ctx.createBufferSource();
+  s.buffer = buf;
+  s.connect(dest);
+  return runSource(v, s, t, t + dur);
+}
+
+function aWind(v, t, out, dur) {
+  for (const [freq, Q, lvl] of [
+    [380, 0.7, 0.55],
+    [900, 4, 0.12],
+    [160, 0.7, 0.4],
+  ]) {
+    const g = gainNode(v, lvl * 0.6, out);
+    const f = biquad(v, 'bandpass', freq, Q, g);
+    longNoise(v, t, dur, f);
+    // Gusts: level and pitch wander every second or two.
+    for (let tt = t + rand(0.5, 1.5); tt < t + dur; tt += rand(0.8, 2.2)) {
+      g.gain.linearRampToValueAtTime(lvl * rand(0.3, 1), tt);
+      f.frequency.linearRampToValueAtTime(freq * rand(0.7, 1.4), tt);
+    }
+  }
+}
+
+function aCrickets(v, t, out, dur) {
+  for (let c = 0; c < 4; c++) {
+    const g = gainNode(v, 0, out);
+    oscNode(v, 'sine', rand(4200, 5200), t, t + dur, g);
+    const period = rand(0.55, 0.95);
+    const pulses = 2 + ((rnd() * 3) | 0);
+    const gap = rand(0.028, 0.04);
+    const lvl = rand(0.05, 0.12);
+    g.gain.setValueAtTime(0, t);
+    for (let tt = t + rand(0, period); tt < t + dur - 0.2; tt += period * rand(0.92, 1.08)) {
+      for (let p = 0; p < pulses; p++) {
+        const ps = tt + p * gap;
+        g.gain.setValueAtTime(0, ps);
+        g.gain.linearRampToValueAtTime(lvl, ps + 0.004);
+        g.gain.linearRampToValueAtTime(0, ps + gap * 0.7);
+      }
+    }
+  }
+  // A distant chorus.
+  const g = gainNode(v, 0.04, out);
+  longNoise(v, t, dur, biquad(v, 'bandpass', 4600, 6, g));
+  oscNode(v, 'sine', 9, t, t + dur, gainNode(v, 0.03, g.gain));
+}
+
+function aDrone(v, t, out, dur) {
+  const g = gainNode(v, 0.45, out);
+  const lp = biquad(v, 'lowpass', 320, 1.5, g);
+  for (const f of [55, 55.25, 82.5, 110.1]) oscNode(v, 'sawtooth', f, t, t + dur, lp);
+  oscNode(v, 'sine', 0.125, t, t + dur, gainNode(v, 140, lp.frequency));
+  // An eerie choir: an "oo" on A3 with slow vibrato.
+  const cg = gainNode(v, 1.4, out);
+  const src = gainNode(v, 1, null);
+  for (const [k, f] of VOWELS.u.entries()) src.connect(biquad(v, 'bandpass', f * 1.1, FORMANT_Q[k], gainNode(v, FORMANT_AMP[k] * 0.12, cg)));
+  const o = oscNode(v, 'sawtooth', 220, t, t + dur, src);
+  oscNode(v, 'sine', 0.25, t, t + dur, gainNode(v, 12, o.detune));
+  oscNode(v, 'sine', 0.0625, t, t + dur, gainNode(v, 0.6, cg.gain));
+  // Low rumble.
+  longNoise(v, t, dur, biquad(v, 'lowpass', 90, 0.7, gainNode(v, 0.5, out)));
+}
+
+function aBird(v, t, out) {
+  const type = (rnd() * 3) | 0;
+  if (type === 0) {
+    // Tweets: a few quick downward sweeps.
+    const n = 2 + ((rnd() * 3) | 0);
+    const f = rand(3800, 5200);
+    for (let i = 0; i < n; i++) {
+      const tt = t + i * rand(0.09, 0.14);
+      const g = gainNode(v, 0, out);
+      perc(g.gain, tt, 0.004, 0.25, 0.06);
+      const o = oscNode(v, 'sine', f, tt, tt + 0.08, g);
+      sweep(o.frequency, tt, f, f * 0.65, 0.06);
+    }
+  } else if (type === 1) {
+    // A trill.
+    const n = 8 + ((rnd() * 6) | 0);
+    const fa = rand(3000, 4000);
+    const fb = fa * rand(1.15, 1.35);
+    const step = rand(0.035, 0.05);
+    for (let i = 0; i < n; i++) {
+      const tt = t + i * step;
+      const g = gainNode(v, 0, out);
+      perc(g.gain, tt, 0.003, 0.16 * (1 - (i / n) * 0.5), step * 0.8);
+      oscNode(v, 'sine', i % 2 ? fb : fa, tt, tt + step + 0.01, g);
+    }
+  } else {
+    // A two-note whistle.
+    const f = rand(2600, 3400);
+    for (const [dt, a, b] of [
+      [0, f, f * 0.98],
+      [0.32, f * 0.8, f * 0.78],
+    ]) {
+      const tt = t + dt;
+      const g = gainNode(v, 0, out);
+      swell(g.gain, tt, 0.02, 0.2, 0.18, 0.06);
+      const o = oscNode(v, 'sine', a, tt, tt + 0.3, g);
+      sweep(o.frequency, tt, a, b, 0.2);
+    }
+  }
+}
+
+const AMBIENT = {
+  wind: { fn: aWind, loop: 16 },
+  crickets: { fn: aCrickets, loop: 8 },
+  drone: { fn: aDrone, loop: 16 },
+  bird: { fn: aBird },
+};
+
+// ---------------------------------------------------------------------------
+// Offline rendering. The Babylon.js audio backend plays pre-rendered buffers
+// as spatial sounds instead of building a node graph per sound. The synths
+// above run unchanged against an OfflineAudioContext: for the (synchronous)
+// duration of a build, the module's context, noise buffer, reverb send and
+// random source point at the offline graph.
+// ---------------------------------------------------------------------------
+
+/** 32 kHz keeps the buffers small (Warcraft III itself shipped 22 kHz sounds); playback resamples. */
+export const OFFLINE_RATE = 32000;
+let offlineShared = null;
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let x = a;
+    x = Math.imul(x ^ (x >>> 15), x | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** Build `fn` into the offline context `oac`; returns when its last source stops and whether it used the reverb. */
+function buildOffline(oac, fn, seed, reverb) {
+  const saved = { ctx, noiseBuf, reverbIn, musicDuck, rnd };
+  try {
+    ctx = oac;
+    if (!offlineShared) offlineShared = { noise: makeNoiseBuffer(2), impulse: makeImpulse(1.8, 2.6) };
+    noiseBuf = offlineShared.noise;
+    musicDuck = null; // the backend ducks the live music itself
+    rnd = mulberry32(seed);
+    wetUsed = false;
+    const out = oac.createGain();
+    out.connect(oac.destination);
+    reverbIn = oac.createGain();
+    if (reverb) {
+      const conv = oac.createConvolver();
+      conv.buffer = offlineShared.impulse;
+      const ret = oac.createGain();
+      ret.gain.value = 0.55 / 0.9; // live, the dry signal passes sfxGain (0.9) and the reverb return doesn't
+      reverbIn.connect(conv);
+      conv.connect(ret);
+      ret.connect(oac.destination);
+    }
+    const v = makeVoice('offline', 0, out, null);
+    fn(v, 0, out);
+    return { end: v.end, wet: wetUsed };
+  } finally {
+    ({ ctx, noiseBuf, reverbIn, musicDuck, rnd } = saved);
+  }
+}
+
+function monoBuffer(data, sampleRate) {
+  const buf = new AudioBuffer({ length: Math.max(1, data.length), numberOfChannels: 1, sampleRate });
+  buf.copyToChannel(data, 0);
+  return buf;
+}
+
+/** Drop the silent tail; optionally scale to a peak level. */
+function trimTail(buf, normalize) {
+  const d = buf.getChannelData(0);
+  let last = d.length - 1;
+  let peak = 0;
+  while (last > 0 && Math.abs(d[last]) < 1e-4) last--;
+  for (let i = 0; i <= last; i++) peak = Math.max(peak, Math.abs(d[i]));
+  const out = d.slice(0, Math.min(d.length, last + Math.ceil(buf.sampleRate * 0.02)));
+  if (normalize && peak > 0) {
+    const k = normalize / peak;
+    for (let i = 0; i < out.length; i++) out[i] *= k;
+  }
+  return monoBuffer(out, buf.sampleRate);
+}
+
+/** Cut a seamless loop of `len` s after `pre` s, cross-fading the following `fold` s into its start. */
+function foldLoop(buf, pre, len, fold) {
+  const sr = buf.sampleRate;
+  const a = buf.getChannelData(0);
+  const n = Math.round(len * sr);
+  const x = Math.round(fold * sr);
+  const p = Math.round(pre * sr);
+  const out = a.slice(p, p + n);
+  for (let i = 0; i < x; i++) {
+    const k = i / x;
+    out[i] = a[p + i] * Math.sqrt(k) + a[p + n + i] * Math.sqrt(1 - k);
+  }
+  return monoBuffer(out, sr);
+}
+
+/**
+ * Render `fn(v, t, out[, duration])` into a mono AudioBuffer (null where offline rendering is
+ * unavailable). `seed` makes the render repeatable; `loop` renders a seamless loop of that many
+ * seconds; `normalize` scales the result to that peak.
+ */
+export async function renderOffline(fn, { seed = 1, loop = 0, normalize = 0 } = {}) {
+  const OAC = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
+  if (!OAC) return null;
+  const rate = OFFLINE_RATE;
+  const PRE = 0.5;
+  const FOLD = 1;
+  let seconds;
+  let reverb = false;
+  let build = fn;
+  if (loop) {
+    seconds = PRE + loop + FOLD;
+    build = (v, t, out) => fn(v, t, out, seconds);
+  } else {
+    // A cheap first pass (never rendered) finds the length and whether the reverb is used.
+    const probe = buildOffline(new OAC(1, 1, rate), fn, seed, false);
+    reverb = probe.wet;
+    seconds = probe.end + (reverb ? 1.9 : 0.05);
+  }
+  const oac = new OAC(1, Math.ceil(seconds * rate), rate);
+  buildOffline(oac, build, seed, reverb);
+  const rendered = await oac.startRendering();
+  return loop ? foldLoop(rendered, PRE, loop, FOLD) : trimTail(rendered, normalize);
+}
+
+/** Variant `variant` of a sound effect. */
+export function renderSfx(name, variant = 0) {
+  const def = SFX[name];
+  return def ? renderOffline(def.fn, { seed: hashString(name) + variant * 7919 }) : Promise.resolve(null);
+}
+
+/** Line `line` of a voice's barks for `kind`, normalized to a common peak level (0: as synthesized). */
+export function renderBark(voiceId, kind, line = 0, normalize = 0.5) {
+  return renderOffline((v, t, out) => sBark(v, t, out, voiceId, kind, line), { seed: hashString(voiceId + kind) + line * 7919, normalize });
+}
+
+/** An ambient loop ('wind', 'crickets', 'drone') or a one-shot ('bird', with variants). */
+export function renderAmbient(name, variant = 0) {
+  const a = AMBIENT[name];
+  if (!a) return Promise.resolve(null);
+  return renderOffline(a.fn, { seed: hashString(name) + variant * 7919, loop: a.loop || 0 });
+}
+
+export const SFX_NAMES = Object.keys(SFX);
+
+/** Limits and level of a sound effect (used by the Babylon.js backend). */
+export function sfxInfo(name) {
+  const d = Object.prototype.hasOwnProperty.call(SFX, name) ? SFX[name] : null;
+  if (!d) return null;
+  return { prio: d.prio, max: d.max ?? MAX_PER_NAME, gap: d.gap ?? MIN_GAP, gain: d.gain ?? 1, duck: d.duck ?? 0 };
+}
+
+export const MAX_SFX_VOICES = MAX_VOICES;
+
+/** The live AudioContext (null until initAudio). */
+export function getAudioContext() {
+  return ctx;
+}
+
+/** Where other engines' sound effects join the mix (before the compressor and the master volume). */
+export function getSfxInput() {
+  return sfxGain;
+}
+
+/** True when sound can be heard now (not muted, context running or just resumed). */
+export function canPlayNow() {
+  return !muted && canPlay();
+}
+
+/** Lower the music for a fanfare played by another engine. */
+export function duckMusicFor(seconds) {
+  if (ctx) duckMusic(ctx.currentTime + START_DELAY, seconds);
 }

@@ -135,6 +135,7 @@ app.whenReady().then(() => {
   win.webContents.on('did-fail-load', (_e, code, desc, url) => log('load failed', code, desc, url));
   // Development-only automated check: HE3D_SCREENSHOT=out.png captures the window after a delay,
   // prints the page's console messages, and quits (used to verify each migration milestone).
+  // HE3D_CHECK_JS optionally runs a script in the page first and prints its (awaited) result.
   const shotPath = process.env.HE3D_SCREENSHOT;
   if (shotPath && !app.isPackaged) {
     win.webContents.on('console-message', (event) => {
@@ -147,6 +148,8 @@ app.whenReady().then(() => {
           'JSON.stringify({ url: location.href, babylon: !!window.__babylon, desktop: typeof window.desktop, require: typeof window.require, process: typeof window.process })',
         );
         console.log('[check]', info);
+        const js = process.env.HE3D_CHECK_JS;
+        if (js) console.log('[check] js', await win.webContents.executeJavaScript(js));
         const img = await win.webContents.capturePage();
         writeFileSync(shotPath, img.toPNG());
         console.log('[check] screenshot', shotPath);

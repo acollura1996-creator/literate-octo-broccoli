@@ -218,13 +218,15 @@ WC3's attack-type/armor-type damage table and armor formula.
 src/
   main.js              title screen, game setup, main loop
   input.js             selection, smart orders, targeting, building placement, hotkeys
-  audio.js             synthesized sound effects and music (Web Audio)
+  audio.js             synthesized sound effects, unit acknowledgements, ambience and music (Web Audio)
   data/                units, buildings, heroes, items
   game/                simulation: Game, Unit, orders/behaviour, abilities, fog of war, roads,
                        empire economy (citizens, taxes, ages, hiring, nukes) and random events
   ai/                  creep camps, Kalenden's Legion, rival general AI (hero and empire)
   world/               map layout, terrain generation, A* path grid, noise
   render/              view and camera, procedural models, unit views, effects, projectiles, overlay
+  babylon/             Babylon.js renderer (?renderer=babylon): view, camera, terrain, models, effects,
+                       HUD icons and portrait, spatial audio
   ui/                  HUD console, command card, minimap, icons and 3D portrait
 tools/
   gallery.html         dev gallery of every procedural model (npm run dev → /tools/gallery.html)

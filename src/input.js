@@ -63,7 +63,16 @@ export class Input {
     this.activeType = null;
     this.cardMenu = null;
     this.sortSelection();
-    if (sound && list.length) this.game.sound('select', undefined, undefined, 0.5);
+    if (sound && list.length) {
+      this.game.sound('select', undefined, undefined, 0.5);
+      this.barkFor('select');
+    }
+  }
+
+  /** The lead unit of the selection acknowledges, Warcraft III style ('select' | 'move' | 'attack'). */
+  barkFor(kind) {
+    const u = this.selection.find((s) => s.owner === this.game.human && !s.isBuilding && !s.dead);
+    if (u) this.onBark?.(u, kind);
   }
 
   pruneSelection() {
@@ -223,6 +232,7 @@ export class Input {
         }
         this.flash(target);
         g.sound('click', undefined, undefined, 0.4);
+        this.barkFor('attack');
         return;
       }
       for (const u of movers) {
@@ -237,12 +247,14 @@ export class Input {
       }
       this.flash(target, true);
       g.sound('click', undefined, undefined, 0.4);
+      this.barkFor('move');
       return;
     }
     if (item && movers.some((u) => u.isHero)) {
       const h = movers.find((u) => u.isHero && !u.isIllusion) ?? movers[0];
       g.issueOrder(h, { type: 'pickup', item }, shift);
       this.view.fx.orderMarker(item.x, item.z, 0xffee55);
+      this.barkFor('move');
       return;
     }
     if (tree && movers.some((u) => u.def.worker)) {
@@ -250,11 +262,13 @@ export class Input {
         if (u.def.worker) g.issueOrder(u, { type: 'harvest', target: tree }, shift);
       }
       this.flashTree(tree);
+      this.barkFor('move');
       return;
     }
     if (!ground) return;
     this.moveGroup(movers, ground.x, ground.z, 'move', shift);
     this.view.fx.orderMarker(ground.x, ground.z, 0x40ff40);
+    this.barkFor('move');
   }
 
   /** Show clearly which tree was chosen for harvesting. */
@@ -318,6 +332,7 @@ export class Input {
           this.moveGroup(movers, ground.x, ground.z, 'move', shift);
           this.view.fx.orderMarker(ground.x, ground.z, 0x40ff40);
         }
+        this.barkFor('move');
         break;
       case 'attack':
         if (target && g.isEnemy(g.human, target.owner)) {
@@ -327,6 +342,7 @@ export class Input {
           this.moveGroup(movers.filter((u) => u.canAttack), ground.x, ground.z, 'attackMove', shift);
           this.view.fx.orderMarker(ground.x, ground.z, 0xff4040);
         }
+        this.barkFor('attack');
         break;
       case 'patrol':
         if (ground) {

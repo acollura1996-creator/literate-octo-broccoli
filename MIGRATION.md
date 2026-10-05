@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M6 are done; see section 3.
+Status: **in progress.** Milestones M1–M7 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -325,10 +325,41 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - One light rig is re-set between icons and the portrait, so the shaders never need recompiling. Light layer masks don't work for instances, which take the template mesh's layer.
     - The icon camera's projection is fixed to a square aspect. Otherwise the render-target pass uses the main canvas's aspect ratio and squeezes the icons.
     - `BabylonView` no longer contains a hidden three.js view: nothing it draws uses three.js.
-- [ ] **M7 – Audio.**
-  - Babylon AudioEngineV2: spatial `StaticSound`s from pre-rendered synth buffers, with the listener on the camera target.
-  - Keep the voice limits and per-sound throttling; port the procedural music onto the engine's bus.
-  - New: unit acknowledgement barks (D4) and ambient beds (wind and birds by day, crickets by night, the citadel's drone).
+- [x] **M7 – Audio.**
+  - [x] Babylon AudioEngineV2 (`src/babylon/SpatialAudio.ts`): spatial `StaticSound`s from pre-rendered synth buffers, with the listener on the camera target.
+    - `src/audio.js` renders any of its synths offline (`renderOffline`). For the length of a build, it points its context, noise buffer, reverb send and random source at an `OfflineAudioContext`. The synths run unchanged.
+    - A cheap first pass with the same seed measures the sound's length and whether it uses the reverb. The real render is then exactly long enough, with the reverb baked in.
+    - Every effect is rendered at boot, in the background, with no user gesture needed: three variants each at 32 kHz, and one for effects longer than 2 s (fanfares, sirens, thunder). That makes 88 buffers, about 12 MB. Each effect gets a pool of spatial sounds that cycles through its variants, plus ±3 % random pitch.
+  - [x] Distance and panning.
+    - The listener hovers 8 units above the camera target, looking down, with its "up" along the camera's view across the ground. Sounds pan with their position on screen and follow camera rotation.
+    - Volume falls off linearly with distance, adjusted for the listener's height, so it stays within about 2 % of the old 14 → 50 unit rule.
+    - Sounds with no position stay under the listener.
+  - [x] Voice limits and per-sound throttling kept: 24 voices, per-name maximum and minimum gap, priority stealing with a short fade.
+  - [x] The procedural music stays on raw Web Audio (risk table, section 4).
+    - The engine is created on audio.js's own `AudioContext` (`CreateAudioEngineAsync({ audioContext })`).
+    - Its main output is re-wired into audio.js's effects input, ahead of the shared compressor and master gain. Mute and volume therefore cover everything, and the compressor still glues loud battles.
+    - AudioEngineV2 has no public option for this, so it is the one internal property used (`mainOut._inNode`). If that ever changes shape, the engine keeps its own output and mirrors the mute button.
+    - The victory and defeat fanfares duck the live music, as before.
+  - [x] Fallback: until the first user gesture creates the engine, or while a sound is still rendering, the game plays audio.js's live synth as before.
+  - [x] New: unit acknowledgement barks (D4).
+    - A small formant synthesizer speaks gibberish lines in the spirit of Warcraft III: a glottal buzz through three gliding vowel formants, with noise for consonants.
+    - Voices are mapped from unit data:
+      - workers, cavemen, soldiers, heavy troops, mystics and the sorceress;
+      - radio chatter in the Atomic to Digital Ages, robot voices in the Future and Galactic Ages;
+      - one voice per hero.
+    - Engines (combustion vehicles), droid bleeps (Digital Age vehicles and later), a trumpet (war elephant) and bubbles (water elemental).
+    - The lead unit of the selection answers selection, move and attack orders (`Input.barkFor`), one unit at a time.
+    - Lines render on first use; the player's worker and hero voices render at game start. The three.js path plays them with the live synth.
+  - [x] New: ambient beds, rendered offline into seamless loops (cross-faded loop points).
+    - Wind grows louder as the camera zooms out.
+    - Birds chirp by day at random spots around the camera; crickets play at night. Both follow the game clock.
+    - The citadel has a spatial drone, heard from just outside its moat.
+  - Verified in Chromium against the live mix with a stereo analyser:
+    - A sound 12 units right of the target plays about 3 : 1 right/left, and is mirrored when the camera turns 180°.
+    - Barks are centred.
+    - The ambient volumes follow day and night.
+    - Mute silences the engine.
+    - The console is clean.
 - [ ] **M8 – Visual upgrade (the Reforged look).**
   - Painterly triplanar texture plugin (D3) and a team-colour shader.
   - `CascadedShadowGenerator` with soft PCF shadows, SSAO2, and a `GlowLayer` for emissive parts and spells.
@@ -361,7 +392,7 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
 | Procedural model builders | No Babylon equivalent of three's full geometry API (`ExtrudeGeometry` bevels, `LatheGeometry` UVs). | Bake with three.js at build time (D1). |
 | `onBeforeCompile` string patches | Babylon shaders are structured differently. | `MaterialPluginBase` gives defined hook points. |
 | Live portrait (second `WebGLRenderer`) | Babylon prefers one engine. | `engine.registerView(canvas, camera)` renders a second camera into the portrait canvas. |
-| Procedural music on raw Web Audio | AudioEngineV2 hides some low-level scheduling. | Keep a raw-Web-Audio music synth connected to the engine's audio context if the API allows; otherwise the music keeps its own `AudioContext`. Flagged in M7. |
+| Procedural music on raw Web Audio | AudioEngineV2 hides some low-level scheduling. | Resolved in M7: the engine runs on audio.js's `AudioContext`, and the music stays a raw Web Audio scheduler on it. The engine's output is routed into the same compressor and master gain, through one internal property (`mainOut._inNode`) with a fallback. |
 | Windows `.exe` verification | No Windows or Wine here. | D5. |
 | Size of the strict-TypeScript conversion | About 19,000 lines of dynamic JavaScript. | Incremental `allowJs` → `.ts` (D2, M11). |
 | 200+ units at 60 fps on integrated GPUs | Many small meshes per unit. | Part instancing with instanced team colour; LOD (hide small details beyond a distance); quality presets. |
