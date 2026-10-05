@@ -18,9 +18,13 @@ Like the original, every general picks one of two paths:
   farms, and they riot if you treat them badly.
 
 The game is written in TypeScript and drawn with [Babylon.js](https://www.babylonjs.com), built with
-Vite and packaged for Windows with Electron. Models are procedural low-poly meshes (baked to one glTF
-file at build time) with procedurally painted textures, and sounds and music are synthesized with
-Web Audio, so there are no hand-made asset files.
+Vite and packaged for Windows with Electron. Its look follows Warcraft III: hand-painted ground
+tiles (Lordaeron grass, dirt, flagstones, blight, cliff rock) with crisp, irregular borders, lush
+rounded trees, grass tufts and flowers, bright water with shore foam, and chunky models with
+painted brick, plank, thatch and tile detail under warm, saturated light. All of it is generated in
+code: the models are procedural meshes (baked to one glTF file at build time), the textures are
+painted with Canvas 2D at load, and sounds and music are synthesized with Web Audio, so there are no
+hand-made asset files. `tools/textures.html` previews the paintings.
 
 ## Running
 
@@ -246,14 +250,15 @@ src/
                        types.ts: Player, Order, Buff, ...; hooks.ts: what the simulation reports
   ai/                  creep camps, Kalenden's Legion, rival general AI (hero and empire)
   world/               map layout, terrain generation, A* path grid, noise
-  babylon/             Babylon.js renderer: view, camera, terrain, models, effects,
-                       HUD icons and portrait, spatial audio
+  babylon/             Babylon.js renderer: view, camera, painted terrain and water, foliage,
+                       models, effects, HUD icons and portrait, spatial audio
   ui/                  HUD console, command card, minimap, 2D overlay (health bars, floating text)
   generated/           models.glb, baked by tools/bake-models.mjs (not committed)
 tools/
   models/              the procedural model builders (three.js geometry, build time only)
   bake-models.mjs      runs the builders in Node and writes src/generated/models.glb
   gallery-babylon.html dev gallery of the baked models in the game's renderer (/tools/gallery-babylon.html)
+  textures.html        preview of the procedurally painted ground and foliage textures (/tools/textures.html)
   gallery.html         the builders' own three.js gallery, for editing models (/tools/gallery.html)
   build-artifact.mjs   post-build step for the hosted version
   headless-sim.mjs     npm run sim: the simulation without any renderer
@@ -269,9 +274,9 @@ Testing helpers (dev server only): `?autostart=hero:paladin` or `?autostart=empi
 title screen, and `&rivals=hero-ranger-ally,empire,random` sets the computer generals
 (`path[-hero][-side]` each). `&reveal=1` removes the fog of war, `&aiplayer=1` lets the AI play
 for you, and `&speed=4` speeds up the game. `&quality=low|medium|high`
-picks the graphics preset (also in the in-game Menu): Low is the classic flat-coloured look, Medium
-and High add HDR tone mapping, colour grading, bloom, painted textures, shadows, ambient occlusion
-and GPU particles. `&bench=240` stages a 240-unit battle with a frame-rate readout (the readout
+picks the graphics preset (also in the in-game Menu): Low keeps the painted world but draws without
+post-processing or shadows and with plain model colours; Medium and High add HDR tone mapping, colour
+grading, bloom, painted model detail, shadows, ambient occlusion and GPU particles. `&bench=240` stages a 240-unit battle with a frame-rate readout (the readout
 also toggles with Ctrl+Shift+F in any build).
 
 ## Notes
