@@ -462,12 +462,18 @@ function boot(data) {
 // When hosted in the Artifact viewer, keep the chosen settings across page updates.
 const hot = window.claude?.hot;
 hot?.snapshot?.(() => ({ settings: { ...settings, rivals: settings.rivals.map((r) => ({ ...r })) } }));
-if (hot?.ready) hot.ready(boot);
+// Babylon.js renderer (migration in progress, see MIGRATION.md): `?renderer=babylon`.
+const useBabylon = params.get('renderer') === 'babylon';
+if (useBabylon) {
+  $('screen-title').classList.add('hidden');
+  $('screen-loading').classList.add('hidden');
+  import('./babylon/sandbox.ts').then((m) => m.runSandbox($('gl')));
+} else if (hot?.ready) hot.ready(boot);
 else boot(hot?.data ?? {});
 
 // Test/debug helpers: ?autostart=hero:paladin or ?autostart=empire
 const auto = params.get('autostart');
-if (auto) {
+if (auto && !useBabylon) {
   const [mode, heroId] = auto.split(':');
   settings.mode = mode === 'empire' ? 'empire' : 'hero';
   if (heroId && HEROES[heroId]) settings.heroId = heroId;

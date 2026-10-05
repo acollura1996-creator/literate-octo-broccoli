@@ -24,12 +24,19 @@ sounds and music are synthesized with Web Audio, so the game ships no asset file
 
 ```bash
 npm install
-npm run dev            # http://localhost:5173
-npm run build          # single self-contained dist/index.html (open it directly in a browser)
-npm run build:artifact # also writes dist/artifact.html (page body used for the hosted version)
+npm run dev            # browser, http://localhost:5173 (three.js renderer)
+                       # http://localhost:5173/?renderer=babylon for the Babylon.js port in progress
+npm run dev:electron   # desktop window (Electron) against the dev server, with hot reload
+npm run typecheck      # TypeScript, game and Electron code
+npm run build          # typecheck, then dist/ (game) and dist-electron/ (desktop main process)
+npm run preview        # serve dist/ in the browser
+npm run dist           # build, then the Windows installer in release/ (electron-builder, NSIS x64)
+npm run build:artifact # single self-contained dist-artifact/index.html and artifact.html
 ```
 
-The game needs a desktop browser with WebGL2, a mouse and a keyboard.
+The game needs WebGL2, a mouse and a keyboard. The game is being migrated to TypeScript and
+Babylon.js; see [MIGRATION.md](MIGRATION.md) for the plan and progress. Until that finishes, the
+browser build defaults to the three.js renderer and the desktop build opens the Babylon renderer.
 
 ## The land of Kalenden
 

@@ -217,12 +217,19 @@ Each milestone ends with the same check:
 
 The three.js renderer keeps working in parallel, behind `?renderer=three`, until M12.
 
-- [ ] **M1 – Scaffold the stack.**
-  - Add TypeScript (strict), `@babylonjs/core`, `@babylonjs/loaders`, `@babylonjs/materials`, Electron and electron-builder.
-  - `tsconfig` uses `allowJs` for the legacy simulation; add `vite.config.ts`.
-  - Add the Electron main process and preload with secure defaults.
-  - npm scripts: `dev`, `dev:electron`, `build`, `dist`.
-  - An empty Babylon scene (ground plane plus light) renders in the browser and in Electron (checked under Xvfb).
+- [x] **M1 – Scaffold the stack.**
+  - [x] Add TypeScript (strict), `@babylonjs/core`, `@babylonjs/loaders`, `@babylonjs/materials`, Electron and electron-builder.
+  - [x] `tsconfig` uses `allowJs` for the legacy simulation; add `vite.config.ts`.
+  - [x] Add the Electron main process and preload with secure defaults (`electron/main.ts`, `electron/preload.ts`).
+  - [x] npm scripts: `dev`, `dev:electron`, `build`, `dist` (plus `typecheck` and `preview`).
+  - [x] An empty Babylon scene (ground plane plus light) renders in the browser and in Electron (checked under Xvfb).
+  - Notes:
+    - `?renderer=babylon` opens the Babylon scene (`src/babylon/`); the default is still three.js.
+    - `dist-electron/` is CommonJS: `scripts/build-electron.mjs` writes a `package.json` with `"type": "commonjs"` next to it, because the root package is an ES module package.
+    - The packaged app serves `dist/` from a custom `app://game` protocol with a strict CSP, rather than `file://`.
+    - Electron is checked with a development-only self-capture: `HE3D_SCREENSHOT=out.png` saves a window screenshot, prints the page console and confirms `require`/`process` are not exposed, then quits. It is ignored in packaged builds.
+    - In this container Electron also needs `--no-sandbox` (it runs as root) and SwiftShader WebGL flags (`--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`). These are passed on the command line for the check only; the app does not set them.
+    - Checked: handedness matches three.js (+X to the right, +Z toward the camera); Babylon reports WebGL2; the three.js game still runs with a clean console.
 - [ ] **M2 – RTS camera.**
   - Port `RTSCamera`: 56° pitch, FOV 42° converted to radians, distance 12–68 with smooth zoom.
   - Ramped edge scrolling, keyboard panning, middle-drag, wheel modes, shake, terrain following.
