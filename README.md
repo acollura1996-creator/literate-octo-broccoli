@@ -11,9 +11,10 @@ Like the original, every general picks one of two paths:
 - **Hero**: gain experience, buy items and survive. You control a single Hero from an Altar of
   Heroes. You level up to 10 on creep camps, learn four abilities, carry six items, hire
   mercenaries, and are revived at your Altar when you fall.
-- **Empire**: build houses, an economy and soldiers, and advance through history: from cavemen
-  with clubs in the Stone Age, through bronze, iron, gunpowder and steam, to tanks, nuclear missiles
-  and laser-armed mechs in the Future Age. Your citizens pay the taxes and eat the food from your
+- **Empire**: build houses, an economy and soldiers, and advance through history across twelve
+  ages: from cavemen with clubs in the Stone Age, through bronze, iron, gunpowder and steam, to
+  tanks, nuclear missiles and laser-armed mechs, and finally war titans and starfighters in the
+  Galactic Age. Your citizens pay the taxes and eat the food from your
   farms, and they riot if you treat them badly.
 
 Everything is built with [three.js](https://threejs.org). Models are procedural low-poly meshes and
@@ -48,7 +49,7 @@ Every few minutes **Kalenden's Legion** marches on one of the generals. Destroy 
 stop the marches. You win by slaying Kalenden, or in free-for-all by being the last general
 standing.
 
-### Empire: citizens, taxes and the eight ages
+### Empire: citizens, taxes, research and the twelve ages
 
 The original map's empires are run like a little nation, and so are they here:
 
@@ -59,14 +60,16 @@ The original map's empires are run like a little nation, and so are they here:
   helps early on.
 - **Farms grow food**, and every citizen eats their **ration** of it. Bigger rations make people
   happier and help them shrug off plague, but cost more food.
-- **Mood** runs from 😍 Love through Happy, Normal and Unhappy to 😡 Hate. Low taxes, generous
+- **Taxes and rations have no upper limit.** Your people's mood keeps them in check.
+- **Mood** runs from 🌟 Utopia, 🤩 Ecstatic, 🥰 Devoted and 😍 Love through Happy, Normal and
+  Unhappy to 😡 Hate. Low taxes, generous
   rations and plenty of **roads** ("build roads and make your people love you") make people
   happier; heavy taxes, hunger, plague and very crowded cities make them angry.
-  - Loving and happy people pay up to 25% more and move in faster.
+  - Content people pay more and move in faster, from +10% when Happy up to +60% in Utopia.
   - Nobody pays taxes while they **starve** or **hate** you.
   - Unhappy citizens **riot**: armed rebels spill out of their houses and march on your town
     center.
-- Set taxes (`Z` / `X`) and rations (`C` / `V`) at the town center. The top bar shows your food
+- Set taxes (`Z` / `X`) and rations (`C` / `V`) at the town center; hold Shift to change them by 5. The top bar shows your food
   stock and its rate, citizens / housing and the people's mood.
 - **Ages**: research the next age at the town center. Everything from the town center to houses,
   farms, walls, gates, towers and roads is rebuilt in the new age's style:
@@ -75,18 +78,43 @@ The original map's empires are run like a little nation, and so are they here:
   | --- | --- | --- | --- |
   | Stone | Tribal Camp | — | Clubman, Rock Thrower |
   | Bronze | Chiefdom Hall | Barracks | Hoplite, Bowman, War Chariot |
-  | Dark | Town Hall | Farm, Stable | Footman, Pikeman, Archer, Light Cavalry, Knight, Catapult, Priest |
-  | Medieval | Castle | Blacksmith, Workshop | Crossbowman, Champion, Royal Knight, Trebuchet, Sorceress, Battle Mage |
-  | Gunpowder | Palace | Arcane Sanctum | Musketeer, Grenadier, Dragoon, Cannon |
-  | Industrial | City Hall | Workshop | Rifleman, Machine Gunner, Landship, Howitzer |
+  | Iron | Forum | Farm, Research Center | Legionary, Javelineer, War Elephant, Ballista |
+  | Dark | Town Hall | Stable, Workshop | Footman, Pikeman, Archer, Light Cavalry, Knight, Catapult, Priest |
+  | Medieval | Castle | Arcane Sanctum | Crossbowman, Champion, Royal Knight, Trebuchet, Sorceress, Battle Mage |
+  | Gunpowder | Palace | Workshop | Musketeer, Grenadier, Dragoon, Cannon |
+  | Industrial | City Hall | Research Center | Rifleman, Machine Gunner, Landship, Howitzer |
+  | Atomic | Ministry | Factory | Flamethrower, Sniper, Half-track |
   | Modern | Capitol | Factory | Infantry, Rocket Trooper, Battle Tank, Rocket Artillery, nuclear missiles |
-  | Future | Nexus | Missile Silo | Laser Trooper, Exo Trooper, Hover Tank, Mech Walker |
+  | Digital | Smart Hub | Missile Silo | Railgunner, Combat Drone, Stealth Tank |
+  | Future | Nexus | Research Center | Laser Trooper, Exo Trooper, Hover Tank, Mech Walker |
+  | Galactic | Star Citadel | Missile Silo | Void Trooper, Starfighter, War Titan, Graviton Lance |
 
   Production buildings offer the units of your current and previous age. Houses go from hide huts
-  to round huts, cottages, townhouses, manors, rowhouses, apartment blocks and habitat pods. Walls
-  go from palisades to stone, castle and bastion walls, then concrete, then energy walls. Towers
+  to round huts, Roman domus, cottages, townhouses, manors, rowhouses, bungalows, apartment
+  blocks, smart homes, habitat pods and floating sky habitats. Walls go from palisades to stone,
+  castle and bastion walls, then concrete, then energy walls and force fields. Towers
   fire arrows, then musket balls, then machine guns, then lasers. Roads go from dirt to cobbles,
   paving, macadam and asphalt.
+- **Research Center** (Peasant's advanced build menu): twelve researches, each with many levels:
+
+  | Research | Each level |
+  | --- | --- |
+  | Weaponry | +6% damage for your units and towers |
+  | Armor Plating | +1 armor for your units |
+  | Vitality | +6% health for your units |
+  | Mobility | +4% movement speed |
+  | Forestry | +2 lumber per trip, 10% faster chopping |
+  | Mining | +2 gold per trip |
+  | Housing | +1 citizen and +1 supply in every house |
+  | Agriculture | +10% food from every farm |
+  | Masonry | +10% building health, 10% faster construction |
+  | Commerce | +5% tax income |
+  | Civics | +3 happiness |
+  | Medicine | +0.4 health regeneration; plague kills 15% fewer |
+
+  Each age you reach unlocks two more levels of every research (up to 24 in the Galactic Age),
+  and each level costs a little more than the last. Several Research Centers can research
+  different topics at once.
 - **Nuclear war**: in the Modern Age a **Missile Silo** builds nuclear missiles. Everyone sees the
   launch warning and the target circle, and 7 seconds later the blast flattens nearly everything
   near the target, friend or foe, and terrifies nearby citizens.
@@ -95,7 +123,7 @@ The original map's empires are run like a little nation, and so are they here:
   may offer you a contract.
 - **Walls** are dragged out like roads (one piece per tile). **Gates** can be dropped onto your
   own walls; they open for you and your allies and stay shut to everyone else.
-- **Lumber Yard**: Peasants drop lumber here, and it researches better lumber harvesting.
+- **Lumber Yard**: Peasants drop lumber here, so they spend less time walking.
 - **Hoplites and Pikemen** deal extra damage to chariots and cavalry.
 - **Losing your town center**: an empire falls 20 seconds after losing its last town center
   unless it starts building another one.
@@ -133,10 +161,10 @@ What the computer generals do on their own:
   march on Kalenden once strong enough.
 - **AI empires** balance peasants between gold and lumber, site Lumber Yards at the forest edge,
   lay a grid of streets and build houses along them, and build farms to feed their citizens. They
-  tune taxes and rations to keep their people happy, advance through the eight ages, and train
+  tune taxes and rations to keep their people happy, advance through the twelve ages, and train
   the best units of each age. They also build a wall with a gate across the approach to their
   town, research upgrades and expand to new gold mines. In battle they clear creeps, hire Heroes,
-  launch nuclear missiles, attack rival bases and finally assault the citadel.
+  launch nuclear missiles, research at their Research Centers, attack rival bases and finally assault the citadel.
 - **AI heroes** you hire guard your lands and join your battles for the length of the contract.
 - **Allies** come to defend your base, join you when you fight a rival nearby, and join your
   assault on Kalenden.
