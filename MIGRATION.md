@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M5 are done; see section 3.
+Status: **in progress.** Milestones M1–M6 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -310,10 +310,21 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - The hidden three.js view inside `BabylonView` is no longer updated each frame. All that remains on it is the command-card icon renderer (M6).
     - Leaving a game now also cancels an active road/wall line tool. Before, its preview could linger into the next game.
     - The walls test now waits for the camera to settle before dragging (it drags in screen pixels).
-- [ ] **M6 – HUD and interface.**
-  - Keep the HTML/CSS HUD.
-  - Port command-card icons to `RenderTargetTexture` and the live portrait to `engine.registerView`.
-  - Keep the overlay canvas and minimap working; bundle the fonts locally for offline Electron.
+- [x] **M6 – HUD and interface.**
+  - [x] Keep the HTML/CSS HUD (unchanged). It now asks the view for pictures: `view.icon(model, colour, isBuilding)` and `view.createPortrait(element)`. The three.js `View` keeps `src/ui/icons.js`, and the Babylon view uses `src/babylon/UiRenderer.ts`.
+  - [x] Command-card icons via `RenderTargetTexture`. They render once per model and colour into a 96×96 target, are read back synchronously, composited on the icon gradient and cached as data URLs, as before.
+  - [x] Live portrait: an equivalent of `engine.registerView` without its per-frame canvas resize.
+    - The portrait renders each frame into the main canvas, in the rectangle hidden under the portrait box, with a scissored clear.
+    - That rectangle is copied into the box's own 2D canvas.
+    - No second WebGL context and no pixel readback.
+  - [x] Overlay canvas and minimap work unchanged.
+  - [x] Fonts bundled locally: Cinzel from `@fontsource/cinzel`, imported by `main.js`. Google Fonts links are gone from `index.html` and from the Electron CSP, so the desktop app works offline.
+  - Notes:
+    - Icons and the portrait use a separate Babylon scene with its own copy of the models (no fog of war, their own lights).
+    - Babylon compiles shaders asynchronously, so that scene compiles all model materials up front (`forceCompilationAsync`). That lets icons be drawn synchronously, as the HUD's HTML templates expect.
+    - One light rig is re-set between icons and the portrait, so the shaders never need recompiling. Light layer masks don't work for instances, which take the template mesh's layer.
+    - The icon camera's projection is fixed to a square aspect. Otherwise the render-target pass uses the main canvas's aspect ratio and squeezes the icons.
+    - `BabylonView` no longer contains a hidden three.js view: nothing it draws uses three.js.
 - [ ] **M7 – Audio.**
   - Babylon AudioEngineV2: spatial `StaticSound`s from pre-rendered synth buffers, with the listener on the camera target.
   - Keep the voice limits and per-sound throttling; port the procedural music onto the engine's bus.

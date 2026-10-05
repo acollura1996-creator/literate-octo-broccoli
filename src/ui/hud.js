@@ -4,7 +4,6 @@ import { moodOf } from '../game/empire.js';
 import { UNITS, UPGRADES, AGE_NAMES, ECONOMY } from '../data/units.js';
 import { ITEMS } from '../data/items.js';
 import { getCommands } from './commands.js';
-import { modelIcon, Portrait } from './icons.js';
 import { Minimap } from './minimap.js';
 
 const $ = (id) => document.getElementById(id);
@@ -26,7 +25,7 @@ export class Hud {
     this.view = view;
     this.input = input;
     this.el = $('hud');
-    this.portrait = new Portrait(view.renderer, $('portrait'));
+    this.portrait = view.createPortrait($('portrait'));
     this.minimap = new Minimap($('minimap'), game, view, input);
     this.input.onInventoryClick = (slot, e) => this.inventoryClick(slot, e);
     this.buildInventory();
@@ -59,7 +58,7 @@ export class Hud {
   }
 
   icon(modelId, color, isBuilding) {
-    return modelIcon(this.view.renderer, modelId, color, isBuilding);
+    return this.view.icon(modelId, color, isBuilding);
   }
 
   bindTopbar() {

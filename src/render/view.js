@@ -5,6 +5,7 @@ import { Effects } from './effects.js';
 import { ProjectileView } from './projectiles.js';
 import { TerrainView, RoadMesh, FogTexture, buildCitadel } from './terrainView.js';
 import { Previews } from './previews.js';
+import { modelIcon, Portrait } from '../ui/icons.js';
 import { MAP_SIZE } from '../world/layout.js';
 import { ITEMS } from '../data/items.js';
 
@@ -236,6 +237,16 @@ export class View {
     this.terrainView = null;
     this.roadMesh = null;
     this.fogTexture = null;
+  }
+
+  /** Data URL icon of a model in a team colour (command card, title screen). */
+  icon(modelId, color, isBuilding) {
+    return modelIcon(this.renderer, modelId, color, isBuilding);
+  }
+
+  /** The animated 3D portrait shown in the console element. */
+  createPortrait(element) {
+    return new Portrait(this.renderer, element);
   }
 
   /** Screen pixels per world unit at a world point (used for picking radii). */

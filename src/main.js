@@ -1,10 +1,12 @@
 // Entry point: title/setup screen, game construction and the main loop.
+import '@fontsource/cinzel/500.css';
+import '@fontsource/cinzel/700.css';
+import '@fontsource/cinzel/900.css';
 import { View } from './render/view.js';
 import { Overlay } from './render/overlay.js';
 import { Game } from './game/game.js';
 import { Input } from './input.js';
 import { Hud } from './ui/hud.js';
-import { modelIcon } from './ui/icons.js';
 import { HEROES, HERO_IDS } from './data/heroes.js';
 import { UNITS } from './data/units.js';
 import { ABILITIES } from './game/abilities.js';
@@ -116,7 +118,7 @@ function buildTitle() {
     btn.dataset.hero = id;
     let img = '';
     try {
-      img = modelIcon(view.renderer, d.model, TEAM_COLORS.red, false);
+      img = view.icon(d.model, TEAM_COLORS.red, false);
     } catch (e) {
       console.error(e);
     }
@@ -487,9 +489,13 @@ function autostart() {
 }
 
 function launch() {
-  if (hot?.ready) hot.ready(boot);
-  else boot(hot?.data ?? {});
-  autostart();
+  // The Babylon view loads its models first (view.ready); the three.js view has nothing to wait for.
+  ensureView();
+  Promise.resolve(view.ready).then(() => {
+    if (hot?.ready) hot.ready(boot);
+    else boot(hot?.data ?? {});
+    autostart();
+  });
 }
 
 if (params.get('renderer') === 'babylon') {

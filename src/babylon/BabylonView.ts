@@ -2,16 +2,14 @@
 // `View` (src/render/view.js), so main.js, the input code, the HUD, the minimap and the overlay
 // work with either renderer.
 //
-// Migration strategy: the parts not ported yet stay on a hidden three.js view (`legacy`) that is
-// never drawn: today only the command-card icon renderer (M6). Each milestone moves another part
-// onto Babylon; MIGRATION.md tracks what is left, and M12 removes `legacy`.
+// Everything it draws is Babylon: terrain, units, effects, projectiles, previews, and the HUD's
+// icons and portrait (UiRenderer).
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import type { Engine } from '@babylonjs/core/Engines/engine';
 import type { Scene } from '@babylonjs/core/scene';
-import { View as LegacyView } from '../render/view.js';
 import { createBabylon } from './engine';
 import { RTSCamera, type GroundPoint } from './RTSCamera';
 import { TerrainView, RoadView } from './TerrainView';
@@ -23,6 +21,7 @@ import { ITEMS } from '../data/items.js';
 import { Effects } from './Effects';
 import { ProjectileView } from './Projectiles';
 import { Previews } from './Previews';
+import { UiRenderer } from './UiRenderer';
 import type { GameLike, ItemLike, UnitLike } from './types';
 
 export interface ScreenPoint {
@@ -38,7 +37,6 @@ export class BabylonView {
   readonly engine: Engine;
   readonly bscene: Scene;
   readonly cam: RTSCamera;
-  readonly legacy: LegacyView;
   width = 1;
   height = 1;
   game: GameLike | null = null;
@@ -57,6 +55,7 @@ export class BabylonView {
   private projectileView: ProjectileView | null = null;
   /** Placement ghost and line preview (used by src/input.js); set once the models are loaded. */
   previews!: Previews;
+  private ui!: UiRenderer;
   readonly itemViews = new Map<ItemLike, ItemView>();
   /** Resolves when the baked models are loaded; main.js waits for it before starting a game. */
   readonly ready: Promise<void>;
@@ -75,34 +74,32 @@ export class BabylonView {
 
     this.hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
     this.sun = new DirectionalLight('sun', new Vector3(-0.4, -1, -0.4), scene);
-    this.ready = ModelLibrary.load(scene).then((lib) => {
+    this.ready = Promise.all([ModelLibrary.load(scene), UiRenderer.create(engine)]).then(([lib, ui]) => {
       this.models = lib;
       this.unitAssets = new UnitAssets(scene, lib);
       this.previews = new Previews(scene, lib);
+      this.ui = ui;
     });
-
-    // The hidden three.js view: an offscreen canvas that is never shown or drawn to.
-    const off = document.createElement('canvas');
-    off.width = 1;
-    off.height = 1;
-    this.legacy = new LegacyView(off);
-    this.legacy.renderer.setSize(1, 1, false);
-    this.legacy.drawsWorld = false; // terrain, roads and fog are drawn here
 
     this.resize();
     (window as unknown as { __babylon: unknown }).__babylon = { engine, scene, view: this };
   }
 
-  // ---- Parts still served by the legacy view (see MIGRATION.md) --------------------------------
-  /** three.js renderer, still used for command-card icons until M6. */
-  get renderer() {
-    return this.legacy.renderer;
+  // ---- HUD pictures --------------------------------------------------------------------------------
+  /** Data URL icon of a model in a team colour (command card, title screen). */
+  icon(modelId: string, color: number, isBuilding: boolean): string {
+    return this.ui.icon(modelId, color, isBuilding);
+  }
+
+  /** The animated 3D portrait shown in the console element. */
+  createPortrait(element: HTMLElement) {
+    this.ui.portrait.attach(element);
+    return this.ui.portrait;
   }
 
   // ---- Game hooks --------------------------------------------------------------------------------
   attachGame(game: GameLike): void {
     this.game = game;
-    this.legacy.attachGame(game);
     this.fx?.clear();
     this.projectileView?.clear();
     this.fx = new Effects(game, this.bscene);
@@ -137,7 +134,6 @@ export class BabylonView {
   }
 
   clearWorld(): void {
-    this.legacy.clearWorld();
     this.fx?.clear();
     this.projectileView?.clear();
     for (const v of this.unitViews.values()) v.dispose();
