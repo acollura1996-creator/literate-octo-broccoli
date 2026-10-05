@@ -3,6 +3,8 @@
 // timings and shapes), built from FxKit instances. Effects are visual only: anything that affects
 // the game (damage, timers) lives in the simulation.
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Color4 } from '@babylonjs/core/Maths/math.color';
+import type { ParticleFx } from './Particles';
 import type { Scene } from '@babylonjs/core/scene';
 import { FxKit, FxMaterial, FxNode, shape as geo } from './FxKit';
 import type { EffectsApi } from '../game/hooks';
@@ -29,6 +31,8 @@ export class Effects implements EffectsApi {
   private list: Entry[] = [];
   readonly kit: FxKit;
   private treeHL: { g: FxNode; ring: FxMaterial; shell: FxMaterial; shells: FxNode[] } | null = null;
+  /** GPU particles layered on the mesh effects (M8); null keeps the original effects only. */
+  particles: ParticleFx | null = null;
 
   constructor(
     readonly game: GameLike,
@@ -144,6 +148,13 @@ export class Effects implements EffectsApi {
       return t < 0.85;
     });
     this.burst(x, 0.3, z, 0xffb347, Math.round(8 * size), 4 * size, 0.08);
+    const p = this.particles;
+    if (p) {
+      const y = this.h(x, z) + 0.4 * size;
+      p.burst('fire', x, y, z, 40 * size, size);
+      p.burst('smoke', x, y + 0.3, z, 14 * size, size);
+      p.burst('sparks', x, y, z, 30 * size);
+    }
   }
 
   /** Brief flash at a gun's muzzle. */
@@ -284,6 +295,12 @@ export class Effects implements EffectsApi {
       return t < 9;
     });
     for (let i = 0; i < 4; i++) this.later(i * 0.15, () => this.burst(x, 1, z, 0xffb347, 18, 9, 0.18, 1.2));
+    const p = this.particles;
+    if (p) {
+      p.burst('nukeFire', x, y + 2, z, 220, Math.max(1, R / 6));
+      p.burst('sparks', x, y + 1, z, 120, 2);
+      p.stream('nukeSmoke', new Vector3(x, y + 2, z), 40, 4, Math.max(1, R / 6));
+    }
   }
 
   /** Green/red arrows on the ground where an order was given. */
@@ -329,12 +346,14 @@ export class Effects implements EffectsApi {
   holyLight(target: Pos): void {
     this.beam(target.x, target.z, 0xfff3a0, 7, 0.75, 1.0);
     this.burst(target.x, 0.6, target.z, 0xfff3a0, 14, 2.5);
+    if (this.visible(target.x, target.z)) this.particles?.burst('sparkle', target.x, this.h(target.x, target.z) + 0.3, target.z, 60, 1, new Color4(1, 0.96, 0.65, 1));
   }
 
   levelUp(h: Pos): void {
     this.beam(h.x, h.z, 0xffd700, 9, 0.9, 1.4);
     this.ring(h.x, h.z, 0xffd700, 2.5, 1.0);
     this.burst(h.x, 1, h.z, 0xffe680, 20, 3);
+    if (this.visible(h.x, h.z)) this.particles?.burst('sparkle', h.x, this.h(h.x, h.z) + 0.3, h.z, 90, 1.2, new Color4(1, 0.85, 0.25, 1), 1.3);
   }
 
   // -------------------------------------------------------------- spells
@@ -361,6 +380,7 @@ export class Effects implements EffectsApi {
       return t < 1.0;
     });
     this.later(0.45, () => this.ring(x, z, 0x3f7fbf, r, 0.4, r * 0.9, 0.45));
+    this.particles?.stream('snow', new Vector3(x, this.h(x, z) + 7, z), 320, 0.8, 1, r);
   }
 
   /** A falling meteor (the impact itself is timed by the simulation, which calls onImpact). */
@@ -379,6 +399,7 @@ export class Effects implements EffectsApi {
     const dur = 0.7;
     let hit = false;
     g.visible = this.visible(x, z);
+    if (g.visible) this.particles?.stream('trail', g.position, 140, dur);
     this.add(g, (t) => {
       const k = Math.min(1, t / dur);
       g.position.set(sx + (x - sx) * k, sy + (gy - sy) * k, sz + (z - sz) * k);

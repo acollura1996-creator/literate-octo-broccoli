@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M7 are done; see section 3.
+Status: **in progress.** Milestones M1–M8 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -360,13 +360,43 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - The ambient volumes follow day and night.
     - Mute silences the engine.
     - The console is clean.
-- [ ] **M8 – Visual upgrade (the Reforged look).**
-  - Painterly triplanar texture plugin (D3) and a team-colour shader.
-  - `CascadedShadowGenerator` with soft PCF shadows, SSAO2, and a `GlowLayer` for emissive parts and spells.
-  - `DefaultRenderingPipeline`: bloom, **ACES tone mapping**, colour grading (`ColorCurves`/LUT), FXAA, plus distance fog (`scene.fogMode`).
-  - `GPUParticleSystem` for spells, explosions, fire, smoke and the nuke.
-  - Day/night colour grading.
-  - Quality presets (Low/Medium/High) in the options menu.
+- [x] **M8 – Visual upgrade (the Reforged look).** `src/babylon/Graphics.ts`, `Painterly.ts`, `Particles.ts`.
+  - [x] Painterly triplanar texture plugin (D3).
+    - One tileable 256 × 256 texture is generated at load, with four painted patterns: stone blotches and cracks, wood grain, cloth weave, brush strokes.
+    - `PainterlyPlugin` samples it triplanar in object space (normals from screen-space derivatives, as the models are flat shaded), so paint sticks to moving units and the baked models need no UVs.
+    - Each material mixes the patterns according to its kind: exact palette colours first, then hue, saturation and value; team-coloured parts count as cloth.
+    - Applied to every model (the HUD's icons and portrait too), trees, rocks and bushes.
+  - [x] Team-colour shader: done in M4 (`TeamColorPlugin`, one material and draw call per part for every team); the paint applies on top.
+  - [x] `CascadedShadowGenerator` with PCF filtering: 2 cascades at 1024 on Medium, 3 cascades at 2048 (high-quality PCF) on High.
+    - Casters and receivers come from the bake's castShadow / receiveShadow flags. `ModelLibrary.onCaster` registers each new instance and removes it when disposed.
+    - Trees, rocks and bushes cast shadows; the ground receives them.
+  - [x] `SSAO2RenderingPipeline` on High (half resolution, 12 samples).
+  - [x] `GlowLayer` for emissive parts (Medium and High).
+  - [x] `DefaultRenderingPipeline`.
+    - A half-float HDR target with ACES tone mapping, contrast, `ColorCurves`, bloom (threshold 0.82), sharpen and a light vignette.
+    - FXAA on Medium, 4× MSAA on High.
+    - StandardMaterial writes linear colour through its `IMAGEPROCESSINGPOSTPROCESS` path. The plugins follow:
+      - the fog-of-war factor is linearized;
+      - lit colour may exceed 1 so the tone mapping rolls highlights off;
+      - unlit translucent overlays use alpha^1.5, because linear blending makes them look much stronger;
+      - additive effects are brightened so spells feed the bloom.
+    - The water shader outputs linear colour too.
+    - With HDR the sun is 25 % stronger for more contrast between light and shade.
+  - [x] Distance haze: linear scene fog from 1.05× to 3.2× the camera distance (none in the foreground, about a fifth at the top of the screen at any zoom). It is coloured by the time of day, and the water gets the same.
+  - [x] `GPUParticleSystem`, with the CPU `ParticleSystem` as fallback. Sprites are drawn procedurally; systems are pooled per kind; the quality preset scales the particle counts.
+    - Fire, smoke and sparks on explosions.
+    - The nuke's fireball and rising smoke column, and the meteor's fire trail.
+    - Blizzard snow, and sparkles for Holy Light and level-ups.
+    - New: buildings below half health burn and smoke as in Warcraft III, more fiercely closer to collapse (the 24 nearest visible ones).
+  - [x] Day/night colour grading.
+    - Keyframed `ColorCurves` and exposure: neutral, slightly warm days, golden hour at dawn and before the 18:00 nightfall, lifted nights.
+    - A moonlight post-process at night maps the image onto a blue luminance ramp, while bright saturated lights (fires, magic, team colours) keep their colour. `ColorCurves` can't do this: their tint multiplies, so green grass stays green.
+  - [x] Quality presets in the game menu (Babylon renderer), saved between sessions; `?quality=low|medium|high` overrides them.
+    - **Low** is the original look: no post-processing, no paint, no shadows.
+    - **Medium** adds HDR, tone mapping, grading, bloom, haze, glow, paint and 2 shadow cascades.
+    - **High** adds 3 sharper cascades, SSAO and MSAA.
+  - Verified with screenshots against Low and three.js: home base, citadel (wide and close), dusk, night, zoomed out, close-ups, effects and a burning building. Runtime switching through the menu works, with a clean console.
+  - In this scene High draws about 7× as many calls as Low (the shadow cascades, SSAO's geometry pass and the glow layer each redraw the scene). M9 addresses this.
 - [ ] **M9 – Performance.**
   - Target: 60 fps with 200+ units on screen.
   - Instanced unit parts (one draw call per part type across all units and teams).

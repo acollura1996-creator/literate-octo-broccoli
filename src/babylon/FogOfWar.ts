@@ -118,8 +118,15 @@ export class FogOfWarPlugin extends MaterialPluginBase {
       CUSTOM_FRAGMENT_DEFINITIONS: `#ifdef FOGOFWAR
         uniform sampler2D fowSampler;
       #endif`,
+      // With the HDR pipeline (IMAGEPROCESSINGPOSTPROCESS) the colour is linear at this point, so
+      // the fog factor is too: the darkening looks the same once the pipeline gamma-encodes.
       CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR: `#ifdef FOGOFWAR
-        color.rgb *= texture2D(fowSampler, vPositionW.xz / fowWorldSize).r;
+        float fowV = texture2D(fowSampler, vPositionW.xz / fowWorldSize).r;
+      #ifdef IMAGEPROCESSINGPOSTPROCESS
+        color.rgb *= pow(fowV, 2.2);
+      #else
+        color.rgb *= fowV;
+      #endif
       #endif`,
     };
   }

@@ -266,6 +266,12 @@ function bindCameraOptions() {
     s.edgeScroll = $('opt-edge').checked;
     input.saveSettings();
   });
+  // Graphics presets (Babylon renderer only).
+  if (typeof view.setQuality === 'function') {
+    $('opt-quality-row').classList.remove('hidden');
+    $('opt-quality').value = view.quality;
+    $('opt-quality').addEventListener('change', () => view.setQuality($('opt-quality').value));
+  }
 }
 
 function toggleMenu() {

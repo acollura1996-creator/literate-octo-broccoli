@@ -19,6 +19,7 @@ import type { Scene } from '@babylonjs/core/scene';
 import '@babylonjs/core/Meshes/instancedMesh';
 import '@babylonjs/loaders/glTF/2.0';
 import modelsUrl from '../generated/models.glb?url';
+import { classifyColor, paint } from './Painterly';
 import { TeamColorPlugin, type TeamFactor } from './TeamColor';
 
 /** Animation handles (the parts contract of src/render/models.js), resolved to nodes. */
@@ -58,6 +59,8 @@ export interface ModelInstance {
 }
 
 const toGamma = (c: number): number => Math.pow(Math.max(0, c), 1 / 2.2);
+/** Exact sRGB encoding (three.js's), to recognise palette colours. */
+const linearToSrgb = (c: number): number => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
 
 function teamColor4(hex: number): Color4 {
   return new Color4(((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255, 1);
@@ -82,6 +85,10 @@ export class ModelLibrary {
   private readonly teamMeshes = new Set<Mesh>();
   private readonly materialInfo = new Map<StandardMaterial, MaterialInfo>();
   private readonly ghostMaterials = new Map<string, StandardMaterial>();
+  /** Source meshes that receive shadows (instances follow their source). */
+  readonly receivers = new Set<Mesh>();
+  /** Called for every new instance of a shadow-casting part (the shadow generator's list). */
+  onCaster: ((mesh: AbstractMesh) => void) | null = null;
 
   private constructor(private readonly scene: Scene) {}
 
@@ -100,6 +107,12 @@ export class ModelLibrary {
         radius: extras.radius ?? 0.5,
         parts: extras.parts ?? {},
       });
+    }
+    // Shadows (M8): the bake carries three.js's castShadow / receiveShadow per mesh node.
+    for (const node of container.meshes) {
+      const ex = node.metadata?.gltf?.extras as { receiveShadow?: boolean } | undefined;
+      const src = node instanceof InstancedMesh ? node.sourceMesh : node;
+      if (ex?.receiveShadow && src instanceof Mesh) lib.receivers.add(src);
     }
     // Templates never render themselves: only their copies do.
     for (const m of container.meshes) {
@@ -142,6 +155,12 @@ export class ModelLibrary {
         team: extras.team ?? null,
         teamEmissive: extras.teamEmissive ?? null,
       });
+      // Hand-painted surface by colour (team-coloured parts are cloth); not on glass or glowing parts.
+      const glowing = Math.max(p.emissiveColor.r, p.emissiveColor.g, p.emissiveColor.b) > 0.25;
+      if (p.alpha >= 1 && !glowing) {
+        const c = p.albedoColor;
+        paint(m, extras.team ? 'cloth' : classifyColor(linearToSrgb(c.r), linearToSrgb(c.g), linearToSrgb(c.b)));
+      }
       if (extras.team || extras.teamEmissive) {
         new TeamColorPlugin(m, extras.team ?? null, extras.teamEmissive ?? null);
         if (extras.team) m.diffuseColor = Color3.White();
@@ -219,6 +238,7 @@ export class ModelLibrary {
         const inst: InstancedMesh = mesh.createInstance(src.name);
         inst.isPickable = false;
         if (this.teamMeshes.has(mesh)) inst.instancedBuffers.color = color;
+        if ((src.metadata?.gltf?.extras as { castShadow?: boolean } | undefined)?.castShadow) this.onCaster?.(inst);
         meshes.push(inst);
         node = inst;
       } else {

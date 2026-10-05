@@ -236,7 +236,10 @@ tools/
 Testing helpers (dev server only): `?autostart=hero:paladin` or `?autostart=empire` skips the
 title screen, and `&rivals=hero-ranger-ally,empire,random` sets the computer generals
 (`path[-hero][-side]` each). `&reveal=1` removes the fog of war, `&aiplayer=1` lets the AI play
-for you, and `&speed=4` speeds up the game.
+for you, and `&speed=4` speeds up the game. With the Babylon.js renderer, `&quality=low|medium|high`
+picks the graphics preset (also in the in-game Menu): Low is the classic flat-coloured look, Medium
+and High add HDR tone mapping, colour grading, bloom, painted textures, shadows, ambient occlusion
+and GPU particles.
 
 ## Notes
 

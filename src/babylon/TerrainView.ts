@@ -13,7 +13,7 @@ import { MaterialPluginBase } from '@babylonjs/core/Materials/materialPluginBase
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
-import { Matrix, Vector2 } from '@babylonjs/core/Maths/math.vector';
+import { Matrix, Vector2, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import type { Material } from '@babylonjs/core/Materials/material';
 import type { MaterialDefines } from '@babylonjs/core/Materials/materialDefines';
@@ -24,6 +24,7 @@ import '@babylonjs/core/Meshes/thinInstanceMesh';
 import { WATER_LEVEL } from '../world/terrain.js';
 import { makeDetailCanvas, makeCobbleCanvas, roadGeometry } from '../world/groundArt.js';
 import { FogOfWar } from './FogOfWar';
+import { paint, type PaintKind } from './Painterly';
 import type { GameLike, TerrainLike, TreeLike, DoodadLike, RoadsLike } from './types';
 
 const CHUNK = 32;
@@ -101,6 +102,11 @@ varying vec3 vW;
 uniform float uTime;
 uniform vec2 uWorldSize;
 uniform sampler2D uFogTex;
+// HDR pipeline (M8): output linear colour and add the distance haze.
+uniform float uLinear;
+uniform vec3 uCamPos;
+uniform vec3 uHazeColor;
+uniform vec2 uHazeRange;
 void main() {
   float w1 = sin(vW.x * 1.3 + uTime * 1.1) * sin(vW.z * 1.1 - uTime * 0.9);
   float w2 = sin((vW.x + vW.z) * 2.3 + uTime * 1.7);
@@ -109,7 +115,14 @@ void main() {
   vec3 light = vec3(0.32, 0.6, 0.72);
   vec3 col = mix(deep, light, 0.45 + s * 0.25);
   col += vec3(0.9) * smoothstep(0.62, 0.75, s) * 0.35;
-  col *= texture2D(uFogTex, vW.xz / uWorldSize).r;
+  float fog = texture2D(uFogTex, vW.xz / uWorldSize).r;
+  if (uLinear > 0.5) {
+    float h = clamp((uHazeRange.y - distance(vW, uCamPos)) / (uHazeRange.y - uHazeRange.x), 0.0, 1.0);
+    col = mix(uHazeColor, col, h);
+    col = pow(col, vec3(2.2)) * pow(fog, 2.2);
+  } else {
+    col *= fog;
+  }
   gl_FragColor = vec4(col, 0.78);
 }`;
 
@@ -171,6 +184,9 @@ export class TerrainView {
   private readonly treeSlots = new Map<TreeLike, TreeSlot>();
   private felledSeen = 0;
   private water!: ShaderMaterial;
+  /** Meshes that cast and receive shadows (trees, rocks, bushes) and the ground, which receives. */
+  readonly casters: Mesh[] = [];
+  readonly receivers: Mesh[] = [];
 
   constructor(scene: Scene, terrain: TerrainLike) {
     this.scene = scene;
@@ -179,6 +195,14 @@ export class TerrainView {
     this.buildWater();
     this.buildTrees();
     this.buildDoodads();
+  }
+
+  /** HDR pipeline state for the water shader (linear output and distance haze). */
+  setWaterGrading(linear: boolean, camPos: { x: number; y: number; z: number }, haze: { color: Color3; start: number; end: number }): void {
+    this.water.setFloat('uLinear', linear ? 1 : 0);
+    this.water.setVector3('uCamPos', new Vector3(camPos.x, camPos.y, camPos.z));
+    this.water.setColor3('uHazeColor', haze.color);
+    this.water.setVector2('uHazeRange', new Vector2(haze.start, Math.max(haze.start + 1, haze.end)));
   }
 
   /** Per frame: animate the water and turn newly felled trees into stumps. */
@@ -250,6 +274,7 @@ export class TerrainView {
     data.applyToMesh(mesh, false);
     mesh.isPickable = false;
     mesh.freezeWorldMatrix();
+    this.receivers.push(mesh);
 
     const material = this.keep(mat(this.scene, 'ground', Color3.White()));
     const canvas = t.textureCanvas ?? t.paintTexture();
@@ -271,7 +296,7 @@ export class TerrainView {
         { vertexSource: WATER_VERTEX, fragmentSource: WATER_FRAGMENT },
         {
           attributes: ['position'],
-          uniforms: ['world', 'viewProjection', 'uTime', 'uWorldSize'],
+          uniforms: ['world', 'viewProjection', 'uTime', 'uWorldSize', 'uLinear', 'uCamPos', 'uHazeColor', 'uHazeRange'],
           samplers: ['uFogTex'],
           needAlphaBlending: true,
         },
@@ -280,6 +305,10 @@ export class TerrainView {
     material.disableDepthWrite = true;
     material.setVector2('uWorldSize', new Vector2(S, S));
     material.setFloat('uTime', 0);
+    material.setFloat('uLinear', 0);
+    material.setVector3('uCamPos', Vector3.Zero());
+    material.setColor3('uHazeColor', Color3.Black());
+    material.setVector2('uHazeRange', new Vector2(1, 2));
     mesh.material = material;
     this.water = material;
   }
@@ -304,6 +333,9 @@ export class TerrainView {
     ];
     const trunkMats = [this.keep(mat(sc, 'trunk', Color3.FromHexString('#6b4a2b'))), this.keep(mat(sc, 'trunk-dead', Color3.FromHexString('#3d3236')))];
     const leafMats = [this.keep(mat(sc, 'leaves', Color3.White())), this.keep(mat(sc, 'leaves-dead', Color3.FromHexString('#4a3a40')))];
+    for (const m of trunkMats) paint(m, 'wood');
+    paint(leafMats[0]!, 'foliage');
+    paint(leafMats[1]!, 'wood');
     for (const b of [trunkBase, ...canopyBases]) {
       b.setEnabled(false);
       this.keep(b);
@@ -338,6 +370,8 @@ export class TerrainView {
         m.isPickable = false;
         m.thinInstanceSetBuffer('matrix', matrices.slice(), 16, false);
         m.thinInstanceRefreshBoundingInfo(false);
+        this.casters.push(m);
+        this.receivers.push(m);
       }
       canopy.thinInstanceSetBuffer('color', colors, 4, true);
     }
@@ -355,7 +389,11 @@ export class TerrainView {
   private buildDoodads(): void {
     const sc = this.scene;
     const d = this.terrain.doodads ?? this.terrain.scatterDoodads();
-    const white = this.keep(mat(sc, 'doodad', Color3.White()));
+    const doodadMat = (kind: PaintKind | null): StandardMaterial => {
+      const m = this.keep(mat(sc, 'doodad', Color3.White()));
+      if (kind) paint(m, kind);
+      return m;
+    };
     const rock = toRadius(CreatePolyhedron('rock', { type: 2, size: 1, flat: true }, sc), 1);
     const bush = CreateIcoSphere('bush', { radius: 1, subdivisions: 1, flat: true }, sc);
     const petals: Mesh[] = [];
@@ -364,9 +402,9 @@ export class TerrainView {
       petals.push(bake(toRadius(CreatePolyhedron('petal', { type: 1, size: 1, flat: true }, sc), 0.07), Matrix.Translation(Math.cos(a) * 0.22, 0.06, Math.sin(a) * 0.22)));
     }
     const flower = merged('flowers', petals);
-    const place = (mesh: Mesh, list: DoodadLike[]): void => {
+    const place = (mesh: Mesh, list: DoodadLike[], kind: PaintKind | null): void => {
       this.keep(mesh);
-      mesh.material = white;
+      mesh.material = doodadMat(kind);
       mesh.isPickable = false;
       if (!list.length) {
         mesh.setEnabled(false);
@@ -381,10 +419,12 @@ export class TerrainView {
       mesh.thinInstanceSetBuffer('matrix', matrices, 16, true);
       mesh.thinInstanceSetBuffer('color', colors, 4, true);
       mesh.thinInstanceRefreshBoundingInfo(false);
+      this.casters.push(mesh);
+      this.receivers.push(mesh);
     };
-    place(rock, d.rocks);
-    place(bush, d.bushes);
-    place(flower, d.flowers);
+    place(rock, d.rocks, 'stone');
+    place(bush, d.bushes, 'foliage');
+    place(flower, d.flowers, null);
   }
 }
 

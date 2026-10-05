@@ -22,6 +22,8 @@ import { Effects } from './Effects';
 import { ProjectileView } from './Projectiles';
 import { Previews } from './Previews';
 import { UiRenderer } from './UiRenderer';
+import { Graphics, QUALITIES, type Quality } from './Graphics';
+import { ParticleFx, type BurningSite } from './Particles';
 import type { GameLike, ItemLike, UnitLike } from './types';
 
 export interface ScreenPoint {
@@ -31,6 +33,21 @@ export interface ScreenPoint {
 }
 
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+
+const QUALITY_KEY = 'he3d.quality';
+
+/** The saved quality preset; `?quality=low|medium|high` overrides it (tests, screenshots). */
+function savedQuality(): Quality {
+  const q = new URLSearchParams(location.search).get('quality');
+  if (q && (QUALITIES as string[]).includes(q)) return q as Quality;
+  try {
+    const s = localStorage.getItem(QUALITY_KEY);
+    if (s && (QUALITIES as string[]).includes(s)) return s as Quality;
+  } catch {
+    /* storage unavailable */
+  }
+  return 'high';
+}
 
 export class BabylonView {
   readonly canvas: HTMLCanvasElement;
@@ -43,6 +60,11 @@ export class BabylonView {
 
   private readonly hemi: HemisphericLight;
   private readonly sun: DirectionalLight;
+  /** Post-processing, shadows and quality presets (M8). */
+  readonly graphics: Graphics;
+  /** GPU particles (explosions, spells, burning buildings). */
+  readonly particles: ParticleFx;
+  private burnCheck = 0;
   private terrainView: TerrainView | null = null;
   private roadView: RoadView | null = null;
   private fog: FogOfWar | null = null;
@@ -74,8 +96,13 @@ export class BabylonView {
 
     this.hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
     this.sun = new DirectionalLight('sun', new Vector3(-0.4, -1, -0.4), scene);
+    this.graphics = new Graphics(scene, this.cam.camera, this.sun);
+    this.graphics.setQuality(savedQuality());
+    this.particles = new ParticleFx(scene, () => this.graphics.particleDensity);
     this.ready = Promise.all([ModelLibrary.load(scene), UiRenderer.create(engine)]).then(([lib, ui]) => {
       this.models = lib;
+      lib.onCaster = (m) => this.graphics.addCaster(m);
+      for (const m of lib.receivers) this.graphics.addReceiver(m);
       this.unitAssets = new UnitAssets(scene, lib);
       this.previews = new Previews(scene, lib);
       this.ui = ui;
@@ -83,6 +110,21 @@ export class BabylonView {
 
     this.resize();
     (window as unknown as { __babylon: unknown }).__babylon = { engine, scene, view: this };
+  }
+
+  // ---- Graphics quality ----------------------------------------------------------------------------
+  get quality(): Quality {
+    return this.graphics.quality;
+  }
+
+  /** 'low' | 'medium' | 'high' (saved for the next session). */
+  setQuality(q: Quality): void {
+    this.graphics.setQuality(q);
+    try {
+      localStorage.setItem(QUALITY_KEY, this.graphics.quality);
+    } catch {
+      /* storage unavailable */
+    }
   }
 
   // ---- HUD pictures --------------------------------------------------------------------------------
@@ -102,7 +144,9 @@ export class BabylonView {
     this.game = game;
     this.fx?.clear();
     this.projectileView?.clear();
+    this.particles.clear();
     this.fx = new Effects(game, this.bscene);
+    this.fx.particles = this.particles;
     this.projectileView = new ProjectileView(game as never, this.fx);
   }
 
@@ -135,6 +179,7 @@ export class BabylonView {
 
   clearWorld(): void {
     this.fx?.clear();
+    this.particles.clear();
     this.projectileView?.clear();
     for (const v of this.unitViews.values()) v.dispose();
     this.unitViews.clear();
@@ -163,9 +208,16 @@ export class BabylonView {
     if (!g) return;
     this.updateWorld(g);
     this.updateLighting(g.timeOfDay);
+    this.graphics.update(g.timeOfDay, this.cam.distance);
     for (const v of this.unitViews.values()) v.sync(dt, g.time);
     for (const v of this.itemViews.values()) v.sync(dt, g.time);
     this.fx?.update(dt);
+    this.particles.update(dt);
+    this.burnCheck -= dt;
+    if (this.burnCheck <= 0) {
+      this.burnCheck = 0.25;
+      this.particles.syncBurning(this.burningSites(g));
+    }
     this.projectileView?.update(dt);
     this.cam.update(g.terrain, g.shakeAmount);
     this.engine.beginFrame();
@@ -183,6 +235,8 @@ export class BabylonView {
     if (this.terrainView?.terrain !== g.terrain) {
       this.terrainView?.dispose();
       this.terrainView = new TerrainView(this.bscene, g.terrain);
+      for (const m of this.terrainView.casters) this.graphics.addCaster(m);
+      for (const m of this.terrainView.receivers) this.graphics.addReceiver(m);
       this.buildCitadel(g);
     }
     if (this.roadView?.roads !== g.roads) {
@@ -190,7 +244,25 @@ export class BabylonView {
       this.roadView = g.roads ? new RoadView(this.bscene, g.roads, g) : null;
     }
     this.terrainView.update(g.time);
+    this.terrainView.setWaterGrading(this.graphics.linear, this.cam.camera.position, this.graphics.haze);
     this.roadView?.update();
+  }
+
+  /**
+   * Buildings below half health burn, more fiercely the closer they are to falling (only where
+   * the player can see them), nearest the camera first.
+   */
+  private burningSites(g: GameLike): BurningSite[] {
+    const sites: Array<BurningSite & { d: number }> = [];
+    const t = this.cam.target;
+    for (const v of this.unitViews.values()) {
+      const u = v.unit as unknown as { id: number; x: number; z: number; hp: number; maxHp: number; isBuilding?: boolean; dead?: boolean; underConstruction?: boolean; def: { footprint?: number; wall?: boolean } };
+      if (!u.isBuilding || u.dead || u.underConstruction || u.def.wall || u.hp >= u.maxHp * 0.5) continue;
+      if (!g.fog.isVisible(u.x, u.z)) continue;
+      const size = (u.def.footprint ?? 2) / 2;
+      sites.push({ id: u.id, x: u.x, y: g.terrain.heightAt(u.x, u.z) + (v.height ?? 1.5) * 0.8, z: u.z, damage: 1 - (u.hp / u.maxHp) * 2, size, d: Math.hypot(u.x - t.x, u.z - t.z) });
+    }
+    return sites.sort((a, b) => a.d - b.d);
   }
 
   /** Kalenden's citadel walls and towers, from the placements in game.citadelWalls. */
@@ -211,9 +283,9 @@ export class BabylonView {
   private updateLighting(hour: number): void {
     const dayness = clamp01(Math.sin(((hour - 6) / 12) * Math.PI) * 1.4 + 0.25);
     const night = 1 - dayness;
-    this.sun.intensity = (0.55 + dayness * 1.75) / Math.PI;
+    this.sun.intensity = ((0.55 + dayness * 1.75) / Math.PI) * this.graphics.keyBoost;
     this.sun.diffuse.set(1 - night * 0.45, 0.95 - night * 0.3, 0.85 + night * 0.15);
-    this.hemi.intensity = (0.75 + dayness * 0.55) / Math.PI;
+    this.hemi.intensity = ((0.75 + dayness * 0.55) / Math.PI) * this.graphics.fillBoost;
     this.hemi.diffuse.set(0.81 - night * 0.35, 0.9 - night * 0.3, 1.0);
     this.hemi.groundColor.set(0.35 - night * 0.15, 0.29 - night * 0.12, 0.19 + night * 0.05);
     this.hemi.specular = Color3.Black();
