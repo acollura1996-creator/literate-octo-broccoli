@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { UnitView, ItemView } from './unitview.js';
 import { Effects } from './effects.js';
 import { Projectiles } from './projectiles.js';
-import { TerrainView, RoadMesh, FogTexture } from './terrainView.js';
+import { TerrainView, RoadMesh, FogTexture, buildCitadel } from './terrainView.js';
 import { MAP_SIZE } from '../world/layout.js';
 import { ITEMS } from '../data/items.js';
 
@@ -204,7 +204,10 @@ export class View {
 
   /** Build the terrain, road and fog visuals for a new game, then keep them in sync. */
   updateWorld(g, time) {
-    if (this.terrainView?.terrain !== g.terrain) this.terrainView = new TerrainView(g.terrain, this.scene);
+    if (this.terrainView?.terrain !== g.terrain) {
+      this.terrainView = new TerrainView(g.terrain, this.scene);
+      buildCitadel(g.citadelWalls ?? [], this.scene);
+    }
     if (this.roadMesh?.roads !== g.roads) this.roadMesh = g.roads ? new RoadMesh(g.roads, g, this.scene) : null;
     if (this.fogTexture?.fog !== g.fog) this.fogTexture = new FogTexture(g.fog);
     this.terrainView.update(time);

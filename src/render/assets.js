@@ -117,17 +117,5 @@ export function mesh(geometry, material, x = 0, y = 0, z = 0, parent = null) {
   return m;
 }
 
-/** Warcraft III player colors. */
-export const TEAM_COLORS = {
-  red: 0xff0303,
-  blue: 0x0042ff,
-  teal: 0x1ce6b9,
-  purple: 0x540081,
-  yellow: 0xfffc01,
-  orange: 0xfe8a0e,
-  green: 0x20c000,
-  pink: 0xe55bb0,
-  gray: 0x959697,
-  neutral: 0x3a3a3a,
-  kalenden: 0x2b2b2b,
-};
+// Player colours live with the engine-free data; re-exported for the existing imports.
+export { TEAM_COLORS } from '../data/colors.js';

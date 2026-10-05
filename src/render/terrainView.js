@@ -5,6 +5,7 @@ import { MAP_SIZE } from '../world/layout.js';
 import { WATER_LEVEL } from '../world/terrain.js';
 import { makeDetailCanvas, makeCobbleCanvas, roadGeometry } from '../world/groundArt.js';
 import { fogUniforms, patchFog, mat, geo } from './assets.js';
+import { createModel } from './models.js';
 
 export class TerrainView {
   constructor(terrain, scene) {
@@ -340,4 +341,23 @@ function mergeGeometries(geoms) {
   out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   out.computeBoundingSphere();
   return out;
+}
+
+/** Kalenden's citadel walls and towers, from the placements in game.citadelWalls. */
+export function buildCitadel(walls, scene) {
+  const group = new THREE.Group();
+  for (const w of walls) {
+    const m = createModel(w.model, w.color);
+    m.root.position.set(w.x, w.y, w.z);
+    m.root.rotation.y = w.rotY;
+    m.root.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
+    group.add(m.root);
+  }
+  scene.add(group);
+  return group;
 }

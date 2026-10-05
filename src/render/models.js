@@ -364,7 +364,7 @@ function nodeAt(root, path) {
   return n;
 }
 
-function buildTemplate(modelId, teamColor) {
+export function buildTemplate(modelId, teamColor) {
   const model = BUILDERS[modelId](teamColor);
   const parts = model.parts ?? {};
   normalizeParts(parts);

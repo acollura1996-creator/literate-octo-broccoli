@@ -308,14 +308,14 @@ function startGame() {
   $('screen-title').classList.add('hidden');
   $('screen-loading').classList.remove('hidden');
   $('hud').classList.add('hidden');
-  setTimeout(() => {
-    try {
-      createGame();
-    } catch (e) {
+  // The Babylon view loads its models first (view.ready); the three.js view has nothing to wait for.
+  Promise.resolve(view.ready)
+    .then(() => new Promise((resolve) => setTimeout(resolve, 30)))
+    .then(createGame)
+    .catch((e) => {
       console.error(e);
       $('screen-loading').querySelector('.loading-text').textContent = `Failed to start: ${e.message}`;
-    }
-  }, 30);
+    });
 }
 
 function soundHook(name, vol = 1, x, z) {
@@ -330,7 +330,6 @@ function soundHook(name, vol = 1, x, z) {
 
 function createGame() {
   const hooks = {
-    scene: view.scene,
     onUnitAdded: (u) => view.addUnit(u),
     onUnitRemoved: (u) => view.removeUnit(u),
     onUnitChanged: (u, modelChanged) => view.changeUnit(u, modelChanged),

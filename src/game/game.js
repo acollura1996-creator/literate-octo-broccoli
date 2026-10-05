@@ -1,5 +1,4 @@
 // The Game: owns the world state and runs the simulation.
-import * as THREE from 'three';
 import { Unit } from './unit.js';
 import { UNITS, ATTACK_TABLE, UPGRADES, RESEARCH_IDS, researchCost, researchTime, researchCap, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES, AGES } from '../data/units.js';
 import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.js';
@@ -13,8 +12,7 @@ import { GameEvents } from './events.js';
 import { Terrain } from '../world/terrain.js';
 import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, CITY_RADIUS } from '../world/layout.js';
 import { Fog } from './fog.js';
-import { TEAM_COLORS } from '../render/assets.js';
-import { createModel } from '../render/models.js';
+import { TEAM_COLORS, lightenHex } from '../data/colors.js';
 import { CreepManager } from '../ai/creeps.js';
 import { LegionManager } from '../ai/legion.js';
 import { GeneralAI } from '../ai/general.js';
@@ -34,12 +32,11 @@ export class Game {
    * opts: { mode: 'hero'|'empire', heroId, difficulty: 'easy'|'normal'|'hard',
    *         rivals: [{ mode: 'random'|'hero'|'empire', hero: 'random'|heroId, team: 'rival'|'ally' }] }
    *   (legacy: opponents (1-3) and diplomacy: 'ffa'|'allied' are still accepted)
-   * hooks: { scene, onUnitAdded(u), onUnitRemoved(u), onUnitChanged(u), fx, projectiles, sound(name, vol) }
+   * hooks: { onUnitAdded(u), onUnitRemoved(u), onUnitChanged(u), fx, projectiles, sound(name, vol) }
    */
   constructor(opts, hooks) {
     this.opts = opts;
     this.hooks = hooks;
-    this.scene = hooks.scene;
     this.time = 0;
     this.frame = 0;
     this.units = [];
@@ -275,24 +272,14 @@ export class Game {
     }
   }
 
+  /** Placement of Kalenden's citadel walls and towers (drawn by the renderers; blocked separately). */
   buildCitadelWalls() {
     const half = CITADEL.half;
     const g = CITADEL.gateHalf;
     const lo = CENTER - half;
     const hi = CENTER + half;
-    const group = new THREE.Group();
-    const place = (id, x, z, rotY) => {
-      const m = createModel(id, TEAM_COLORS.kalenden);
-      m.root.position.set(x, this.terrain.heightAt(x, z) - 0.05, z);
-      m.root.rotation.y = rotY;
-      m.root.traverse((o) => {
-        if (o.isMesh) {
-          o.castShadow = true;
-          o.receiveShadow = true;
-        }
-      });
-      group.add(m.root);
-    };
+    const walls = [];
+    const place = (model, x, z, rotY) => walls.push({ model, x, y: this.terrain.heightAt(x, z) - 0.05, z, rotY, color: TEAM_COLORS.kalenden });
     // Segments are 2 long along X; place along each side.
     for (let i = lo; i < hi; i += 2) {
       const mid = i + 1;
@@ -310,8 +297,7 @@ export class Game {
       place('wall_tower', lo + 0.5, CENTER + s * (g + 0.6), 0);
       place('wall_tower', hi + 0.5, CENTER + s * (g + 0.6), 0);
     }
-    this.scene.add(group);
-    this.wallGroup = group;
+    this.citadelWalls = walls;
   }
 
   // -------------------------------------------------------------- relations
@@ -330,8 +316,7 @@ export class Game {
   }
   /** CSS color for a player's name in messages (team colors lightened to read on dark UI). */
   nameColor(p) {
-    const c = new THREE.Color(p.color).lerp(new THREE.Color(0xffffff), 0.35);
-    return `#${c.getHexString()}`;
+    return lightenHex(p.color, 0.35);
   }
   /** A message about another general's doings, in their color. */
   notify(p, text) {

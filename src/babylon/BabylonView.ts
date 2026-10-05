@@ -4,8 +4,8 @@
 //
 // Migration strategy: the parts not ported yet keep running on a hidden three.js view (`legacy`),
 // which is updated every frame but never drawn. It still supplies what the game and HUD expect
-// from it today (unit visibility and model heights, effect timers, icons). Each milestone moves
-// another part onto Babylon; MIGRATION.md tracks what is left, and M12 removes `legacy`.
+// from it today (effect and projectile timers, command-card icons). Each milestone moves another
+// part onto Babylon; MIGRATION.md tracks what is left, and M12 removes `legacy`.
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
@@ -17,7 +17,10 @@ import { createBabylon } from './engine';
 import { RTSCamera, type GroundPoint } from './RTSCamera';
 import { TerrainView, RoadView } from './TerrainView';
 import { FogOfWar, registerFogOfWar } from './FogOfWar';
-import { UnitMarkers } from './UnitMarkers';
+import { registerLinearLighting } from './Lighting';
+import { ModelLibrary, type ModelInstance } from './ModelLibrary';
+import { UnitAssets, UnitView, ItemView, quatFromEulerXYZ } from './UnitView';
+import { ITEMS } from '../data/items.js';
 import type { GameLike, ItemLike, UnitLike } from './types';
 
 export interface ScreenPoint {
@@ -43,7 +46,13 @@ export class BabylonView {
   private terrainView: TerrainView | null = null;
   private roadView: RoadView | null = null;
   private fog: FogOfWar | null = null;
-  private readonly markers: UnitMarkers;
+  private citadel: ModelInstance[] = [];
+  private models: ModelLibrary | null = null;
+  private unitAssets: UnitAssets | null = null;
+  readonly unitViews = new Map<number, UnitView>();
+  readonly itemViews = new Map<ItemLike, ItemView>();
+  /** Resolves when the baked models are loaded; main.js waits for it before starting a game. */
+  readonly ready: Promise<void>;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -52,12 +61,17 @@ export class BabylonView {
     this.bscene = scene;
     this.cam = new RTSCamera(scene);
     scene.activeCamera = this.cam.camera;
-    // Before any material is created: every material gets the fog-of-war plugin.
+    // Before any material is created: every material gets three.js-style lighting and the fog of
+    // war.
+    registerLinearLighting();
     registerFogOfWar();
 
     this.hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
     this.sun = new DirectionalLight('sun', new Vector3(-0.4, -1, -0.4), scene);
-    this.markers = new UnitMarkers(scene);
+    this.ready = ModelLibrary.load(scene).then((lib) => {
+      this.models = lib;
+      this.unitAssets = new UnitAssets(scene, lib);
+    });
 
     // The hidden three.js view: an offscreen canvas that is never shown or drawn to.
     const off = document.createElement('canvas');
@@ -82,14 +96,6 @@ export class BabylonView {
     return this.legacy.scene;
   }
 
-  get unitViews() {
-    return this.legacy.unitViews;
-  }
-
-  get itemViews() {
-    return this.legacy.itemViews;
-  }
-
   get fx() {
     return this.legacy.fx;
   }
@@ -105,30 +111,40 @@ export class BabylonView {
   }
 
   addUnit(u: UnitLike): void {
-    this.legacy.addUnit(u);
-    this.markers.add(u);
+    const v = new UnitView(u as never, this.game as never, this.unitAssets!);
+    u.view = v;
+    this.unitViews.set(u.id, v);
   }
 
   removeUnit(u: UnitLike): void {
-    this.legacy.removeUnit(u);
-    this.markers.remove(u);
+    this.unitViews.get(u.id)?.dispose();
+    this.unitViews.delete(u.id);
+    u.view = null;
   }
 
   changeUnit(u: UnitLike, modelChanged: boolean): void {
-    this.legacy.changeUnit(u, modelChanged);
+    if (modelChanged) this.unitViews.get(u.id)?.buildModel();
   }
 
   addItem(it: ItemLike): void {
-    this.legacy.addItem(it);
+    const def = (ITEMS as Record<string, { color?: string }>)[(it as { id: string }).id];
+    const color = parseInt((def?.color ?? '#ffd700').replace('#', ''), 16);
+    this.itemViews.set(it, new ItemView(it as never, this.game as never, this.bscene, color));
   }
 
   removeItem(it: ItemLike): void {
-    this.legacy.removeItem(it);
+    this.itemViews.get(it)?.dispose();
+    this.itemViews.delete(it);
   }
 
   clearWorld(): void {
     this.legacy.clearWorld();
-    this.markers.clear();
+    for (const v of this.unitViews.values()) v.dispose();
+    this.unitViews.clear();
+    for (const v of this.itemViews.values()) v.dispose();
+    this.itemViews.clear();
+    for (const c of this.citadel) c.dispose();
+    this.citadel = [];
     this.terrainView?.dispose();
     this.terrainView = null;
     this.roadView?.dispose();
@@ -154,7 +170,8 @@ export class BabylonView {
 
     this.updateWorld(g);
     this.updateLighting(g.timeOfDay);
-    this.markers.sync();
+    for (const v of this.unitViews.values()) v.sync(dt, g.time);
+    for (const v of this.itemViews.values()) v.sync(dt, g.time);
     this.cam.update(g.terrain, g.shakeAmount);
     this.engine.beginFrame();
     this.bscene.render();
@@ -171,6 +188,7 @@ export class BabylonView {
     if (this.terrainView?.terrain !== g.terrain) {
       this.terrainView?.dispose();
       this.terrainView = new TerrainView(this.bscene, g.terrain);
+      this.buildCitadel(g);
     }
     if (this.roadView?.roads !== g.roads) {
       this.roadView?.dispose();
@@ -180,20 +198,27 @@ export class BabylonView {
     this.roadView?.update();
   }
 
+  /** Kalenden's citadel walls and towers, from the placements in game.citadelWalls. */
+  private buildCitadel(g: GameLike): void {
+    for (const c of this.citadel) c.dispose();
+    this.citadel = (g.citadelWalls ?? []).map((w, i) => {
+      const m = this.models!.instantiate(w.model, w.color, `citadel-${i}`);
+      m.root.position.set(w.x, w.y, w.z);
+      m.root.rotationQuaternion = quatFromEulerXYZ(0, w.rotY, 0);
+      return m;
+    });
+  }
+
   /**
-   * Day/night cycle: the same curve as the three.js view.
-   *
-   * three.js lights in linear space (light intensities divided by π) and encodes the result to
-   * sRGB; Babylon's StandardMaterial lights in gamma space. To match three.js brightness, both
-   * lights are scaled so that flat ground receives I^(1/2.2) instead of I. The visual upgrade (M8)
-   * replaces this with a linear pipeline.
+   * Day/night cycle: the same curve and colours as the three.js view. Intensities are three.js's
+   * divided by π (its Lambert BRDF); the LinearLighting plugin gamma-encodes the light per pixel.
    */
   private updateLighting(hour: number): void {
     const dayness = clamp01(Math.sin(((hour - 6) / 12) * Math.PI) * 1.4 + 0.25);
     const night = 1 - dayness;
-    const sunI = (0.55 + dayness * 1.75) / Math.PI;
-    const hemiI = (0.75 + dayness * 0.55) / Math.PI;
+    this.sun.intensity = (0.55 + dayness * 1.75) / Math.PI;
     this.sun.diffuse.set(1 - night * 0.45, 0.95 - night * 0.3, 0.85 + night * 0.15);
+    this.hemi.intensity = (0.75 + dayness * 0.55) / Math.PI;
     this.hemi.diffuse.set(0.81 - night * 0.35, 0.9 - night * 0.3, 1.0);
     this.hemi.groundColor.set(0.35 - night * 0.15, 0.29 - night * 0.12, 0.19 + night * 0.05);
     this.hemi.specular = Color3.Black();
@@ -201,11 +226,6 @@ export class BabylonView {
     const sx = Math.cos(ang) * 30;
     const sy = 45 + Math.abs(Math.sin(ang)) * 20;
     this.sun.direction.set(-sx, -sy, -25).normalize();
-    const lum = (c: Color3): number => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-    const flat = hemiI * lum(this.hemi.diffuse) + sunI * (sy / Math.hypot(sx, sy, 25)) * lum(this.sun.diffuse);
-    const k = Math.pow(Math.max(flat, 1e-3), 1 / 2.2) / Math.max(flat, 1e-3);
-    this.sun.intensity = sunI * k;
-    this.hemi.intensity = hemiI * k;
   }
 
   // ---- Screen <-> world --------------------------------------------------------------------------

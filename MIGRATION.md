@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M3 are done; see section 3.
+Status: **in progress.** Milestones M1–M4 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -82,19 +82,19 @@ Engine coupling: **none** means no three.js; **render** means pure rendering; **
 
 | File | Lines | Purpose | Coupling | Plan |
 | --- | ---: | --- | --- | --- |
-| `src/game/game.js` | 1732 | Simulation core: players, spawning, combat, economy hooks, defeat rules | **mixed**: imports THREE, `createModel` and `TEAM_COLORS` only for the citadel wall meshes | Move the citadel wall visuals into the renderer; the core becomes `sim/game.ts` |
+| `src/game/game.js` | 1732 | Simulation core: players, spawning, combat, economy hooks, defeat rules | **mixed**: imports THREE, `createModel` and `TEAM_COLORS` only for the citadel wall meshes | Move the citadel wall visuals into the renderer; the core becomes `sim/game.ts`. **Done in M4**: `game.js` only computes the wall placements. |
 | `src/game/behavior.js` | 947 | Orders, movement, harvesting, attacks | none | Reuse as-is, then TypeScript (M11) |
 | `src/game/unit.js` | 326 | Unit state and derived stats | none | Reuse, then TypeScript |
 | `src/game/abilities.js` | 363 | Hero and creep abilities | none (calls `hooks.fx`) | Reuse |
 | `src/game/empire.js` | 358 | Citizens, taxes, ages, hiring, nukes | none (calls `hooks.fx`) | Reuse |
 | `src/game/events.js` | 137 | Random events | none | Reuse |
-| `src/game/roads.js` | 286 | Road network and connectivity, **plus the road mesh** | **mixed** | Split into `sim/roads.ts` and `render/RoadMesh.ts` |
-| `src/game/fog.js` | 116 | Visibility grid, **plus a THREE.DataTexture** | **mixed** | The grid goes to `sim`; the texture becomes a Babylon `RawTexture` in the renderer |
+| `src/game/roads.js` | 286 | Road network and connectivity, **plus the road mesh** | **mixed** | Split into `sim/roads.ts` and `render/RoadMesh.ts`. **Done in M3**: data plus a `version` counter; meshes in `render/terrainView.js` and `babylon/TerrainView.ts`. |
+| `src/game/fog.js` | 116 | Visibility grid, **plus a THREE.DataTexture** | **mixed** | The grid goes to `sim`; the texture becomes a Babylon `RawTexture` in the renderer. **Done in M3.** |
 | `src/ai/*.js` | 1583 | Creeps, Legion, general AI | none | Reuse |
 | `src/data/*.js` | 921 | Units, heroes, items, ages, research, economy | none | Reuse, then typed data |
 | `src/world/pathgrid.js` | 317 | A* pathfinding grid | none | Reuse |
 | `src/world/layout.js`, `noise.js` | 194 | Map layout, noise | none | Reuse |
-| `src/world/terrain.js` | 704 | Heights, classification and trees (**data**), plus ground, water, tree and doodad **meshes** | **mixed** | Split into `sim/terrainData.ts` and `render/TerrainView.ts` |
+| `src/world/terrain.js` | 704 | Heights, classification and trees (**data**), plus ground, water, tree and doodad **meshes** | **mixed** | Split into `sim/terrainData.ts` and `render/TerrainView.ts`. **Done in M3** (`world/terrain.js` is the data; `render/terrainView.js` and `babylon/TerrainView.ts` are the views). |
 | `src/render/view.js` | 223 | Renderer, lights, day/night, RTS camera, ground picking | render | `render/BabylonView.ts` |
 | `src/render/assets.js` | 133 | Material and geometry caches, fog-of-war shader patch, team colours | render | Material library plus `FogOfWarPlugin` |
 | `src/render/models.js` | 436 | Model registry, template cache, static-mesh merging, cloning | render | Bake script plus GLB library and instancing (D1) |
@@ -261,18 +261,38 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - Babylon stores thin-instance buffers on the geometry, which clones share, so each tree chunk calls `makeGeometryUnique()`.
     - Babylon ES modules are excluded from Vite's dependency pre-bundling (`optimizeDeps.exclude`). Otherwise each newly imported Babylon module makes the dev server re-optimise and fail the next page load (HTTP 504 "Outdated Optimize Dep").
     - Checked against three.js at the same camera position: home base, zoomed out, moat water, citadel plaza, fog of war (black mask and explored areas), night and noon, and felled trees. Shadows are not drawn on Babylon until M8.
-    - Fixed in passing: the HUD clock showed `-1:-1:-1` for the first split second of a game (game time starts slightly below zero).
-- [ ] **M4 – Models and units.**
-  - Bake script: all 147 models to GLB, with parts metadata and team-colour material tags.
-  - GLB library with a per-model template.
-  - Unit views:
-    - instanced parts with an instanced team colour;
-    - the animation driver for every part type;
-    - selection and hover rings, construction, death, buffs, carried resources, doors.
-  - Check that models are not mirrored, comparing screenshots against the current renderer.
-  - Drag-box selection and right-click move/attack work through the existing input logic.
+    - Fixed in passing:
+      - The HUD clock showed `-1:-1:-1` for the first split second of a game (game time starts slightly below zero).
+      - The hero contract offer box was rebuilt every second (its countdown was part of the rebuild signature), which could swallow a click on Accept or Decline. It now rebuilds only when the offers change and updates the countdown in place.
+      - Two scenario tests were made robust: the research test holds off raids, and the offer test waits for the dialog.
+- [x] **M4 – Models and units.**
+  - [x] Bake script (`tools/bake-models.mjs`, run by `npm run bake` and before `dev`, `dev:electron`, `build` and `build:artifact`; it is skipped when up to date). It writes all 147 models into one GLB (`src/generated/models.glb`, 4.2 MB, not committed) with the parts contract and team-colour factors in glTF `extras`. Details:
+    - Vertices are welded (573k → 124k).
+    - Flat-shaded meshes carry no normals; Babylon's StandardMaterial derives face normals, as three.js `flatShading` does.
+    - Team colour is found by building each model with three different team colours. Each team-coloured material stores `colour = k × team + b` (linear): `mat(team)`, `shade(team, k)` and blends such as `lerp(team, white, 0.55)` all fit, and the bake fails if a builder ever uses the team colour in some other way.
+  - [x] GLB library (`src/babylon/ModelLibrary.ts`), loaded with `@babylonjs/loaders`:
+    - Materials are converted to StandardMaterial.
+    - Each model is a hidden template. A unit gets its own transform nodes (so its parts animate) and an `InstancedMesh` per part.
+    - The team colour is an instance attribute read by `TeamColorPlugin` (`src/babylon/TeamColor.ts`), so all units of a model share one draw call per part, whatever their team.
+  - [x] Unit views (`src/babylon/UnitView.ts`, a port of `src/render/unitview.js`):
+    - [x] instanced parts with an instanced team colour;
+    - [x] the animation driver for every part type: legs, arms, body bob, weapon swing, thrust, gun kick, spin, doors, bob, wings, wheels, fire, glow and bladestorm. Node rotations keep three.js's Euler XYZ semantics, converted to quaternions;
+    - [x] selection and hover rings, construction scaffold, death, buff visuals (stun, shield, slow, roots, bladestorm, auras), carried gold and lumber, gate doors, and ghost copies for illusions and invisible units;
+    - [x] ground items (`ItemView`).
+  - [x] Citadel walls (moved from M3): `game.js` now only computes their placements (`game.citadelWalls`), and each renderer draws them.
+  - [x] Check that models are not mirrored, comparing against the current renderer.
+    - New Babylon model gallery, `tools/gallery-babylon.html`, with the same layout and options as the three.js gallery (`tools/gallery.html`).
+    - All 147 models compared side by side. The exact vertex bounds of every model match three.js within 0.01 units, and the mesh counts are identical.
+  - [x] Drag-box selection and right-click move/attack work through the existing input logic (scenario tests).
+  - Notes:
+    - The simulation (`src/game`, `src/ai`, `src/world`, `src/data`) no longer imports three.js or anything from `src/render`. Player colours moved to `src/data/colors.js`; `nameColor` uses an engine-free sRGB/linear blend identical to three.js `Color.lerp`. `hooks.scene` is gone.
+    - Lighting parity: `LinearLightingPlugin` (`src/babylon/Lighting.ts`) gamma-encodes the accumulated light per pixel, which is what three.js's linear lighting with sRGB output amounts to. Faces turned away from the sun now match too. This replaced the M3 light-scaling workaround.
+    - The glTF loader turns meshes shared by several nodes into `InstancedMesh` templates; the library instances their source mesh.
+    - Unlit StandardMaterials show only their emissive colour, so the selection ring's per-instance colour goes in through the team-colour plugin's emissive term.
+    - `BabylonView.ready` resolves once the models are loaded; `main.js` waits for it before creating a game.
 - [ ] **M5 – Reconnect the game logic.**
-  - Typed `SimHooks`; move the citadel walls, road mesh and fog texture out of the simulation.
+  - [x] (done in M3/M4) Move the citadel walls, road mesh and fog texture out of the simulation.
+  - Typed `SimHooks`.
   - Projectiles, all effects (meshes first, particles in M8), placement ghosts, the line tool and tree highlights.
   - Full-game check: the existing Playwright scenario tests (interaction, walls, mechanics, research, town-center UI) and a 30-minute AI simulation, all passing against the Babylon renderer.
 - [ ] **M6 – HUD and interface.**

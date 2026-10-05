@@ -67,17 +67,23 @@ export interface UnitLike {
   owner: PlayerLike;
   def: { footprint?: number; modelColor?: number };
   mods: { scale?: number };
-  /** The legacy three.js unit view; supplies visibility and model height until M4. */
-  view: {
-    visibleNow?: boolean;
-    height?: number;
-    group?: { position: { x: number; y: number; z: number } };
-  } | null;
+  /** The renderer's view of this unit (visibility, model height, hover state). */
+  view: { visibleNow?: boolean; height?: number; hovered?: boolean } | null;
 }
 
 export type ItemLike = object;
 
+export interface CitadelWall {
+  model: string;
+  x: number;
+  y: number;
+  z: number;
+  rotY: number;
+  color: number;
+}
+
 export interface GameLike {
+  citadelWalls?: CitadelWall[];
   time: number;
   timeOfDay: number;
   shakeAmount: number;
