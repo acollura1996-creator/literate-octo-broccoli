@@ -4,9 +4,6 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder';
-import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder';
-import { CreateIcoSphere } from '@babylonjs/core/Meshes/Builders/icoSphereBuilder';
-import { CreatePolyhedron } from '@babylonjs/core/Meshes/Builders/polyhedronBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
@@ -15,18 +12,18 @@ import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
 import { Constants } from '@babylonjs/core/Engines/constants';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Vector2, Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import type { Scene } from '@babylonjs/core/scene';
 // Side effect: thin instances on Mesh.
 import '@babylonjs/core/Meshes/thinInstanceMesh';
-import { WATER_LEVEL } from '../world/terrain.ts';
+import { T_DIRT, T_FOREST, T_GRASS, T_SHORE, WATER_LEVEL } from '../world/terrain.ts';
+import { BLOCK_BUILDING, BLOCK_GATE } from '../world/pathgrid.ts';
+import { FoliagePlugin, boulderGeo, broadleafGeo, bushGeo, deadTreeGeo, flowerGeo, foliageMask, foliageMaterial, geoMesh, grassTuftGeo, pineGeo } from './Foliage';
 import { makeCobbleCanvas, roadGeometry } from '../world/groundArt.ts';
 import { GroundSplatPlugin } from './GroundMaterial';
 import { FogOfWar } from './FogOfWar';
-import { paint, type PaintKind } from './Painterly';
 import type { Game } from '../game/game.ts';
 import type { Roads } from '../game/roads.ts';
-import type { Doodad, Terrain, Tree } from '../world/terrain.ts';
+import type { Terrain, Tree } from '../world/terrain.ts';
 
 const CHUNK = 32;
 
@@ -158,28 +155,6 @@ function waterNoise(size = 256): Uint8Array {
  */
 const toGamma = (c: number): number => Math.pow(Math.max(0, c), 1 / 2.2);
 
-/** Bake a transform into a mesh's vertices. */
-function bake(mesh: Mesh, m: Matrix): Mesh {
-  mesh.bakeTransformIntoVertices(m);
-  return mesh;
-}
-
-/** Scale a mesh so its farthest vertex is `radius` from the origin (three.js polyhedron sizing). */
-function toRadius(mesh: Mesh, radius: number): Mesh {
-  const pos = mesh.getVerticesData(VertexBuffer.PositionKind) ?? [];
-  let max = 0;
-  for (let i = 0; i < pos.length; i += 3) max = Math.max(max, Math.hypot(pos[i]!, pos[i + 1]!, pos[i + 2]!));
-  return bake(mesh, Matrix.Scaling(radius / max, radius / max, radius / max));
-}
-
-/** Merge parts into one flat-shaded mesh (the faceted low-poly look of the three.js materials). */
-function merged(name: string, parts: Mesh[]): Mesh {
-  const m = Mesh.MergeMeshes(parts, true, true)!;
-  m.name = name;
-  m.convertToFlatShadedMesh();
-  return m;
-}
-
 /** three.js-style transform: translate · rotate (Euler XYZ) · scale. */
 function compose(x: number, y: number, z: number, rx: number, ry: number, rz: number, sx: number, sy: number, sz: number): Matrix {
   return Matrix.Scaling(sx, sy, sz)
@@ -209,6 +184,9 @@ export class TerrainView {
   private readonly treeSlots = new Map<Tree, TreeSlot>();
   private felledSeen = 0;
   private water!: ShaderMaterial;
+  private readonly mask: RawTexture;
+  private readonly maskData: Uint8Array;
+  private maskVersion = -1;
   /** Meshes that cast and receive shadows (trees, rocks, bushes) and the ground, which receives. */
   readonly casters: Mesh[] = [];
   readonly receivers: Mesh[] = [];
@@ -216,10 +194,17 @@ export class TerrainView {
   constructor(scene: Scene, terrain: Terrain) {
     this.scene = scene;
     this.terrain = terrain;
+    const S = terrain.size;
+    this.maskData = new Uint8Array(S * S);
+    this.mask = this.keep(new RawTexture(this.maskData, S, S, Constants.TEXTUREFORMAT_R, scene, false, false, Texture.NEAREST_SAMPLINGMODE));
+    this.mask.wrapU = this.mask.wrapV = Texture.CLAMP_ADDRESSMODE;
+    foliageMask.texture = this.mask;
+    foliageMask.size = S;
     this.buildGround();
     this.buildWater();
     this.buildTrees();
     this.buildDoodads();
+    this.buildGrass();
   }
 
   /** Sun (direction towards it, colour × strength) and sky colour for the water. */
@@ -240,6 +225,7 @@ export class TerrainView {
   /** Per frame: animate the water and turn newly felled trees into stumps. */
   update(time: number): void {
     this.water.setFloat('uTime', time);
+    FoliagePlugin.time = time;
     const fog = FogOfWar.current;
     if (fog) this.water.setTexture('uFogTex', fog.texture);
     const felled = this.terrain.felled;
@@ -247,6 +233,7 @@ export class TerrainView {
   }
 
   dispose(): void {
+    if (foliageMask.texture === this.mask) foliageMask.texture = null;
     for (const d of this.disposables) d.dispose();
     this.disposables.length = 0;
     this.treeSlots.clear();
@@ -363,31 +350,30 @@ export class TerrainView {
 
   private buildTrees(): void {
     const sc = this.scene;
-    const trunkBase = bake(CreateCylinder('trunk', { height: 1, diameterTop: 0.18, diameterBottom: 0.32, tessellation: 6 }, sc), Matrix.Translation(0, 0.5, 0));
-    trunkBase.convertToFlatShadedMesh();
-    const cone = (r: number, h: number, seg: number, m: Matrix): Mesh =>
-      bake(CreateCylinder('cone', { height: h, diameterTop: 0, diameterBottom: r * 2, tessellation: seg }, sc), m);
-    const ico = (r: number, x: number, y: number, z: number): Mesh =>
-      bake(CreateIcoSphere('ico', { radius: r, subdivisions: 1, flat: true }, sc), Matrix.Translation(x, y, z));
-    const canopyBases = [
-      merged('pine', [cone(0.85, 1.3, 7, Matrix.Translation(0, 1.35, 0)), cone(0.68, 1.15, 7, Matrix.Translation(0, 2.0, 0)), cone(0.45, 0.95, 7, Matrix.Translation(0, 2.6, 0))]),
-      merged('ash', [ico(0.85, 0, 1.85, 0), ico(0.6, 0.45, 1.5, 0.2), ico(0.58, -0.4, 1.55, -0.25), ico(0.5, 0.05, 2.45, 0.1)]),
-      merged('dead', [
-        cone(0.06, 1.0, 4, Matrix.RotationZ(0.9).multiply(Matrix.Translation(0.35, 1.5, 0))),
-        cone(0.05, 0.9, 4, Matrix.RotationZ(-0.8).multiply(Matrix.Translation(-0.3, 1.7, 0.1))),
-        cone(0.05, 0.8, 4, Matrix.RotationX(0.8).multiply(Matrix.Translation(0, 1.6, 0.3))),
-        cone(0.08, 1.2, 5, Matrix.Translation(0, 1.9, 0)),
-      ]),
-    ];
-    const trunkMats = [this.keep(mat(sc, 'trunk', Color3.FromHexString('#6b4a2b'))), this.keep(mat(sc, 'trunk-dead', Color3.FromHexString('#3d3236')))];
-    const leafMats = [this.keep(mat(sc, 'leaves', Color3.White())), this.keep(mat(sc, 'leaves-dead', Color3.FromHexString('#4a3a40')))];
-    for (const m of trunkMats) paint(m, 'wood');
-    paint(leafMats[0]!, 'foliage');
-    paint(leafMats[1]!, 'wood');
-    for (const b of [trunkBase, ...canopyBases]) {
-      b.setEnabled(false);
-      this.keep(b);
+    const shapes = [pineGeo(), broadleafGeo(), deadTreeGeo()];
+    const bases = shapes.map((sh, i) => ({ trunk: this.keep(geoMesh(`trunk-${i}`, sh.trunk, sc)), canopy: this.keep(geoMesh(`canopy-${i}`, sh.canopy, sc)) }));
+    const bark = this.keep(foliageMaterial(sc, 'bark', { channel: [0, 0, 1, 0], scale: 1.6, hue: 0.4 }, Color3.FromHexString('#7d5833')));
+    const deadBark = this.keep(foliageMaterial(sc, 'bark-dead', { channel: [0, 0, 1, 0], scale: 1.6, hue: 0.3 }, Color3.FromHexString('#5b4a5a')));
+    const needles = this.keep(foliageMaterial(sc, 'needles', { channel: [0, 1, 0, 0], scale: 0.6, hue: 0.5, wind: 0.025, windFrom: 1.0 }));
+    const leaves = this.keep(foliageMaterial(sc, 'leaves', { channel: [1, 0, 0, 0], scale: 0.55, hue: 0.85, wind: 0.035, windFrom: 1.2 }));
+    const trunkMats = [bark, bark, deadBark];
+    const canopyMats = [needles, leaves, deadBark];
+    for (const b of bases) {
+      b.trunk.setEnabled(false);
+      b.canopy.setEnabled(false);
     }
+    // Canopy colours (sRGB): deep blue-green pines, lush summer broadleaves. The simulation's tint
+    // varies each tree around these.
+    const base: Array<[number, number, number]> = [
+      [0.25, 0.53, 0.31],
+      [0.38, 0.64, 0.19],
+      [1, 1, 1],
+    ];
+    const mean: Array<[number, number, number]> = [
+      [0.155, 0.41, 0.185],
+      [0.32, 0.56, 0.165],
+      [0.32, 0.27, 0.3],
+    ];
 
     // Batch per 32×32-cell chunk and species, so off-screen forests are culled.
     const chunksPerSide = Math.ceil(this.terrain.size / CHUNK);
@@ -400,15 +386,24 @@ export class TerrainView {
     }
     for (const [key, list] of buckets) {
       const s = list[0]!.species;
-      const trunks = this.keep(trunkBase.clone(`trunks-${key}`));
-      const canopy = this.keep(canopyBases[s]!.clone(`canopy-${key}`));
-      trunks.material = trunkMats[s === 2 ? 1 : 0]!;
-      canopy.material = leafMats[s === 2 ? 1 : 0]!;
+      const trunks = this.keep(bases[s]!.trunk.clone(`trunks-${key}`));
+      const canopy = this.keep(bases[s]!.canopy.clone(`canopy-${key}`));
+      trunks.material = trunkMats[s]!;
+      canopy.material = canopyMats[s]!;
       const matrices = new Float32Array(list.length * 16);
       const colors = new Float32Array(list.length * 4);
       list.forEach((t, i) => {
-        compose(t.x, this.terrain.heightAt(t.x, t.z) - 0.05, t.z, 0, t.rot, 0, t.scale, t.scale, t.scale).copyToArray(matrices, i * 16);
-        colors.set([toGamma(t.tint[0]), toGamma(t.tint[1]), toGamma(t.tint[2]), 1], i * 4);
+        // Each tree a little wider or taller than the next.
+        const h1 = (Math.sin(t.cx * 12.9898 + t.cz * 78.233) * 43758.5453) % 1;
+        const h2 = (Math.sin(t.cx * 39.346 + t.cz * 11.135) * 24634.6345) % 1;
+        const w = t.scale * (0.92 + 0.16 * Math.abs(h1));
+        const h = t.scale * (0.92 + 0.22 * Math.abs(h2));
+        compose(t.x, this.terrain.heightAt(t.x, t.z) - 0.05, t.z, 0, t.rot, 0, w, h, w).copyToArray(matrices, i * 16);
+        const b = base[s]!;
+        const m = mean[s]!;
+        const v = Math.max(0.82, Math.min(1.18, t.tint[1] / m[1]));
+        const warm = Math.max(-0.15, Math.min(0.15, t.tint[0] / m[0] - 1));
+        colors.set([b[0] * v * (1 + warm), b[1] * v, b[2] * v * (1 - warm), 1], i * 4);
         this.treeSlots.set(t, { trunks, canopy, index: i });
       });
       for (const m of [trunks, canopy]) {
@@ -419,8 +414,10 @@ export class TerrainView {
         m.thinInstanceSetBuffer('matrix', matrices.slice(), 16, false);
         m.thinInstanceRefreshBoundingInfo(false);
         this.casters.push(m);
-        this.receivers.push(m);
       }
+      // Canopies carry their own painted shading; shadows from the next tree would make the forest
+      // a black mass. Trunks stand in the canopy's shade.
+      this.receivers.push(trunks);
       canopy.thinInstanceSetBuffer('color', colors, 4, true);
     }
   }
@@ -430,49 +427,137 @@ export class TerrainView {
     const slot = this.treeSlots.get(tree);
     if (!slot) return;
     const y = this.terrain.heightAt(tree.x, tree.z) - 0.05;
-    slot.trunks.thinInstanceSetMatrixAt(slot.index, compose(tree.x, y, tree.z, 0, 0, 0, tree.scale * 1.3, 0.12, tree.scale * 1.3), true);
+    slot.trunks.thinInstanceSetMatrixAt(slot.index, compose(tree.x, y, tree.z, 0, 0, 0, tree.scale * 1.1, 0.16, tree.scale * 1.1), true);
     slot.canopy.thinInstanceSetMatrixAt(slot.index, compose(tree.x, y, tree.z, 0, 0, 0, 0, 0, 0), true);
+  }
+
+  /** Thin instances of `mesh` (one draw call); it casts shadows if asked and receives them if `receive`. */
+  private place(mesh: Mesh, matrices: Float32Array, colors: Float32Array | null, cast: boolean, receive = true): void {
+    this.keep(mesh);
+    mesh.isPickable = false;
+    if (!matrices.length) {
+      mesh.setEnabled(false);
+      return;
+    }
+    mesh.thinInstanceSetBuffer('matrix', matrices, 16, true);
+    if (colors) mesh.thinInstanceSetBuffer('color', colors, 4, true);
+    mesh.thinInstanceRefreshBoundingInfo(false);
+    if (cast) this.casters.push(mesh);
+    if (receive) this.receivers.push(mesh);
   }
 
   private buildDoodads(): void {
     const sc = this.scene;
-    const d = this.terrain.doodads ?? this.terrain.scatterDoodads();
-    const doodadMat = (kind: PaintKind | null): StandardMaterial => {
-      const m = this.keep(mat(sc, 'doodad', Color3.White()));
-      if (kind) paint(m, kind);
-      return m;
+    const t = this.terrain;
+    const d = t.doodads ?? t.scatterDoodads();
+    const stone = this.keep(foliageMaterial(sc, 'boulder', { channel: [0, 0, 0, 1], scale: 0.9, hue: 0.35, moss: 0.9 }));
+    const leafy = this.keep(foliageMaterial(sc, 'bush', { channel: [1, 0, 0, 0], scale: 0.8, hue: 0.85, wind: 0.02, windFrom: 0.3 }));
+    const stemMat = this.keep(foliageMaterial(sc, 'flower-stems', { channel: [0, 0, 0, 0], scale: 1, hue: 0, lift: 0.62, wind: 0.12, masked: true }, Color3.White(), true));
+    const headMat = this.keep(foliageMaterial(sc, 'flower-heads', { channel: [0, 0, 0, 0], scale: 1, hue: 0.3, lift: 0.72, wind: 0.12, masked: true }, Color3.White(), true));
+
+    const rock = geoMesh('boulders', boulderGeo(), sc);
+    rock.material = stone;
+    const rm = new Float32Array(d.rocks.length * 16);
+    const rc = new Float32Array(d.rocks.length * 4);
+    d.rocks.forEach((p, i) => {
+      compose(p.x, p.y, p.z, p.rot[0], p.rot[1], p.rot[2], p.scale[0], p.scale[1], p.scale[2]).copyToArray(rm, i * 16);
+      const v = toGamma(p.color[0]) * 0.8;
+      rc.set([v, v * 0.96, v * 0.9, 1], i * 4);
+    });
+    this.place(rock, rm, rc, true);
+
+    const bush = geoMesh('bushes', bushGeo(), sc);
+    bush.material = leafy;
+    const bm = new Float32Array(d.bushes.length * 16);
+    const bc = new Float32Array(d.bushes.length * 4);
+    d.bushes.forEach((p, i) => {
+      compose(p.x, t.heightAt(p.x, p.z) - 0.04, p.z, 0, p.rot[1], 0, p.scale[0], p.scale[1], p.scale[2]).copyToArray(bm, i * 16);
+      const v = Math.max(0.85, Math.min(1.15, p.color[1] / 0.44));
+      bc.set([0.33 * v, 0.58 * v, 0.17 * v, 1], i * 4);
+    });
+    this.place(bush, bm, bc, true, false);
+
+    const { stems, heads } = flowerGeo();
+    const stemMesh = geoMesh('flower-stems', stems, sc);
+    const headMesh = geoMesh('flower-heads', heads, sc);
+    stemMesh.material = stemMat;
+    headMesh.material = headMat;
+    const fm = new Float32Array(d.flowers.length * 16);
+    const fc = new Float32Array(d.flowers.length * 4);
+    d.flowers.forEach((p, i) => {
+      compose(p.x, t.heightAt(p.x, p.z) - 0.01, p.z, 0, p.rot[1], 0, p.scale[0], p.scale[0], p.scale[0]).copyToArray(fm, i * 16);
+      fc.set([p.color[0], p.color[1], p.color[2], 1], i * 4);
+    });
+    this.place(stemMesh, fm, null, false);
+    this.place(headMesh, fm.slice(), fc, false);
+  }
+
+  /** Grass tufts over the meadows (fewer on the forest floor and on dirt), batched per chunk. */
+  private buildGrass(): void {
+    const sc = this.scene;
+    const t = this.terrain;
+    const S = t.size;
+    const mat = this.keep(foliageMaterial(sc, 'grass-tufts', { channel: [0, 0, 0, 0], scale: 1, hue: 0.5, lift: 0.6, wind: 0.16, masked: true }, Color3.White(), true));
+    const proto = this.keep(geoMesh('grass-tuft', grassTuftGeo(), sc));
+    proto.setEnabled(false);
+    let seed = 0x1234567;
+    const rand = (): number => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
     };
-    const rock = toRadius(CreatePolyhedron('rock', { type: 2, size: 1, flat: true }, sc), 1);
-    const bush = CreateIcoSphere('bush', { radius: 1, subdivisions: 1, flat: true }, sc);
-    const petals: Mesh[] = [];
-    for (let k = 0; k < 5; k++) {
-      const a = (k / 5) * Math.PI * 2;
-      petals.push(bake(toRadius(CreatePolyhedron('petal', { type: 1, size: 1, flat: true }, sc), 0.07), Matrix.Translation(Math.cos(a) * 0.22, 0.06, Math.sin(a) * 0.22)));
-    }
-    const flower = merged('flowers', petals);
-    const place = (mesh: Mesh, list: Doodad[], kind: PaintKind | null): void => {
-      this.keep(mesh);
-      mesh.material = doodadMat(kind);
-      mesh.isPickable = false;
-      if (!list.length) {
-        mesh.setEnabled(false);
-        return;
+    const chance: Record<number, number> = { [T_GRASS]: 0.6, [T_FOREST]: 0.18, [T_DIRT]: 0.14, [T_SHORE]: 0.05 };
+    const chunksPerSide = Math.ceil(S / CHUNK);
+    const buckets = new Map<number, number[]>();
+    for (let cz = 1; cz < S - 1; cz++) {
+      for (let cx = 1; cx < S - 1; cx++) {
+        const p = chance[t.types[cz * S + cx]!] ?? 0;
+        for (let k = 0; k < 2; k++) {
+          if (rand() >= p * 0.6) continue;
+          const x = cx + rand();
+          const z = cz + rand();
+          if (t.heightAt(x, z) < WATER_LEVEL + 0.08 || t.isNearFlatSpot(x, z)) continue;
+          const key = Math.floor(cx / CHUNK) + Math.floor(cz / CHUNK) * chunksPerSide;
+          let list = buckets.get(key);
+          if (!list) buckets.set(key, (list = []));
+          list.push(x, z, t.types[cz * S + cx]!);
+        }
       }
-      const matrices = new Float32Array(list.length * 16);
-      const colors = new Float32Array(list.length * 4);
-      list.forEach((p, i) => {
-        compose(p.x, p.y, p.z, p.rot[0], p.rot[1], p.rot[2], p.scale[0], p.scale[1], p.scale[2]).copyToArray(matrices, i * 16);
-        colors.set([toGamma(p.color[0]), toGamma(p.color[1]), toGamma(p.color[2]), 1], i * 4);
-      });
-      mesh.thinInstanceSetBuffer('matrix', matrices, 16, true);
-      mesh.thinInstanceSetBuffer('color', colors, 4, true);
-      mesh.thinInstanceRefreshBoundingInfo(false);
-      this.casters.push(mesh);
-      this.receivers.push(mesh);
-    };
-    place(rock, d.rocks, 'stone');
-    place(bush, d.bushes, 'foliage');
-    place(flower, d.flowers, null);
+    }
+    for (const [key, list] of buckets) {
+      const n = list.length / 3;
+      const matrices = new Float32Array(n * 16);
+      const colors = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) {
+        const x = list[i * 3]!;
+        const z = list[i * 3 + 1]!;
+        const type = list[i * 3 + 2]!;
+        const s = 0.8 + rand() * 0.7;
+        compose(x, t.heightAt(x, z) - 0.02, z, 0, rand() * Math.PI * 2, 0, s, s * (0.85 + rand() * 0.4), s).copyToArray(matrices, i * 16);
+        const v = 0.85 + rand() * 0.3;
+        const c = type === T_FOREST ? [0.26, 0.45, 0.13] : type === T_DIRT || type === T_SHORE ? [0.42, 0.56, 0.2] : [0.38, 0.62, 0.17];
+        colors.set([c[0]! * v * (0.9 + rand() * 0.2), c[1]! * v, c[2]! * v, 1], i * 4);
+      }
+      const m = proto.clone(`grass-${key}`);
+      m.makeGeometryUnique();
+      m.setEnabled(true);
+      m.material = mat;
+      this.place(m, matrices, colors, false);
+    }
+  }
+
+  /** The foliage mask: grass and flowers hide where a building, gate or road now stands. */
+  updateClearMask(roads: Roads | null): void {
+    const grid = this.terrain.grid;
+    const version = grid.version * 100003 + (roads?.version ?? 0);
+    if (version === this.maskVersion) return;
+    this.maskVersion = version;
+    const S = this.terrain.size;
+    const data = this.maskData;
+    for (let i = 0; i < S * S; i++) {
+      const blocked = (grid.flags[i]! & (BLOCK_BUILDING | BLOCK_GATE)) !== 0 || (roads !== null && roads.owner[i]! >= 0);
+      data[i] = blocked ? 255 : 0;
+    }
+    this.mask.update(data);
   }
 }
 

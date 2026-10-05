@@ -325,6 +325,7 @@ export class BabylonView {
       this.roadView = g.roads ? new RoadView(this.bscene, g.roads, g) : null;
     }
     this.terrainView.update(g.time);
+    this.terrainView.updateClearMask(g.roads ?? null);
     this.terrainView.setWaterGrading(this.graphics.linear, this.cam.camera.position, this.graphics.haze);
     this.terrainView.setWaterLight(this.toSun.copyFrom(this.sun.direction).scaleInPlace(-1), this.sunColor.copyFrom(this.sun.diffuse).scaleInPlace((this.sun.intensity * Math.PI) / 2.3), this.hemi.diffuse);
     this.roadView?.update();

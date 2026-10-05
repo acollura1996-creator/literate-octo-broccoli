@@ -1,8 +1,11 @@
-// Hand-painted ground textures (M13), generated at load with Canvas 2D: one tileable painting per
-// ground layer in the spirit of Warcraft III's Lordaeron Summer tile set (grass, forest floor,
-// dirt, rough road, cobblestone, shore, blight and cliff rock). Each layer also gets a height map
-// (stones, clumps and blades stand high; gaps and cracks lie low) that the terrain's splat shader
-// uses for crisp, irregular borders between layers.
+// Hand-painted textures (M13), generated at load with Canvas 2D.
+//
+// - Ground: one tileable painting per ground layer in the spirit of Warcraft III's Lordaeron Summer
+//   tile set (grass, forest floor, dirt, rough road, flagstones, shore, blight and cliff rock). Each
+//   layer also gets a height map (stones, clumps and blades stand high; gaps and cracks lie low)
+//   that the terrain's splat shader uses for crisp, irregular borders between layers.
+// - Foliage: one greyscale painting per channel (leaf clusters, pine needles, bark, lichened
+//   stone) that the foliage shader turns into lit and shaded colour (Foliage.ts).
 //
 // No Babylon imports, so tools/textures.html can preview the paintings on their own.
 
@@ -625,6 +628,82 @@ const PAINTERS: Record<GroundLayer, (p: Painter) => void> = {
   blight: paintBlight,
   rock: paintRock,
 };
+
+// ------------------------------------------------------------------------------------- foliage
+
+/** Leaf clusters, darkest first so the sunlit clumps lie on top, each over its own shadow. */
+function paintLeaves(p: Painter): void {
+  const N = p.N;
+  p.fill([0, 0, 16], 0.3);
+  const clusters: Array<{ x: number; y: number; b: number }> = [];
+  for (let i = 0; i < 620; i++) clusters.push({ x: p.r(0, N), y: p.r(0, N), b: p.r(0.25, 1) });
+  clusters.sort((a, b) => a.b - b.b);
+  for (const cl of clusters) {
+    p.blotch(cl.x + 4, cl.y + 5, 17, [0, 0, 5], 0.5);
+    const n = 7 + Math.floor(p.r(0, 5));
+    for (let k = 0; k < n; k++) {
+      const a = p.r(0, Math.PI * 2);
+      const d = p.r(2, 12);
+      const lit = (-Math.cos(a) - Math.sin(a)) * 5;
+      p.leaf(cl.x + Math.cos(a) * d, cl.y + Math.sin(a) * d, p.r(10, 17), a + p.r(-0.6, 0.6), p.col([0, 0, Math.max(6, Math.min(96, cl.b * 72 + lit + p.r(-6, 6)))]), cl.b);
+    }
+  }
+}
+
+/** Pine needles: tiers of downward strokes. */
+function paintNeedles(p: Painter): void {
+  const N = p.N;
+  p.fill([0, 0, 14], 0.3);
+  const strokes: Array<{ x: number; y: number; b: number }> = [];
+  for (let i = 0; i < 5200; i++) strokes.push({ x: p.r(0, N), y: p.r(0, N), b: p.r(0.2, 1) });
+  strokes.sort((a, b) => a.b - b.b);
+  for (const st of strokes) p.blade(st.x, st.y, p.r(9, 18), Math.PI + p.r(-0.55, 0.55), p.r(1.6, 2.6), p.col([0, 0, 10 + st.b * 75]), st.b, p.r(-0.15, 0.15));
+}
+
+/** Bark: vertical furrows and ridges with a few knots. */
+function paintBark(p: Painter): void {
+  const N = p.N;
+  p.fill([0, 0, 42], 0.5);
+  for (let i = 0; i < 260; i++) {
+    const x = p.r(0, N);
+    const y = p.r(0, N);
+    const pts: Array<[number, number]> = [];
+    let px = x;
+    for (let k = 0; k < 6; k++) {
+      pts.push([px, y + k * 16]);
+      px += p.r(-3, 3);
+    }
+    const dark = p.rand() < 0.55;
+    p.stroke(pts, dark ? p.r(2, 4) : p.r(1.5, 3), p.col([0, 0, dark ? p.r(12, 26) : p.r(58, 74)], 0.85), dark ? 0.2 : 0.8);
+  }
+  for (let i = 0; i < 16; i++) {
+    const x = p.r(0, N);
+    const y = p.r(0, N);
+    p.blotch(x, y, 9, [0, 0, 10], 0.8);
+    p.blotch(x - 2, y - 2, 4, [0, 0, 60], 0.7);
+  }
+}
+
+/** Weathered stone: blotches, cracks and speckles (moss is added by the shader on top faces). */
+function paintStone(p: Painter): void {
+  const N = p.N;
+  p.fill([0, 0, 50], 0.5);
+  for (let i = 0; i < 110; i++) p.blotch(p.r(0, N), p.r(0, N), p.r(14, 60), [0, 0, p.rand() < 0.5 ? 66 : 32], 0.45);
+  for (let i = 0; i < 4000; i++) p.dot(p.r(0, N), p.r(0, N), p.r(0.6, 1.5), p.col([0, 0, p.rand() < 0.5 ? 78 : 22], 0.7));
+  for (let i = 0; i < 40; i++) p.crack(p.r(0, N), p.r(0, N), Math.floor(p.r(3, 7)), p.r(8, 16), p.r(1.2, 2.4), [0, 0, 12], 0.8);
+}
+
+/** The foliage painting: R leaves, G needles, B bark, A stone (greyscale, tileable). */
+export function foliagePixels(size = GROUND_TEX_SIZE): Uint8Array {
+  const out = new Uint8Array(size * size * 4);
+  [paintLeaves, paintNeedles, paintBark, paintStone].forEach((paint, ch) => {
+    const p = new Painter(size, mulberry32(0x51ed270b + ch * 104729));
+    paint(p);
+    const d = p.c.getImageData(0, 0, size, size).data;
+    for (let i = 0; i < size * size; i++) out[i * 4 + ch] = d[i * 4]!;
+  });
+  return out;
+}
 
 export interface GroundPainting {
   layer: GroundLayer;
