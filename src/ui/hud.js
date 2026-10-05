@@ -465,7 +465,7 @@ export class Hud {
         const names = {
           stun: 'Stunned', slow: 'Slowed', thunder_slow: 'Thunder Clap', divine_shield: 'Divine Shield', wind_walk: 'Wind Walk',
           avatar: 'Avatar', entangle: 'Entangled', bladestorm: 'Bladestorm', aura_devotion_aura: 'Devotion Aura',
-          aura_brilliance_aura: 'Brilliance Aura', aura_trueshot_aura: 'Trueshot Aura', elemental_power: '', tyrant_might: '', veteran: 'Veteran',
+          aura_brilliance_aura: 'Brilliance Aura', aura_trueshot_aura: 'Trueshot Aura', elemental_power: '', tyrant_might: '', veteran: 'Veteran', dominion: "Kalenden's Dominion",
         };
         const list = buffs.map((b) => names[b] ?? b).filter(Boolean);
         if (list.length) stats.push(`<div class="buffs">${list.map((n) => `<span>${n}</span>`).join('')}</div>`);
