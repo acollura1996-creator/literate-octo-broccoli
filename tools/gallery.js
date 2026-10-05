@@ -42,6 +42,8 @@ const FP = {
   stone_camp: 4, bronze_hall: 4, house_stone: 2, farm_1: 3, city_hall: 4, house_ind: 2, farm_2: 3, factory: 3,
   tower_bunker: 2, wall_concrete: 1, gate_concrete: 2, missile_silo: 3, capitol: 4, house_mod: 2, nexus: 4,
   house_fut: 2, farm_3: 3, wall_energy: 1, gate_energy: 2, tower_laser: 2,
+  iron_forum: 4, house_iron: 2, research_1: 3, atomic_hall: 4, house_atomic: 2, research_2: 3, digital_hub: 4,
+  house_digital: 2, research_3: 3, galactic_citadel: 4, house_galactic: 2, wall_force: 1, gate_force: 2,
 };
 
 // Fog-of-war patch: disable and feed a white texture.

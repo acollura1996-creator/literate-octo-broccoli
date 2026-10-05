@@ -20,6 +20,10 @@ import * as E2 from './models/era_gunpowder.js';
 import * as E3 from './models/era_industrial.js';
 import * as E4 from './models/era_modern.js';
 import * as E5 from './models/era_future.js';
+import * as E6 from './models/era_iron.js';
+import * as E7 from './models/era_atomic.js';
+import * as E8 from './models/era_digital.js';
+import * as E9 from './models/era_galactic.js';
 
 const BUILDERS = {
   // Empire units
@@ -157,6 +161,37 @@ const BUILDERS = {
   wall_energy: E5.wall_energy,
   gate_energy: E5.gate_energy,
   tower_laser: E5.tower_laser,
+  // Eras: iron
+  legionary: E6.legionary,
+  javelineer: E6.javelineer,
+  war_elephant: E6.war_elephant,
+  ballista: E6.ballista,
+  iron_forum: E6.iron_forum,
+  house_iron: E6.house_iron,
+  research_1: E6.research_1,
+  // Eras: atomic
+  flamethrower: E7.flamethrower,
+  sniper: E7.sniper,
+  half_track: E7.half_track,
+  atomic_hall: E7.atomic_hall,
+  house_atomic: E7.house_atomic,
+  research_2: E7.research_2,
+  // Eras: digital
+  railgunner: E8.railgunner,
+  combat_drone: E8.combat_drone,
+  stealth_tank: E8.stealth_tank,
+  digital_hub: E8.digital_hub,
+  house_digital: E8.house_digital,
+  research_3: E8.research_3,
+  // Eras: galactic
+  void_trooper: E9.void_trooper,
+  starfighter: E9.starfighter,
+  titan: E9.titan,
+  graviton: E9.graviton,
+  galactic_citadel: E9.galactic_citadel,
+  house_galactic: E9.house_galactic,
+  wall_force: E9.wall_force,
+  gate_force: E9.gate_force,
 };
 
 export const MODEL_IDS = Object.keys(BUILDERS);
@@ -172,6 +207,7 @@ const STATIC_IDS = new Set([
   'stone_camp', 'bronze_hall', 'house_stone', 'farm_1', 'city_hall', 'house_ind', 'farm_2', 'factory',
   'tower_bunker', 'wall_concrete', 'gate_concrete', 'missile_silo', 'capitol', 'house_mod', 'nexus', 'house_fut',
   'farm_3', 'wall_energy', 'gate_energy', 'tower_laser',
+  'iron_forum', 'house_iron', 'research_1', 'atomic_hall', 'house_atomic', 'research_2', 'digital_hub', 'house_digital', 'research_3', 'galactic_citadel', 'house_galactic', 'wall_force', 'gate_force',
 ]);
 
 const DEFAULT_TEAM = 0x959697;
