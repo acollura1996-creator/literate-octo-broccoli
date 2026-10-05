@@ -17,15 +17,16 @@ Like the original, every general picks one of two paths:
   Galactic Age. Your citizens pay the taxes and eat the food from your
   farms, and they riot if you treat them badly.
 
-Everything is built with [three.js](https://threejs.org). Models are procedural low-poly meshes and
-sounds and music are synthesized with Web Audio, so the game ships no asset files.
+The game is written in TypeScript and drawn with [Babylon.js](https://www.babylonjs.com), built with
+Vite and packaged for Windows with Electron. Models are procedural low-poly meshes (baked to one glTF
+file at build time) with procedurally painted textures, and sounds and music are synthesized with
+Web Audio, so there are no hand-made asset files.
 
 ## Running
 
 ```bash
 npm install
-npm run dev            # browser, http://localhost:5173 (three.js renderer)
-                       # http://localhost:5173/?renderer=babylon for the Babylon.js port in progress
+npm run dev            # browser, http://localhost:5173
 npm run dev:electron   # desktop window (Electron) against the dev server, with hot reload
 npm run typecheck      # TypeScript, game and Electron code
 npm run sim            # headless game (no renderer): four computer generals, a state hash per minute
@@ -35,9 +36,8 @@ npm run dist           # build, then the Windows installer in release/ (electron
 npm run build:artifact # single self-contained dist-artifact/index.html and artifact.html
 ```
 
-The game needs WebGL2, a mouse and a keyboard. The game is being migrated to TypeScript and
-Babylon.js; see [MIGRATION.md](MIGRATION.md) for the plan and progress. Until that finishes, the
-browser build defaults to the three.js renderer and the desktop build opens the Babylon renderer.
+The game needs WebGL2, a mouse and a keyboard. It was migrated from three.js and JavaScript to
+Babylon.js and TypeScript; [MIGRATION.md](MIGRATION.md) records how, milestone by milestone.
 
 ### Windows desktop build
 
@@ -245,12 +245,15 @@ src/
                        types.ts: Player, Order, Buff, ...; hooks.ts: what the simulation reports
   ai/                  creep camps, Kalenden's Legion, rival general AI (hero and empire)
   world/               map layout, terrain generation, A* path grid, noise
-  render/              view and camera, procedural models, unit views, effects, projectiles, overlay
-  babylon/             Babylon.js renderer (?renderer=babylon): view, camera, terrain, models, effects,
+  babylon/             Babylon.js renderer: view, camera, terrain, models, effects,
                        HUD icons and portrait, spatial audio
-  ui/                  HUD console, command card, minimap, icons and 3D portrait
+  ui/                  HUD console, command card, minimap, 2D overlay (health bars, floating text)
+  generated/           models.glb, baked by tools/bake-models.mjs (not committed)
 tools/
-  gallery.html         dev gallery of every procedural model (npm run dev → /tools/gallery.html)
+  models/              the procedural model builders (three.js geometry, build time only)
+  bake-models.mjs      runs the builders in Node and writes src/generated/models.glb
+  gallery-babylon.html dev gallery of the baked models in the game's renderer (/tools/gallery-babylon.html)
+  gallery.html         the builders' own three.js gallery, for editing models (/tools/gallery.html)
   build-artifact.mjs   post-build step for the hosted version
   headless-sim.mjs     npm run sim: the simulation without any renderer
 ```
@@ -262,7 +265,7 @@ engine; renderers read its state and implement `SimHooks`. It sticks to erasable
 Testing helpers (dev server only): `?autostart=hero:paladin` or `?autostart=empire` skips the
 title screen, and `&rivals=hero-ranger-ally,empire,random` sets the computer generals
 (`path[-hero][-side]` each). `&reveal=1` removes the fog of war, `&aiplayer=1` lets the AI play
-for you, and `&speed=4` speeds up the game. With the Babylon.js renderer, `&quality=low|medium|high`
+for you, and `&speed=4` speeds up the game. `&quality=low|medium|high`
 picks the graphics preset (also in the in-game Menu): Low is the classic flat-coloured look, Medium
 and High add HDR tone mapping, colour grading, bloom, painted textures, shadows, ambient occlusion
 and GPU particles. `&bench=240` stages a 240-unit battle with a frame-rate readout (the readout

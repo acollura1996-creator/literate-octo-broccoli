@@ -7,7 +7,7 @@
 // the albedo around its flat colour.
 //
 // The materials come from the three.js builders as flat colours, so each is classified by colour:
-// exact palette entries first (src/render/models/common.js), then hue, saturation and value.
+// exact palette entries first (tools/models/models/common.js), then hue, saturation and value.
 import { MaterialPluginBase } from '@babylonjs/core/Materials/materialPluginBase';
 import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
@@ -34,7 +34,7 @@ const KINDS: Record<PaintKind, { w: [number, number, number, number]; strength: 
   plain: { w: [0, 0, 0, 1], strength: 0.08, scale: 0.8 },
 };
 
-/** The model palette (src/render/models/common.js `P`) by kind. */
+/** The model palette (tools/models/models/common.js `P`) by kind. */
 const PALETTE: Record<number, PaintKind> = {
   0xb4bcc6: 'metal', 0x6c7480: 'metal', 0xe2e8ef: 'metal', 0x858d98: 'metal', 0x3c4048: 'metal',
   0xf2c43c: 'gold', 0xb98a1e: 'gold', 0xb87333: 'gold',

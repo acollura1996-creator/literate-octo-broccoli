@@ -16,9 +16,8 @@ const log = (...a: unknown[]): void => {
 const DIST = path.join(__dirname, '..', 'dist');
 const APP_ORIGIN = 'app://game';
 
-// Until the Babylon renderer becomes the default (see MIGRATION.md), the desktop build opts in.
 // HE3D_QUERY adds test parameters (e.g. `autostart=empire`) in unpackaged development runs only.
-const START_QUERY = `?renderer=babylon${!app.isPackaged && process.env.HE3D_QUERY ? `&${process.env.HE3D_QUERY}` : ''}`;
+const START_QUERY = !app.isPackaged && process.env.HE3D_QUERY ? `?${process.env.HE3D_QUERY}` : '';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },

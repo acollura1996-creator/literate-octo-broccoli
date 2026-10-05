@@ -1,6 +1,6 @@
 // Visual representation of a unit on Babylon: the baked model, the procedural animation driver,
 // the selection ring, construction scaffold, death, carried resources, buff visuals and fog-of-war
-// visibility. A port of src/render/unitview.js with the same behaviour.
+// visibility. A port of the original three.js unit view with the same behaviour.
 //
 // The animation driver keeps three.js semantics: every animated node has an Euler rotation in XYZ
 // order (three.js's default) that the driver sets per axis, converted to a quaternion when applied.
@@ -28,7 +28,7 @@ import type { Game } from '../game/game.ts';
 import type { GroundItem } from '../game/types.ts';
 
 // ---------------------------------------------------------------------------------- shared data
-// Pole weapons thrust instead of swinging (same table as src/render/unitview.js).
+// Pole weapons thrust instead of swinging (same table as the original three.js unit view).
 const THRUST: Record<string, number> = { spearman: 0.55, royal_knight: 0.05, hoplite: 1.1 };
 const AURA_COLORS: Record<string, number> = { devotion_aura: 0xffe08a, brilliance_aura: 0x9f8cff, trueshot_aura: 0xb8f08a };
 const RING_COLORS = { own: 0x33ff33, ally: 0xffee33, enemy: 0xff3333, neutral: 0xffee33 } as const;

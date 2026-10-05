@@ -2,15 +2,14 @@
 import '@fontsource/cinzel/500.css';
 import '@fontsource/cinzel/700.css';
 import '@fontsource/cinzel/900.css';
-import { View } from './render/view.js';
-import { Overlay } from './render/overlay.js';
+import { Overlay } from './ui/overlay.js';
 import { Game } from './game/game.ts';
 import { Input } from './input.js';
 import { Hud } from './ui/hud.js';
 import { HEROES, HERO_IDS } from './data/heroes.ts';
 import { UNITS } from './data/units.ts';
 import { ABILITIES } from './game/abilities.ts';
-import { TEAM_COLORS } from './render/assets.js';
+import { TEAM_COLORS } from './data/colors.ts';
 import { initAudio, playSfx, playBark, barkVoice, startMusic, stopMusic, setMuted, isMuted } from './audio.js';
 import { GeneralAI } from './ai/general.ts';
 import { Roads } from './game/roads.ts';
@@ -91,10 +90,9 @@ let running = false;
 let lastFrame = 0;
 let endShown = false;
 
-// The renderer: three.js by default, Babylon.js with `?renderer=babylon` (migration in progress,
-// see MIGRATION.md). Resolved before boot.
-let ViewClass = View;
-/** The Babylon.js audio backend (src/babylon/SpatialAudio.ts) with the Babylon renderer; null with three.js. */
+// The Babylon.js renderer and audio backend, loaded before boot (src/babylon/).
+let ViewClass = null;
+/** Spatial sound effects and ambience (src/babylon/SpatialAudio.ts). */
 let spatial = null;
 
 function ensureView() {
@@ -342,7 +340,7 @@ function startGame() {
   $('screen-title').classList.add('hidden');
   $('screen-loading').classList.remove('hidden');
   $('hud').classList.add('hidden');
-  // The Babylon view loads its models first (view.ready); the three.js view has nothing to wait for.
+  // The view loads its models first (view.ready).
   Promise.resolve(view.ready)
     .then(() => new Promise((resolve) => setTimeout(resolve, 30)))
     .then(createGame)
@@ -605,7 +603,7 @@ function autostart() {
 }
 
 function launch() {
-  // The Babylon view loads its models first (view.ready); the three.js view has nothing to wait for.
+  // The view loads its models first (view.ready).
   ensureView();
   Promise.resolve(view.ready).then(() => {
     spatial?.prerender();
@@ -615,18 +613,11 @@ function launch() {
   });
 }
 
-if (params.get('renderer') === 'babylon') {
-  Promise.all([import('./babylon/BabylonView.ts'), import('./babylon/SpatialAudio.ts')])
-    .then(([m, a]) => {
-      ViewClass = m.BabylonView;
-      spatial = new a.SpatialAudio();
-      launch();
-    })
-    .catch((e) => {
-      console.error('Babylon.js renderer failed to load; using three.js', e);
-      launch();
-    });
-} else launch();
+Promise.all([import('./babylon/BabylonView.ts'), import('./babylon/SpatialAudio.ts')]).then(([m, a]) => {
+  ViewClass = m.BabylonView;
+  spatial = new a.SpatialAudio();
+  launch();
+});
 window.__setSpeed = (s) => (speed = s);
 window.__initSound = initSound;
 window.__audio = () => spatial;

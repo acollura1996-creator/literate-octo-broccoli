@@ -223,7 +223,7 @@ export type ShapeSpec =
   | ['circle', number, number?]
   | ['torus', number, number, number?, number?];
 
-/** Shape helpers with the three.js geo.* signatures (see src/render/assets.js). */
+/** Shape helpers with the three.js geo.* signatures (see tools/models/assets.js). */
 export const shape = {
   box: (w: number, h: number, d: number): ShapeSpec => ['box', w, h, d],
   cyl: (rt: number, rb: number, h: number, seg = 8): ShapeSpec => ['cyl', rt, rb, h, seg],

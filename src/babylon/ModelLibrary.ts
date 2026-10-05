@@ -1,5 +1,5 @@
-// The baked models (src/generated/models.glb, made by tools/bake-models.mjs from the same
-// procedural builders the three.js renderer uses), loaded once with Babylon's glTF loader.
+// The baked models (src/generated/models.glb, made by tools/bake-models.mjs from the original
+// procedural three.js builders in tools/models/), loaded once with Babylon's glTF loader.
 //
 // Each model is a template hierarchy that stays hidden. A unit gets its own copy of the transform
 // nodes (so its parts can animate) with InstancedMesh for every mesh: all units of a model share
@@ -26,7 +26,7 @@ import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { TeamColorPlugin, type TeamFactor } from './TeamColor';
 
-/** Animation handles (the parts contract of src/render/models.js), resolved to nodes. */
+/** Animation handles (the parts contract of tools/models/models.js), resolved to nodes. */
 export interface ModelParts {
   body?: TransformNode;
   head?: TransformNode;

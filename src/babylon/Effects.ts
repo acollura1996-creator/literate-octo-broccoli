@@ -1,5 +1,5 @@
 // Transient visual effects on Babylon: hit sparks, explosions, rings, spell visuals, order markers,
-// level-up beams, the nuke and tree highlights. A port of src/render/effects.js (same API, same
+// level-up beams, the nuke and tree highlights. A port of the original three.js effects (same API, same
 // timings and shapes), built from FxKit instances. Effects are visual only: anything that affects
 // the game (damage, timers) lives in the simulation.
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';

@@ -1,4 +1,4 @@
-// Babylon meshes for the terrain data (src/world/terrain.js), matching the three.js TerrainView:
+// Babylon meshes for the terrain data (src/world/terrain.ts), matching the three.js TerrainView:
 // the heightfield with the painted ground map and detail map, the moat water, trees and doodads as
 // thin instances (one draw call per species per 32×32-cell chunk), and the road surface.
 import { Mesh } from '@babylonjs/core/Meshes/mesh';

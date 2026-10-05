@@ -298,8 +298,7 @@ export class Terrain {
 
   // ------------------------------------------------------------- appearance
   // Engine-free inputs for the renderers: the painted ground map, per-tree tints and the scattered
-  // rocks, bushes and flowers. The meshes are built by the renderer (src/render/terrainView.js,
-  // src/babylon/TerrainView.ts).
+  // rocks, bushes and flowers. The meshes are built by the renderer (src/babylon/TerrainView.ts).
 
   paintTexture(): HTMLCanvasElement {
     const RES = 2048;

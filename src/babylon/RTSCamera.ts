@@ -1,4 +1,4 @@
-// The RTS camera, ported from the three.js `RTSCamera` (src/render/view.js) with the same public
+// The RTS camera, ported from the original three.js `RTSCamera` with the same public
 // shape, so the existing input code (edge, keyboard and middle-drag panning, wheel zoom), the
 // minimap and the HUD drive it unchanged: `target`, `distance`, `zoomTarget`, `minDist`,
 // `maxDist`, `vel`, `setTarget()`, `update()` and `screenToGround()`.

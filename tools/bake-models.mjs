@@ -1,16 +1,17 @@
-// Bakes every procedural model (src/render/models/*) into one binary glTF file,
-// src/generated/models.glb, for the Babylon.js renderer (MIGRATION.md, decision D1).
+// Bakes every procedural model (tools/models/*) into one binary glTF file,
+// src/generated/models.glb, for the game's Babylon.js renderer (MIGRATION.md, decision D1).
 //
 //   node tools/bake-models.mjs [--force]
 //
-// The builders are the same code the three.js renderer runs. three.js geometry needs no WebGL,
-// so they run here in Node. The game then loads the GLB with @babylonjs/loaders and contains no
-// three.js. The bake is skipped when the GLB is newer than every input.
+// The builders are the original procedural models, written with three.js geometry. three.js needs
+// no WebGL for that, so they run here in Node at build time; three.js is a devDependency only. The
+// game loads the GLB with @babylonjs/loaders and contains no three.js. The bake is skipped when the
+// GLB is newer than every input.
 //
 // What goes into the file:
 //   - One root node per model, named after the model id. Its `extras` hold `height`, `radius` and
 //     `parts`, the animation handles (legs, arms, weapon, doors, …) as node names, in the shape
-//     built by buildTemplate() in src/render/models.js.
+//     built by buildTemplate() in tools/models/models.js.
 //   - Nodes keep the builders' hierarchy and transforms (three.js and glTF are both right-handed,
 //     Y up, +Z forward).
 //   - Flat-shaded materials (the default in the builders) get no normals: the renderer derives
@@ -26,14 +27,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { MODEL_IDS, buildTemplate } from '../src/render/models.js';
+import { MODEL_IDS, buildTemplate } from './models/models.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'src/generated/models.glb');
 const INPUTS = [
-  path.join(ROOT, 'src/render/models'),
-  path.join(ROOT, 'src/render/models.js'),
-  path.join(ROOT, 'src/render/assets.js'),
+  path.join(ROOT, 'tools/models/models'),
+  path.join(ROOT, 'tools/models/models.js'),
+  path.join(ROOT, 'tools/models/assets.js'),
   fileURLToPath(import.meta.url),
 ];
 

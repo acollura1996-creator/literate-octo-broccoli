@@ -1,6 +1,5 @@
-// The Babylon.js view (`?renderer=babylon`). It has the same public interface as the three.js
-// `View` (src/render/view.js), so main.js, the input code, the HUD, the minimap and the overlay
-// work with either renderer.
+// The game's view on Babylon.js. It kept the public interface of the original three.js `View`, so
+// main.js, the input code, the HUD, the minimap and the overlay carried over unchanged.
 //
 // Everything it draws is Babylon: terrain, units, effects, projectiles, previews, and the HUD's
 // icons and portrait (UiRenderer).

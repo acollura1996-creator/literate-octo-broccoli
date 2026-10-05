@@ -1,6 +1,6 @@
 // Fog of war and black mask: every Babylon material is darkened by the fog grid of the simulation
-// (src/game/fog.js), sampled at the fragment's world XZ position. This replaces the three.js
-// `onBeforeCompile` patch in src/render/assets.js with a Babylon material plugin.
+// (src/game/fog.ts), sampled at the fragment's world XZ position. This replaces the original
+// three.js `onBeforeCompile` patch with a Babylon material plugin.
 import { MaterialPluginBase } from '@babylonjs/core/Materials/materialPluginBase';
 import { RegisterMaterialPlugin } from '@babylonjs/core/Materials/materialPluginManager';
 import type { Material } from '@babylonjs/core/Materials/material';

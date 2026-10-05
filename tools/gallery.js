@@ -11,8 +11,8 @@
 //   merge=0              disable static-mesh merging (debug)
 //   cols=4 gap=0.7       layout
 import * as THREE from 'three';
-import { createModel, MODEL_IDS, MODEL_OPTIONS } from '../src/render/models.js';
-import { fogUniforms, mat, geo } from '../src/render/assets.js';
+import { createModel, MODEL_IDS, MODEL_OPTIONS } from './models/models.js';
+import { fogUniforms, mat, geo } from './models/assets.js';
 
 const q = new URLSearchParams(location.search);
 const ids = q.get('ids') ? q.get('ids').split(',').filter(Boolean) : MODEL_IDS;

@@ -1,7 +1,7 @@
 // Projectiles in flight: arrows, magic bolts, thrown axes, rocks and fireballs, Storm Bolt
 // hammers, bullets, grenades, cannonballs, shells, rockets, plasma, and instant lasers and rail
 // shots. Engine-free: this is where shots travel and land (calling their `onHit`); the renderers
-// draw `list` (src/render/projectiles.js, src/babylon/Projectiles.ts). Homing unless they are lobbed
+// draw `list` (src/babylon/Projectiles.ts). Homing unless they are lobbed
 // at a point.
 import { MUZZLE } from '../data/muzzles.ts';
 import type { Vec3 } from '../data/muzzles.ts';

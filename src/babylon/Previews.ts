@@ -1,5 +1,5 @@
 // Building-placement ghost and road/wall line preview on Babylon (the logic is in src/input.js).
-// Same look as src/render/previews.js: a see-through green or red copy of the building over its
+// Same look as the original three.js previews: a see-through green or red copy of the building over its
 // footprint tiles, and one translucent block per road or wall cell.
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';

@@ -118,4 +118,4 @@ export function mesh(geometry, material, x = 0, y = 0, z = 0, parent = null) {
 }
 
 // Player colours live with the engine-free data; re-exported for the existing imports.
-export { TEAM_COLORS } from '../data/colors.ts';
+export { TEAM_COLORS } from '../../src/data/colors.ts';

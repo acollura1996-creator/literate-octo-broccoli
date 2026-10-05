@@ -1,6 +1,6 @@
-// Draws the simulation's projectiles (src/game/projectiles.js) on Babylon: the same meshes as the
-// three.js version (src/render/projectiles.js), oriented along their flight, with spin, smoke
-// trails and fading laser beams.
+// Draws the simulation's projectiles (src/game/projectiles.ts) on Babylon: the same meshes as the
+// original three.js renderer, oriented along their flight, with spin, smoke trails and fading
+// laser beams.
 import type { FxKit, FxNode, LitSpec } from './FxKit';
 import { FxMaterial, shape as geo } from './FxKit';
 import type { Effects } from './Effects';

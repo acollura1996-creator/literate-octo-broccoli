@@ -1,5 +1,5 @@
 // Model pictures for the HUD on Babylon: command-card icons and the live 3D portrait (Warcraft III's
-// talking head). A port of src/ui/icons.js.
+// talking head). A port of the original three.js icon renderer.
 //
 // Both use a separate scene on the game's engine, with their own copy of the baked models, lights
 // and no fog of war.
@@ -30,7 +30,7 @@ const DEG = Math.PI / 180;
 /** What icons and portraits need of a unit (the HUD also passes stand-ins for unit types). */
 type UnitLike = Pick<Unit, 'id' | 'modelId' | 'isBuilding'> & { owner: { color: number }; def: { modelColor?: number } };
 
-/** Frame a model nicely: whole thing for buildings, upper body for units (as in icons.js). */
+/** Frame a model nicely: whole thing for buildings, upper body for units (as the original icons did). */
 function frame(cam: TargetCamera, m: ModelInstance, isBuilding: boolean, portrait = false): void {
   m.root.computeWorldMatrix(true);
   let min = new Vector3(Infinity, Infinity, Infinity);
@@ -88,7 +88,7 @@ class LightRig {
     l.intensity = intensity / Math.PI;
   }
 
-  /** icons.js icon scene: hemisphere 1.6, white key light 2.2 from (2, 4, 5). */
+  /** The original icon scene: hemisphere 1.6, white key light 2.2 from (2, 4, 5). */
   icon(): void {
     this.hemi.diffuse = hex3(0xffffff);
     this.hemi.groundColor = hex3(0x404040);
@@ -97,7 +97,7 @@ class LightRig {
     this.rim.intensity = 0;
   }
 
-  /** icons.js portrait scene: cool hemisphere 1.5, warm key 2.4, blue rim 1.2 from behind. */
+  /** The original portrait scene: cool hemisphere 1.5, warm key 2.4, blue rim 1.2 from behind. */
   portrait(): void {
     this.hemi.diffuse = hex3(0xdde8ff);
     this.hemi.groundColor = hex3(0x2a2018);
@@ -202,7 +202,7 @@ export class UiRenderer {
   }
 }
 
-/** The animated 3D portrait in the console (icons.js Portrait, same framing and idle motion). */
+/** The animated 3D portrait in the console (same framing and idle motion as the original). */
 export class Portrait {
   private el: HTMLElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
