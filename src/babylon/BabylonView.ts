@@ -4,7 +4,9 @@
 //
 // Everything it draws is Babylon: terrain, units, effects, projectiles, previews, and the HUD's
 // icons and portrait (UiRenderer).
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Frustum } from '@babylonjs/core/Maths/math.frustum';
+import type { Plane } from '@babylonjs/core/Maths/math.plane';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
@@ -24,6 +26,7 @@ import { Previews } from './Previews';
 import { UiRenderer } from './UiRenderer';
 import { Graphics, QUALITIES, type Quality } from './Graphics';
 import { ParticleFx, type BurningSite } from './Particles';
+import { SceneInstrumentation } from '@babylonjs/core/Instrumentation/sceneInstrumentation';
 import type { GameLike, ItemLike, UnitLike } from './types';
 
 export interface ScreenPoint {
@@ -36,8 +39,8 @@ const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
 
 const QUALITY_KEY = 'he3d.quality';
 
-/** The saved quality preset; `?quality=low|medium|high` overrides it (tests, screenshots). */
-function savedQuality(): Quality {
+/** The chosen quality preset: `?quality=low|medium|high` (tests, screenshots), else the saved one. */
+function chosenQuality(): Quality | null {
   const q = new URLSearchParams(location.search).get('quality');
   if (q && (QUALITIES as string[]).includes(q)) return q as Quality;
   try {
@@ -46,7 +49,7 @@ function savedQuality(): Quality {
   } catch {
     /* storage unavailable */
   }
-  return 'high';
+  return null;
 }
 
 export class BabylonView {
@@ -65,6 +68,14 @@ export class BabylonView {
   /** GPU particles (explosions, spells, burning buildings). */
   readonly particles: ParticleFx;
   private burnCheck = 0;
+  /** First-run frame-rate check (see the constructor). */
+  private autoQuality: { warm: number; time: number; frames: number } | null = null;
+  private lastFrameAt = 0;
+  /** Called when the first-run check settles on a lower preset. */
+  onQualityLowered: ((q: Quality) => void) | null = null;
+  private instrumentation: SceneInstrumentation | null = null;
+  private readonly frustum: Plane[] = Frustum.GetPlanes(new Matrix());
+  private readonly sphereCenter = new Vector3();
   private terrainView: TerrainView | null = null;
   private roadView: RoadView | null = null;
   private fog: FogOfWar | null = null;
@@ -97,19 +108,52 @@ export class BabylonView {
     this.hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
     this.sun = new DirectionalLight('sun', new Vector3(-0.4, -1, -0.4), scene);
     this.graphics = new Graphics(scene, this.cam.camera, this.sun);
-    this.graphics.setQuality(savedQuality());
+    const chosen = chosenQuality();
+    this.graphics.setQuality(chosen ?? 'high');
+    // First run: start on High and step down if the frame rate is low (once; the result is saved).
+    if (!chosen) this.autoQuality = { warm: 2.5, time: 0, frames: 0 };
     this.particles = new ParticleFx(scene, () => this.graphics.particleDensity);
     this.ready = Promise.all([ModelLibrary.load(scene), UiRenderer.create(engine)]).then(([lib, ui]) => {
       this.models = lib;
       lib.onCaster = (m) => this.graphics.addCaster(m);
       for (const m of lib.receivers) this.graphics.addReceiver(m);
+      for (const m of lib.glowSources) this.graphics.addGlow(m);
       this.unitAssets = new UnitAssets(scene, lib);
+      this.unitAssets.inView = (x, y, z, r) => this.inView(x, y, z, r);
       this.previews = new Previews(scene, lib);
       this.ui = ui;
     });
 
     this.resize();
     (window as unknown as { __babylon: unknown }).__babylon = { engine, scene, view: this };
+  }
+
+  /** Could a sphere at (x, y, z) of radius r be on screen? */
+  inView(x: number, y: number, z: number, r: number): boolean {
+    const c = this.sphereCenter.set(x, y, z);
+    for (const p of this.frustum) if (p.dotCoordinate(c) < -r) return false;
+    return true;
+  }
+
+  // ---- Performance readout (M9) --------------------------------------------------------------------
+  /** Per-frame renderer statistics (instrumentation starts on the first call). */
+  perfStats(): { drawCalls: number; activeMeshes: number; meshes: number; evalMs: number; renderMs: number; frameMs: number } {
+    if (!this.instrumentation) {
+      const i = new SceneInstrumentation(this.bscene);
+      i.captureFrameTime = true;
+      i.captureRenderTime = true;
+      i.captureActiveMeshesEvaluationTime = true;
+      this.instrumentation = i;
+    }
+    const i = this.instrumentation;
+    return {
+      drawCalls: i.drawCallsCounter.current,
+      activeMeshes: this.bscene.getActiveMeshes().length,
+      meshes: this.bscene.meshes.length,
+      evalMs: i.activeMeshesEvaluationTimeCounter.lastSecAverage,
+      renderMs: i.renderTimeCounter.lastSecAverage,
+      frameMs: i.frameTimeCounter.lastSecAverage,
+    };
   }
 
   // ---- Graphics quality ----------------------------------------------------------------------------
@@ -119,6 +163,7 @@ export class BabylonView {
 
   /** 'low' | 'medium' | 'high' (saved for the next session). */
   setQuality(q: Quality): void {
+    this.autoQuality = null; // a choice (the player's, or the first-run check's) ends the check
     this.graphics.setQuality(q);
     try {
       localStorage.setItem(QUALITY_KEY, this.graphics.quality);
@@ -208,6 +253,8 @@ export class BabylonView {
     if (!g) return;
     this.updateWorld(g);
     this.updateLighting(g.timeOfDay);
+    // Last frame's camera frustum for culling whole units (the margin covers one frame of motion).
+    Frustum.GetPlanesToRef(this.cam.camera.getTransformationMatrix(), this.frustum);
     this.graphics.update(g.timeOfDay, this.cam.distance);
     for (const v of this.unitViews.values()) v.sync(dt, g.time);
     for (const v of this.itemViews.values()) v.sync(dt, g.time);
@@ -223,6 +270,37 @@ export class BabylonView {
     this.engine.beginFrame();
     this.bscene.render();
     this.engine.endFrame();
+    this.checkAutoQuality();
+  }
+
+  /**
+   * First-run quality check: after a short warm-up, average the frame rate over six seconds of play;
+   * below 45 fps drop from High to Medium, below 30 from Medium to Low, then save the result.
+   */
+  private checkAutoQuality(): void {
+    const a = this.autoQuality;
+    const now = performance.now();
+    const dt = this.lastFrameAt ? Math.min(0.5, (now - this.lastFrameAt) / 1000) : 0;
+    this.lastFrameAt = now;
+    if (!a || !this.game || document.hidden) return;
+    if (a.warm > 0) {
+      a.warm -= dt;
+      return;
+    }
+    a.time += dt;
+    a.frames++;
+    if (a.time < 6) return;
+    const fps = a.frames / a.time;
+    const q = this.graphics.quality;
+    const lower: Quality | null = q === 'high' && fps < 45 ? 'medium' : q === 'medium' && fps < 30 ? 'low' : null;
+    if (lower) {
+      this.graphics.setQuality(lower); // saved once the check settles
+      this.onQualityLowered?.(lower);
+      this.autoQuality = { warm: 2.5, time: 0, frames: 0 };
+    } else {
+      this.setQuality(q);
+      this.autoQuality = null;
+    }
   }
 
   /** Build the terrain, road and fog visuals for a new game, then keep them in sync. */

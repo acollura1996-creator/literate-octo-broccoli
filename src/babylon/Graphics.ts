@@ -21,6 +21,8 @@ import { Scene } from '@babylonjs/core/scene';
 import type { Camera } from '@babylonjs/core/Cameras/camera';
 import type { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
+import { Frustum } from '@babylonjs/core/Maths/math.frustum';
+import { Matrix } from '@babylonjs/core/Maths/math.vector';
 import { Constants } from '@babylonjs/core/Engines/constants';
 import { PainterlyPlugin } from './Painterly';
 
@@ -151,6 +153,8 @@ export class Graphics {
   private night = 0;
   private readonly casters = new Set<AbstractMesh>();
   private readonly receivers = new Set<AbstractMesh>();
+  /** Meshes with emissive parts: the glow layer renders only these (not the whole scene again). */
+  private readonly glowing = new Set<AbstractMesh>();
   private readonly curves = new ColorCurves();
   readonly haze: HazeState = { enabled: false, color: new Color3(), start: 0, end: 1 };
 
@@ -195,6 +199,14 @@ export class Graphics {
     this.shadows?.removeShadowCaster(mesh, false);
   }
 
+  /** A mesh (or instance source) that glows. */
+  addGlow(mesh: AbstractMesh): void {
+    if (this.glowing.has(mesh)) return;
+    this.glowing.add(mesh);
+    this.glow?.addIncludedOnlyMesh(mesh as never);
+    mesh.onDisposeObservable.addOnce(() => this.glowing.delete(mesh));
+  }
+
   /** Meshes that receive shadows (instances follow their source mesh). */
   addReceiver(mesh: AbstractMesh): void {
     this.receivers.add(mesh);
@@ -229,6 +241,7 @@ export class Graphics {
       csm.normalBias = 0.015;
       csm.darkness = 0;
       for (const m of this.casters) csm.addShadowCaster(m, false);
+      this.cullCascades(csm);
       this.shadows = csm;
     }
     for (const m of this.receivers) m.receiveShadows = p.cascades > 0;
@@ -247,6 +260,7 @@ export class Graphics {
     if (p.glow) {
       const glow = new GlowLayer('glow', scene, { mainTextureRatio: 0.5, blurKernelSize: 48 });
       glow.intensity = 0.55;
+      for (const m of this.glowing) glow.addIncludedOnlyMesh(m as never);
       this.glow = glow;
     }
 
@@ -286,6 +300,32 @@ export class Graphics {
     this.haze.enabled = p.post;
   }
 
+  /**
+   * Per-cascade caster culling. Babylon's CascadedShadowGenerator draws every caster into every
+   * cascade; this keeps those whose bounding sphere touches the cascade's light frustum (sides and
+   * far plane only: with depth clamping, casters between the sun and the cascade still count).
+   */
+  private cullCascades(csm: CascadedShadowGenerator): void {
+    const map = csm.getShadowMap();
+    if (!map) return;
+    const planes = Frustum.GetPlanes(Matrix.Identity());
+    const list: AbstractMesh[] = [];
+    map.getCustomRenderList = (layer, renderList, length) => {
+      const tm = csm.getCascadeTransformMatrix(layer);
+      if (!tm || !renderList) return null;
+      Frustum.GetPlanesToRef(tm, planes);
+      list.length = 0;
+      for (let i = 0; i < length; i++) {
+        const m = renderList[i] as AbstractMesh;
+        const bs = m.getBoundingInfo().boundingSphere;
+        let inside = true;
+        for (let p = 1; p < 6 && inside; p++) if (planes[p]!.dotCoordinate(bs.centerWorld) < -bs.radiusWorld) inside = false;
+        if (inside) list.push(m);
+      }
+      return list;
+    };
+  }
+
   /** Per frame: grading and haze follow the time of day; the haze range follows the zoom. */
   update(hour: number, cameraDistance: number): void {
     if (!this.pipeline) return;
@@ -306,6 +346,13 @@ export class Graphics {
     // Haze: none in the foreground, about a fifth at the top of the screen at any zoom.
     const s = this.scene;
     s.fogColor.set(g.haze[0], g.haze[1], g.haze[2]);
+    // Shadows only as far as the RTS camera sees (the top of the screen is ~1.5× the camera
+    // distance away); the default (the camera's 400-unit far plane) would put most of the map's
+    // forests in the far cascade.
+    if (this.shadows) {
+      const maxZ = Math.round(cameraDistance * 2.2 + 20);
+      if (Math.abs(this.shadows.shadowMaxZ - maxZ) > 4) this.shadows.shadowMaxZ = maxZ;
+    }
     s.fogStart = cameraDistance * 1.05;
     s.fogEnd = cameraDistance * 3.2;
     this.haze.color.copyFrom(s.fogColor);

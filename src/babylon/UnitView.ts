@@ -110,6 +110,12 @@ export class UnitAssets {
   readonly lumber: Mesh;
   readonly buff: Record<string, Mesh> = {};
   readonly shieldMaterial: StandardMaterial;
+  /**
+   * Camera culling for whole units (M9), set by the view each frame: true when a sphere at (x, y, z)
+   * of radius r may be on screen. Units off screen are disabled outright, so none of their parts
+   * is evaluated, animated or drawn.
+   */
+  inView: (x: number, y: number, z: number, r: number) => boolean = () => true;
 
   constructor(readonly scene: Scene, readonly models: ModelLibrary) {
     const unlit = (name: string, color: number, alpha: number, additive: boolean): StandardMaterial => {
@@ -326,9 +332,12 @@ export class UnitView {
     const u = this.unit;
     const g = this.game;
     const vis = this.computeVisible();
-    this.group.setEnabled(vis);
     this.visibleNow = vis;
-    if (!vis) return;
+    // Off-screen units skip everything (with a margin for their shadows).
+    const h = this.height || 1.2;
+    const shown = vis && this.assets.inView(u.x, g.terrain.heightAt(u.x, u.z) + h / 2, u.z, (this.model?.radius ?? 1) + h * 1.6 + 1.5);
+    this.group.setEnabled(shown);
+    if (!shown) return;
 
     this.group.position.set(u.x, g.terrain.heightAt(u.x, u.z), u.z);
     const root = this.rootPose;

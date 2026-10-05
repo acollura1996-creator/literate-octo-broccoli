@@ -1,6 +1,6 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **in progress.** Milestones M1–M8 are done; see section 3.
+Status: **in progress.** Milestones M1–M9 are done; see section 3.
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch, and the three.js version keeps running until every
@@ -397,12 +397,38 @@ The three.js renderer keeps working in parallel, behind `?renderer=three`, until
     - **High** adds 3 sharper cascades, SSAO and MSAA.
   - Verified with screenshots against Low and three.js: home base, citadel (wide and close), dusk, night, zoomed out, close-ups, effects and a burning building. Runtime switching through the menu works, with a clean console.
   - In this scene High draws about 7× as many calls as Low (the shadow cascades, SSAO's geometry pass and the glow layer each redraw the scene). M9 addresses this.
-- [ ] **M9 – Performance.**
-  - Target: 60 fps with 200+ units on screen.
-  - Instanced unit parts (one draw call per part type across all units and teams).
-  - Freeze world matrices and materials for static buildings; thin instances for every repeated prop.
-  - Merge static building meshes per age style; cull shadow casters per cascade.
-  - Benchmark scene with an fps readout and a headless measurement of draw calls and frame time.
+- [x] **M9 – Performance.** Target: 60 fps with 200+ units on screen.
+  - [x] Benchmark scene.
+    - `?bench=240` spawns two armies of 16 unit types, from the Bronze Age to the Galactic Age, between your base and the citadel, and makes them fight.
+    - `?fps=1`, or **Ctrl+Shift+F** in any build, shows a readout: fps, simulation / view / HUD milliseconds, draw calls and active meshes.
+    - `window.__perf` exposes the same numbers for headless measurement, and Babylon's `SceneInstrumentation` supplies the per-frame draw calls and evaluation times.
+  - [x] Instanced unit parts, merged.
+    - At load, every static part under each animated node of a model (the nodes named in its parts contract, and the root) is merged into one mesh in that node's space, whatever its material.
+    - Colours, team-colour factors and paint become vertex attributes read by one shared material (`MergedModel.ts`). The team colour stays per instance, so each merged part is one draw call for every unit of a model on every team.
+    - Glowing, translucent and depth-write-off parts keep their own materials.
+    - Template meshes go from 3,097 to 925: footman 24 → 6, knight 31 → 8, rifleman 31 → 6.
+    - All 147 models keep exactly the vertex bounds of the three.js version. Close-ups match with and without merging (`?merge=0` turns it off for comparison).
+    - Winding follows the glTF meshes (counter-clockwise), and mirrored parts flip.
+  - [x] Unit-level culling: a unit outside the camera frustum is disabled outright, with a margin for its shadow, so none of its parts is evaluated, animated or drawn. Hidden model templates are disabled too, so the scene no longer walks their ~4,000 meshes each frame.
+  - [x] Thin instances for every repeated prop (trees per 32 × 32 chunk and species, rocks, bushes, flowers; since M3).
+  - [x] Shadow casters are culled per cascade. Babylon's `CascadedShadowGenerator` draws every caster into every cascade, so `Graphics.cullCascades` gives each cascade's map a custom render list of only the casters inside that cascade's light frustum. The shadow distance follows the camera zoom, and off-screen units cast nothing (they are disabled).
+  - [x] The glow layer draws only the parts that glow (emissive or team-emissive parts kept out of the merge), instead of re-rendering the whole scene in black.
+  - Not done, with reasons:
+    - Freezing world matrices and materials for static buildings: Babylon already skips recomputing the world matrix of a node that hasn't moved. Freezing materials would stop the fog-of-war texture and paint toggles from binding.
+    - Merging static buildings across instances: merging per model already makes each building part one instanced draw call.
+  - [x] First-run quality check: with no saved preset, the game starts on High, measures six seconds of play and steps down to Medium below 45 fps (then Low below 30). It saves the result and tells the player.
+  - Measured with the 240-unit benchmark (390 units on the map, software rendering, Low; CPU-side numbers, as fps here is bound by the software rasterizer):
+
+    | | before M9 | after M9 |
+    |---|---|---|
+    | draw calls per frame | 537 | 220 |
+    | active meshes | 7,005 | 1,994 |
+    | meshes in the scene | 14,484 | 7,715 |
+    | active-mesh evaluation | 75 ms | 29 ms |
+    | Babylon render (CPU) | 21.8 ms | 9.5 ms |
+
+  - The same benchmark at 120 units on High (shadows, SSAO, glow): 1,489 → 652 draw calls per frame. The glow pass went from 183 to 25 draws and the shadow cascades from about 1,116 to about 440. Screenshots of the M8 scenes on High show the same shadows as before.
+  - **Real-GPU fps needs checking on real hardware.** This environment renders with SwiftShader on the CPU, so it can't show the frame rate a graphics card gives. The CPU-side cost per frame has dropped about 2.5×, and the first-run check keeps slower machines smooth.
 - [ ] **M10 – Package with Electron.**
   - electron-builder NSIS `x64` installer, app icon, offline fonts.
   - Check the unpacked app runs under Electron (Linux, Xvfb).

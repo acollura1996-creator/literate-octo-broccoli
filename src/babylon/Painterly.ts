@@ -231,6 +231,11 @@ export function paintPixels(N = 256): Uint8Array {
 let pixels: Uint8Array | null = null;
 const textures = new WeakMap<Scene, RawTexture>();
 
+/** The paint texture of a scene (merged model parts sample it too). */
+export function paintTextureFor(scene: Scene): RawTexture {
+  return paintTexture(scene);
+}
+
 /** The paint texture of a scene (generated once, shared by every scene). */
 function paintTexture(scene: Scene): RawTexture {
   let t = textures.get(scene);
@@ -327,6 +332,12 @@ export class PainterlyPlugin extends MaterialPluginBase {
       #endif`,
     };
   }
+}
+
+/** Pattern weights × strength and the scale of a kind (merged parts carry these per vertex). */
+export function paintParams(kind: PaintKind): { weights: [number, number, number, number]; scale: number } {
+  const k = KINDS[kind];
+  return { weights: k.w.map((w) => w * k.strength) as [number, number, number, number], scale: k.scale };
 }
 
 /** Give a material the painted look for its colour (sRGB) or an explicit kind. */

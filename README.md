@@ -239,7 +239,8 @@ title screen, and `&rivals=hero-ranger-ally,empire,random` sets the computer gen
 for you, and `&speed=4` speeds up the game. With the Babylon.js renderer, `&quality=low|medium|high`
 picks the graphics preset (also in the in-game Menu): Low is the classic flat-coloured look, Medium
 and High add HDR tone mapping, colour grading, bloom, painted textures, shadows, ambient occlusion
-and GPU particles.
+and GPU particles. `&bench=240` stages a 240-unit battle with a frame-rate readout (the readout
+also toggles with Ctrl+Shift+F in any build).
 
 ## Notes
 

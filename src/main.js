@@ -229,6 +229,15 @@ function bindModals() {
     $('btn-sound').textContent = isMuted() ? '🔇' : '🔊';
   });
   window.addEventListener('keydown', (e) => {
+    // Ctrl+Shift+F: frame-rate readout (packaged builds take no URL options).
+    if (e.ctrlKey && e.shiftKey && e.code === 'KeyF') {
+      e.preventDefault();
+      perf.on = !perf.on;
+      perf.el?.remove();
+      perf.el = null;
+      perf.t0 = 0;
+      return;
+    }
     if (!running) return;
     if (e.key === 'F10') {
       e.preventDefault();
@@ -387,6 +396,10 @@ function createGame() {
   } else {
     input = new Input(game, view, $('gl'));
     input.onBark = bark;
+    view.onQualityLowered = (q) => {
+      game?.message(`Graphics set to ${q === 'low' ? 'Low' : 'Medium'} for a smoother frame rate (change it in the Menu).`, '#d8ccaa');
+      if ($('opt-quality')) $('opt-quality').value = q;
+    };
     bindCameraOptions();
   }
   overlay.game = game;
@@ -415,6 +428,7 @@ function createGame() {
   window.__R = Roads;
   paused = false;
   setPaused(false);
+  if (params.get('bench')) benchmark(Math.max(2, Math.min(600, Number(params.get('bench')) || 200)));
   startMusic();
   if (spatial) {
     spatial.startAmbience(game);
@@ -456,6 +470,10 @@ function showEnd(over) {
 }
 
 // -------------------------------------------------------------- main loop
+// Performance readout (?fps=1, or ?bench=N): frame rate and where the frame time goes.
+const perf = { on: params.has('fps') || params.has('bench'), frames: 0, t0: 0, sim: 0, render: 0, ui: 0, el: null };
+window.__perf = null;
+
 function frame(now) {
   requestAnimationFrame(frame);
   if (!running || !game) {
@@ -465,20 +483,75 @@ function frame(now) {
   const realDt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
   try {
+    const t0 = performance.now();
     if (!paused) {
       const dt = realDt * speed;
       const steps = Math.max(1, Math.ceil(dt / 0.034));
       for (let i = 0; i < steps; i++) game.update(dt / steps);
     }
+    const t1 = performance.now();
     input.update(realDt);
     view.render(paused ? 0 : realDt * speed);
     spatial?.update(view.cam);
+    const t2 = performance.now();
     overlay.draw();
     hud.update(realDt);
     hud.renderPortrait(now / 1000);
+    if (perf.on) perfTick(now, t1 - t0, t2 - t1, performance.now() - t2);
   } catch (e) {
     console.error(e);
   }
+}
+
+function perfTick(now, simMs, renderMs, uiMs) {
+  perf.frames++;
+  perf.sim += simMs;
+  perf.render += renderMs;
+  perf.ui += uiMs;
+  if (!perf.t0) perf.t0 = now;
+  if (now - perf.t0 < 500) return;
+  const n = perf.frames;
+  const stats = typeof view.perfStats === 'function' ? view.perfStats() : {};
+  const units = game.units.filter((u) => !u.isBuilding && !u.dead).length;
+  window.__perf = { ...stats, fps: (n * 1000) / (now - perf.t0), simMs: perf.sim / n, viewMs: perf.render / n, uiMs: perf.ui / n, units };
+  perf.frames = 0;
+  perf.sim = perf.render = perf.ui = 0;
+  perf.t0 = now;
+  if (!perf.el) {
+    perf.el = document.createElement('div');
+    perf.el.id = 'perf-readout';
+    perf.el.style.cssText = 'position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:50;font:12px/1.3 monospace;color:#e8ffd0;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:4px;pointer-events:none;white-space:pre';
+    document.body.appendChild(perf.el);
+  }
+  const p = window.__perf;
+  perf.el.textContent = `${p.fps.toFixed(0)} fps · sim ${p.simMs.toFixed(1)} ms · view ${p.viewMs.toFixed(1)} ms · ui ${p.uiMs.toFixed(1)} ms · ${units} units` + (p.drawCalls !== undefined ? ` · ${p.drawCalls} draws · ${p.activeMeshes} active` : '');
+}
+
+/** ?bench=N: two armies of mixed units (ancient to galactic) meet between your base and the citadel. */
+function benchmark(n) {
+  const g = game;
+  const foe = g.generals.find((p) => p !== g.human && g.isEnemy(g.human, p));
+  if (!foe) return;
+  const home = g.homeOf(g.human);
+  const dx = 128 - home.x;
+  const dz = 128 - home.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const cx = home.x + (dx / len) * 26;
+  const cz = home.z + (dz / len) * 26;
+  const types = ['footman', 'archer', 'knight', 'spearman', 'musketeer', 'rifleman', 'crossbowman', 'priest', 'tank', 'catapult', 'laser_trooper', 'mech_walker', 'war_elephant', 'hoplite', 'sniper', 'exo_trooper'];
+  const perRow = 12;
+  for (let i = 0; i < n; i++) {
+    const side = i % 2;
+    const k = Math.floor(i / 2);
+    const row = Math.floor(k / perRow);
+    const col = k % perRow;
+    const x = cx + (col - (perRow - 1) / 2) * 1.4;
+    const z = cz + (side ? -1 : 1) * (5 + row * 1.4);
+    const u = g.spawnUnit(types[k % types.length], side ? foe : g.human, x, z);
+    g.issueOrder(u, { type: 'attackMove', point: { x: cx, z: cz + (side ? 6 : -6) } });
+  }
+  input.centerOn(cx, cz);
+  view.cam.distance = view.cam.zoomTarget = 46;
 }
 
 function boot(data) {
