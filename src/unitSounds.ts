@@ -16,7 +16,7 @@
 //  - shots, deaths, creep camps and moving vehicles: the game's state after the steps.
 //
 // Read-only towards the game, and it never touches Math.random (headless runs seed it).
-import { barkVoice, hasSfx } from './audio.ts';
+import { MOVE_LOOPS, barkVoice, hasSfx } from './audio.ts';
 import type { BarkKind, Material, Missile, MoveLoop, Weapon } from './audio.ts';
 import type { UnitDef } from './data/types.ts';
 import type { Game } from './game/game.ts';
@@ -299,6 +299,7 @@ export class UnitSounds {
 
   /** Follow a new game (or none). */
   attach(game: Game | null): void {
+    this.silence();
     this.game = game;
     this.queue = [];
     this.added = [];
@@ -339,9 +340,17 @@ export class UnitSounds {
     return true;
   }
 
-  /** The game added a unit (a trained unit answers 'ready'). */
+  /** The game added a unit (a trained unit answers 'ready'; a revived hero can die again). */
   unitAdded(u: Unit): void {
+    this.seenDead.delete(u);
     if (this.stepping) this.added.push(u);
+  }
+
+  /** Stop the movement loops (the game is paused, or over). */
+  silence(): void {
+    if (!this.out.movement) return;
+    for (const l of MOVE_LOOPS) this.out.movement(l, 0, 0, 0);
+    this.nextLoops = 0;
   }
 
   /** Call before the frame's simulation steps. */
@@ -431,6 +440,11 @@ export class UnitSounds {
     for (const q of queue) {
       if (!this.explained(q, deaths, shooters, hits, added)) this.out.sfx(q.name, q.vol, q.x, q.z);
     }
+    // A hero the player hired or revived announces itself.
+    for (const u of added) {
+      const voice = u.isHero && u.owner === g.human ? barkVoice(u.def) : null;
+      if (voice) this.out.bark(voice, 'ready', VOL.ready);
+    }
 
     for (const u of deaths) this.death(u);
     for (const u of shooters) {
@@ -442,7 +456,7 @@ export class UnitSounds {
     this.creatures(g, callers);
     if (wantLoops) {
       this.nextLoops = g.time + 0.25;
-      for (const l of ['tracks', 'hover', 'mech', 'hooves', 'wheels'] as const) {
+      for (const l of MOVE_LOOPS) {
         const e = loops.get(l);
         this.out.movement!(l, e ? Math.min(1, 0.45 + 0.12 * e.n) : 0, e ? e.x / e.n : cam.x, e ? e.z / e.n : cam.z);
       }
@@ -539,9 +553,9 @@ export class UnitSounds {
         this.out.sfx(calls[1], VOL.roar, best.x, best.z);
       }
     }
-    // Lone guards (the Legion's) roar once when they engage.
+    // Lone guards (the Legion's, at the citadel) roar when they engage.
     for (const u of callers) {
-      if (u.camp || u.order.type !== 'attack' || t < (this.roaredAt.get(u) ?? -1e9) + 15) continue;
+      if (u.camp || !u.guardPos || u.order.type !== 'attack' || t < (this.roaredAt.get(u) ?? -1e9) + 15) continue;
       const calls = callsOf(u.def);
       if (!calls || !g.fog.isVisible(u.x, u.z)) continue;
       this.roaredAt.set(u, t);

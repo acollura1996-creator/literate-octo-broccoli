@@ -209,6 +209,7 @@ function closeModal(id: string): void {
 
 function setPaused(p: boolean): void {
   paused = p;
+  if (p) sounds.silence(); // engines and hooves stop with the game
   $('pause-banner').classList.toggle('hidden', !p || !$('modal-menu').classList.contains('hidden'));
 }
 
