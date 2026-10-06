@@ -63,7 +63,7 @@ export function weaponOf(def: UnitDef): Weapon {
 const MATERIAL_OF: Record<string, Material> = {
   water_elemental: 'water', rock_golem: 'stone', skeleton: 'bone', skeleton_archer: 'bone', ballista: 'wood', catapult: 'wood',
   trebuchet: 'wood', cargo_wagon: 'wood', cannon: 'metal', howitzer: 'metal', paladin: 'metal', mountainking: 'metal',
-  kalenden: 'metal', dark_knight: 'metal', ogre: 'flesh', ogre_lord: 'flesh', farm: 'wood',
+  kalenden: 'metal', dark_knight: 'metal', ogre: 'flesh', ogre_lord: 'flesh', farm: 'wood', war_elephant: 'flesh',
 };
 
 /** What a unit sounds like when it is struck (its "armour sound"). */
@@ -100,7 +100,8 @@ export function deathOf(def: UnitDef): string {
   if (d) return d;
   if (def.boss) return 'dieBoss';
   if (def.vehicle) return 'dieVehicle';
-  if (def.minRange) return 'dieSiege';
+  // Siege engines: timber breaking up, or (gunpowder pieces) the powder going up.
+  if (def.minRange) return (def.age ?? 0) <= 5 ? 'dieSiege' : 'dieVehicle';
   if (def.cavalry) return 'dieHorse';
   if (def.undead) return def.armorType === 'heavy' ? 'dieUndead' : 'dieSkeleton';
   if (def.creep || def.legion) return def.radius >= 0.65 ? 'dieOgre' : 'dieGnoll';
