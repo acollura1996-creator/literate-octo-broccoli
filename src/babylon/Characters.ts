@@ -205,8 +205,13 @@ class CharacterPlugin extends MaterialPluginBase {
           vec4 kkS0 = vec4(0.0);
           vec4 kkS1 = vec4(0.0);
           vec4 kkS2 = vec4(0.0);
+        #ifdef SM_ESM
+          // Shadow maps (their passes define SM_*): the nearest frame is plenty.
+          kkSkin(floor(kkFrame.x + 0.5), 1.0, kkS0, kkS1, kkS2);
+        #else
           kkSkin(kkFrame.x, 1.0 - kkFrame.z, kkS0, kkS1, kkS2);
           if (kkFrame.z > 0.001) kkSkin(kkFrame.y, kkFrame.z, kkS0, kkS1, kkS2);
+        #endif
           {
             vec4 p = vec4(positionUpdated, 1.0);
             positionUpdated = vec3(dot(kkS0, p), dot(kkS1, p), dot(kkS2, p));
