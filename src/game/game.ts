@@ -794,7 +794,7 @@ export class Game {
       if (owner.isHuman) {
         const altar = this.reviveSite(owner);
         this.message(
-          altar ? `Your Hero has fallen! It will return at the Altar in ${Math.round(u.reviveAt - this.time)} seconds.` : 'Your Hero has fallen!',
+          altar ? `Your Hero has fallen! It will return at ${altar.def.revivesHeroes ? 'the Altar' : 'your town center'} in ${Math.round(u.reviveAt - this.time)} seconds.` : 'Your Hero has fallen!',
           '#ff6b6b',
         );
       } else if (kOwner?.isHuman) {
@@ -1335,7 +1335,10 @@ export class Game {
   buyItem(p: Player, shop: Unit, itemId: string): boolean {
     const item = ITEMS[itemId]!;
     const ware = shop.wares?.find((w) => w.id === itemId && w.stock > 0);
-    if (shop.wares && !ware) return false;
+    if (shop.wares && !ware) {
+      if (p.isHuman) this.message('Sold out: the traders bring new wares every 70 seconds.', '#ff8080');
+      return false;
+    }
     const price = itemPrice(itemId);
     const h = this.shopCustomer(p, shop);
     if (!h) {

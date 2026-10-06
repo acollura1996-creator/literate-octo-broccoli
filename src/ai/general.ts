@@ -146,6 +146,21 @@ export class GeneralAI {
     return list.reduce((s, u) => s + (u.def.food || 1), 0);
   }
 
+  /** Worth of the strongest enemy army in the field. */
+  rivalArmyWorth(): number {
+    let best = 0;
+    for (const o of this.g.generals) {
+      if (o === this.p || o.defeated || !this.g.isEnemy(this.p, o)) continue;
+      best = Math.max(best, this.worth(o.units.filter((u) => !u.dead && !u.def.worker && !u.isHero && u.canAttack)));
+    }
+    return best;
+  }
+
+  /** Fighting worth of some units and towers: what they cost (later ages cost more). */
+  worth(list: Unit[]): number {
+    return list.reduce((s, u) => s + u.def.cost.gold + u.def.cost.lumber, 0);
+  }
+
   home(): Point {
     const [x, z] = this.p.base!.hall;
     return { x, z };
@@ -1157,6 +1172,7 @@ export class GeneralAI {
   tendSites(peasants: Unit[]): void {
     const g = this.g;
     const p = this.p;
+    for (const b of this.sites.keys()) if (b.dead || !b.underConstruction) this.sites.delete(b);
     for (const b of p.buildings) {
       if (b.dead || !b.underConstruction) continue;
       if (peasants.some((u) => u.order.type === 'construct' && u.order.target === b)) {
@@ -1247,7 +1263,7 @@ export class GeneralAI {
       }
       let started: boolean;
       if (type === 'lumberyard') {
-        const spot = this.lumberYardSpot(hall!);
+        const spot = hall ? this.lumberYardSpot(hall) : null;
         started = spot ? this.buildAt('lumberyard', spot, peasants) : this.build(type, peasants, hall);
       } else started = this.build(type, peasants, hall);
       if (started) return;
@@ -1262,7 +1278,7 @@ export class GeneralAI {
         return tr && Math.hypot(tr.x - b.x, tr.z - b.z) < 12;
       });
       if (!near && yards < 3) {
-        const spot = this.lumberYardSpot(hall!);
+        const spot = hall ? this.lumberYardSpot(hall) : null;
         if (spot) this.buildAt('lumberyard', spot, peasants);
       }
     }
@@ -1461,6 +1477,8 @@ export class GeneralAI {
     if (food >= threshold || (this.expansionGuard && food >= 16)) {
       const obj = this.attackObjective(false);
       if (!obj) return;
+      // A march across half the map leaves the town bare for minutes: wait for a bigger army.
+      if (obj.player && Math.hypot(obj.x - h.x, obj.z - h.z) > MAP_SIZE * 0.55 && food < 30) return;
       this.state = 'attack';
       this.target = obj;
       this.armyStart = food;
@@ -1492,11 +1510,18 @@ export class GeneralAI {
     const k = g.legionMgr.kalenden;
     const teamPlay = this.hasAllies();
     const late = g.time > 26 * 60 || (teamPlay && g.time > 16 * 60);
-    if (!k.dead && late && food >= (teamPlay ? 30 : 40)) return { x: k.x, z: k.z, label: 'Assaulting Kalenden', kalenden: true };
+    // The citadel is a long march from home: only a big army goes, and not while a stronger rival army
+    // could raze the town behind its back.
+    const safe = this.rivalArmyWorth() <= this.worth(this.army()) * 1.2;
+    if (!k.dead && late && safe && food >= (teamPlay ? 36 : 44)) return { x: k.x, z: k.z, label: 'Assaulting Kalenden', kalenden: true };
     // Rival bases are only raided after a grace period that depends on difficulty.
     if (this.raidsAllowed()) {
       const base = this.nearestEnemyBase();
-      if (base && (this.attacks >= 2 || continuing)) {
+      // Not against a much stronger army (or an age ahead) at home: after a march across the map the
+      // survivors never make it back.
+      const fresh = base && (!continuing || this.target?.player !== base.player);
+      const defenders = fresh ? this.worth([...base.player.units, ...base.player.buildings].filter((u) => !u.dead && !u.def.worker && u.canAttack && Math.hypot(u.x - base.x, u.z - base.z) < 40)) : 0;
+      if (base && (this.attacks >= 2 || continuing) && defenders <= this.worth(this.army()) * 1.1) {
         const near = base.player.buildings.filter((b) => !b.dead).sort((a, b) => Math.hypot(a.x - base.x, a.z - base.z) - Math.hypot(b.x - base.x, b.z - base.z))[0];
         const label = `Attacking ${base.player.isHuman ? 'you' : base.player.name}`;
         return near ? { x: near.x, z: near.z, label, player: base.player } : { ...base, label };
@@ -1514,7 +1539,7 @@ export class GeneralAI {
       .filter((c) => c.tier <= (this.attacks >= 3 ? 3 : 2))
       .sort((a, b) => Math.hypot(a.at.x - h.x, a.at.z - h.z) - Math.hypot(b.at.x - h.x, b.at.z - h.z));
     if (camps[0]) return { ...camps[0].at, label: 'Clearing creep camps' };
-    if (!k.dead && food >= 34) return { x: CENTER, z: CENTER + CITADEL.half - 3, label: 'Assaulting Kalenden', kalenden: true };
+    if (!k.dead && safe && food >= 34) return { x: CENTER, z: CENTER + CITADEL.half - 3, label: 'Assaulting Kalenden', kalenden: true };
     return null;
   }
 }

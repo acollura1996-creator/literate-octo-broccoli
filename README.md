@@ -64,17 +64,38 @@ Generals board, so use Alt+Enter or the ⛶ button). Developer tools are disable
 
 ## The land of Kalenden
 
-The 256×256 map is four-fold symmetric, in a Lordaeron Summer style:
+The 384×384 map is four-fold symmetric, in a Lordaeron Summer style (even the forests mirror each
+other, so every general has the same woods). Dirt roads, which speed movement, link the bases to
+the outposts and to a ring road around the moat.
 
 - **Corners**: one start location per general (up to 4), each with open ground for a town, a gold
-  mine, forests around it and a nearby Goblin Merchant.
+  mine, forests around it, a nearby Goblin Merchant and a hill Mercenary Camp.
 - **Center**: Kalenden's walled citadel on a blighted plateau, ringed by a moat that can only be
   crossed at four diagonal fords. It holds his Keep, four Dark Spires, the Death Guard, skeletal
   warriors, and Kalenden himself.
-- **Edge outposts**: an expansion gold mine, a Mercenary Camp, an Arcane Vault and a Fountain of
-  Health, guarded by drakes and a rock golem.
-- **Creep camps**: 40 camps of kobolds, gnolls, wolves, trolls, spiders, ogres, golems and drakes.
-  They leash back home, drop treasure and respawn.
+- **Edge outposts**: an expansion gold mine, a themed Mercenary Camp (highland ogres and harpies,
+  lakeside murlocs and naga, southern brigands, western trolls and wolves), an Arcane Vault,
+  Fountains of Health and Mana, a Goblin Laboratory and a Waygate to the opposite outpost, guarded
+  by drakes and a rock golem.
+- **Boss lairs**: behind each outpost, a ring of cliffs holds a boss with its treasure: Vyrnax the
+  Red (north), the Ancient Hydra in its pool (east), Varrok the Bandit Lord (south) and the
+  Broodmother (west). Bosses cast spells, drop their own artifact and return after ten minutes.
+- **Villages** on the ring road: a Tavern, a Marketplace and a Waygate across the citadel.
+- **Quadrants**: two guarded expansion mines along the edges with lumber groves beside them, a
+  lake with murlocs and naga, ruins with harpies and runes, a brigand camp holding captives, and
+  two secret glades in the forest, reached by narrow tracks: a Shrine of the Ancients and a stash
+  of tomes.
+- **Creep camps**: 64 camps, easy near the bases and harder farther out: kobolds, gnolls,
+  murlocs, brigands, wolves, trolls and troll shamans, spiders, harpies, naga, ogres, golems and
+  drakes. They leash back home, drop treasure of the tier their strength earns and respawn.
+
+**Neutral buildings** work for your units in range, as in Warcraft III: shops and the Goblin
+Laboratory (blasting charges, speed potions, flares) sell to a Hero; Marketplaces sell a changing
+stock of rare finds, one of each; mercenaries and Taverns serve any of your units. A **Tavern**
+recruits a Hero for a general who has none (an empire's town center revives it) or hires a Hero
+general for three minutes. Right-click a **Waygate** with your units to step through to its twin.
+A **Shrine** blesses the army of the first Hero to reach it, then recharges. Items come in six
+tiers, from potions to each boss's own treasure.
 
 Every few minutes **Kalenden's Legion** marches on one of the generals. Destroy Kalenden's Keep to
 stop the marches. You win by slaying Kalenden, or in free-for-all by being the last general
@@ -171,6 +192,20 @@ Every few minutes something happens somewhere in the land:
 
 **Creep camps grow stronger** the longer the game goes on.
 
+### Side quests
+
+Optional quests turn up over the game and go to the first general who completes them; the quest
+log (top left) lists them, a click on one shows where it is, the minimap marks them and `F9` has
+the details. Rewards are gold, lumber, experience and items.
+
+- **Captives**: brigands keep captives caged in each quadrant. Kill the guards and bring any unit
+  to the cage: four freed soldiers join you.
+- **Bounty**: a price on the head of one of the lair bosses.
+- **Buried treasure**: a map marks a circle; a Hero searching it sees the spot glint, and digs.
+- **The merchant's wagon**: take the contract at a village and keep the wagon alive through two
+  bandit ambushes on its way to the next outpost.
+- **Cleanse a region**: wipe out three camps; the general who clears the most of them is paid.
+
 ### Single player: the computer generals
 
 You play against (or alongside) up to three computer-controlled generals. For each one you
@@ -189,13 +224,17 @@ What the computer generals do on their own:
 
 - **AI heroes** hunt creep camps suited to their level, learn skills, buy items from merchants and
   arcane vaults, hire mercenaries, retreat to heal, Town-Portal home to defend, raid rivals, and
-  march on Kalenden once strong enough.
+  march on Kalenden once strong enough. They dig up treasure, free captives, take the merchant's
+  contract and claim bounties on lair bosses when they are strong enough.
 - **AI empires** balance peasants between gold and lumber, site Lumber Yards at the forest edge,
   lay a grid of streets and build houses along them, and build farms to feed their citizens. They
   tune taxes and rations to keep their people happy, advance through the twelve ages, and train
   the best units of each age. They also build a wall with a gate across the approach to their
   town, research upgrades and expand to new gold mines. In battle they clear creeps, hire Heroes,
   launch nuclear missiles, research at their Research Centers, attack rival bases and finally assault the citadel.
+  Rich empires recruit a Hero at a Tavern, who fights beside their army, and a big army may go
+  after a bounty.
+- **Armies and heroes take the waygates** when that makes a long march much shorter.
 - **AI heroes** you hire guard your lands and join your battles for the length of the contract.
 - **Allies** come to defend your base, join you when you fight a rival nearby, and join your
   assault on Kalenden.
@@ -223,7 +262,7 @@ WC3's attack-type/armor-type damage table and armor formula.
 | Input | Action |
 | --- | --- |
 | Left-click / drag | Select / box-select (Shift adds, double-click selects all of a type on screen) |
-| Right-click | Smart order: move, attack, gather, follow, pick up items, set rally points. A label beside the cursor says what it will do; trees light up for selected Peasants. |
+| Right-click | Smart order: move, attack, gather, follow, pick up items, set rally points, step through a Waygate. A label beside the cursor says what it will do; trees light up for selected Peasants. |
 | Click and drag (road / wall tool) | Lay a line of road or wall |
 | Command card hotkeys | `M` move, `S` stop, `H` hold, `A` attack-move, `P` patrol, `B` build, `O` learn skill, `Q W E R` spells |
 | `F1` | Select your Hero (press twice to center) |
@@ -246,7 +285,8 @@ src/
   globals.d.ts         the desktop bridge and the debug handles on `window`
   data/                units, buildings, heroes, items (types.ts: UnitDef, ItemDef, ...)
   game/                simulation: Game, Unit, orders/behaviour, abilities, fog of war, roads,
-                       empire economy (citizens, taxes, ages, hiring, nukes) and random events;
+                       empire economy (citizens, taxes, ages, hiring, nukes), random events,
+                       neutral wonders (waygates, shrines, runes, markets, cages) and side quests;
                        types.ts: Player, Order, Buff, ...; hooks.ts: what the simulation reports
   ai/                  creep camps, Kalenden's Legion, rival general AI (hero and empire)
   world/               map layout, terrain generation, A* path grid, noise

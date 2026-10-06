@@ -276,7 +276,7 @@ export class QuestManager {
     if (w.distTo(dest) < 5) {
       const p = w.owner;
       this.complete(q, p, { x: w.x, z: w.z });
-      g.kill(w, null, { expire: true });
+      g.removeQuietly(w);
       return;
     }
     const left = this.remaining(w, route);
