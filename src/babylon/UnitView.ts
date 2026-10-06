@@ -217,6 +217,10 @@ export class UnitView {
   private rootScale = 1;
   /** The rigged character, when the unit has one (M14). */
   private character: CharacterInstance | null = null;
+  /** KayKit buildings (M14) rise through the pack's construction stages and leave rubble. */
+  private kkBuilding = false;
+  private stage: { name: string; model: ModelInstance } | null = null;
+  private rubble: ModelInstance | null = null;
   /** Animation bookkeeping for characters. */
   private anim = { attackStart: -1, attackIndex: 0, lastFight: -99, idleUntil: 0, deathClip: '', spawned: false, level: 0, cheerUntil: 0 };
   /** Game time the view was made (units made after the start are new: raised, trained, summoned). */
@@ -247,6 +251,9 @@ export class UnitView {
     this.character = !u.isBuilding && chars?.has(u.modelId) ? chars.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost) : null;
     if (this.character && this.anim.deathClip) this.character.animator.play(this.anim.deathClip, { loop: false, fade: 0, at: 99 });
     const building = u.isBuilding ? chars?.instantiateBuilding(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost) : null;
+    this.kkBuilding = !!building;
+    this.stage?.model.dispose();
+    this.stage = null;
     this.model = this.character ?? building ?? this.assets.models.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost);
     this.model.root.parent = this.group;
     this.height = this.model.height ?? 1.2;
@@ -339,6 +346,12 @@ export class UnitView {
       if (u.isBuilding) {
         rootNode.position.y = -Math.min(1, t / 2.2) * this.height * 0.8;
         root.rz = Math.min(1, t / 2.2) * 0.12;
+        // KayKit buildings collapse into the pack's rubble.
+        if (this.kkBuilding && !this.rubble && t > 0.4) {
+          this.rubble = this.assets.characters!.instantiateStatic('hex/destroyed', u.owner.color, `rubble-${u.id}`, u.def.footprint! * 0.85);
+          this.rubble.root.parent = this.group;
+          this.rubble.root.rotation.y = (u.id % 4) * (Math.PI / 2);
+        }
       } else {
         // A fall with a small bounce as the body lands; four-legged creatures roll onto a side.
         const k = Math.min(1, t / 0.5);
@@ -380,6 +393,21 @@ export class UnitView {
 
   private syncConstruction(u: Unit): void {
     const rootNode = this.model.root;
+    if (this.kkBuilding) {
+      // The pack's stages: foundations, walls going up, a roofless frame; then the building.
+      const want = u.underConstruction ? (u.buildProgress < 0.34 ? 'hex/stage_A' : u.buildProgress < 0.67 ? 'hex/stage_B' : 'hex/stage_C') : null;
+      if (want !== (this.stage?.name ?? null)) {
+        this.stage?.model.dispose();
+        this.stage = null;
+        if (want) {
+          const m = this.assets.characters!.instantiateStatic(want, u.owner.color, `stage-${u.id}`, u.def.footprint! * 0.9);
+          m.root.parent = this.group;
+          this.stage = { name: want, model: m };
+        }
+      }
+      rootNode.setEnabled(!want);
+      return;
+    }
     if (u.underConstruction) {
       const k = Math.max(0.05, u.buildProgress);
       rootNode.scaling.y = this.rootScale * (0.08 + 0.92 * k);
@@ -756,6 +784,8 @@ export class UnitView {
 
   dispose(): void {
     this.scaffold?.dispose();
+    this.stage?.model.dispose();
+    this.rubble?.dispose();
     this.group.dispose(false, false);
   }
 }

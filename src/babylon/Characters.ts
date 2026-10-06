@@ -692,10 +692,15 @@ export class CharacterLibrary {
 
   /** The mesh of a building recipe (built once, hidden), and its size once scaled. */
   private buildingMesh(modelId: string, ghost: GhostMode | null): { mesh: Mesh; scale: number; height: number; radius: number } {
-    const key = `building:${modelId}|${ghost ?? ''}`;
     const recipe = BUILDING_RECIPES[modelId]!;
-    const piece = this.pieces.get(recipe.piece);
-    if (!piece) throw new Error(`kaykit: no piece ${recipe.piece}`);
+    return this.staticMesh(recipe.piece, recipe.size, ghost);
+  }
+
+  /** A static piece's mesh (built once, hidden), scaled to `size` wide. */
+  private staticMesh(pieceName: string, size: number, ghost: GhostMode | null): { mesh: Mesh; scale: number; height: number; radius: number } {
+    const key = `static:${pieceName}|${ghost ?? ''}`;
+    const piece = this.pieces.get(pieceName);
+    if (!piece) throw new Error(`kaykit: no piece ${pieceName}`);
     let mesh = this.meshes.get(key);
     if (!mesh) {
       mesh = this.pieceMesh(key, piece, TEAM_CELLS[piece.texture] ?? [], ghost);
@@ -707,7 +712,7 @@ export class CharacterLibrary {
     }
     const bb = mesh.getBoundingInfo().boundingBox;
     const w = Math.max(bb.maximum.x - bb.minimum.x, bb.maximum.z - bb.minimum.z);
-    const scale = recipe.size / Math.max(0.1, w);
+    const scale = size / Math.max(0.1, w);
     return { mesh, scale, height: bb.maximum.y * scale, radius: (w / 2) * scale };
   }
 
@@ -767,6 +772,20 @@ export class CharacterLibrary {
     inst.instancedBuffers.kkFrame = new Vector4(0, 0, 0, 0);
     if (!ghost) this.onCaster?.(inst);
     return { id: modelId, root, parts: {}, height, radius, meshes: [inst], dispose: () => root.dispose(false, false) };
+  }
+
+  /** Any static piece (construction stages, rubble), `size` wide, in a team colour. */
+  instantiateStatic(pieceName: string, team: number, name: string, size: number): ModelInstance {
+    const { mesh, scale, height, radius } = this.staticMesh(pieceName, size, null);
+    const root = new TransformNode(name, this.scene);
+    const inst = mesh.createInstance(`${name}-kk`);
+    inst.parent = root;
+    inst.scaling.setAll(scale);
+    inst.isPickable = false;
+    inst.instancedBuffers.kkTeam = new Color4(((team >> 16) & 255) / 255, ((team >> 8) & 255) / 255, (team & 255) / 255, 1);
+    inst.instancedBuffers.kkFrame = new Vector4(0, 0, 0, 0);
+    this.onCaster?.(inst);
+    return { id: pieceName, root, parts: {}, height, radius, meshes: [inst], dispose: () => root.dispose(false, false) };
   }
 
   /** A building in one flat material (placement previews). */

@@ -87,9 +87,9 @@ const PROPS = [
 ];
 
 /** Buildings of the Medieval Hexagon pack (the blue set: its blue swatches take the team colour). */
-const BUILDINGS = ['castle', 'barracks', 'blacksmith', 'church', 'home_A', 'home_B', 'tower_A', 'tower_B', 'lumbermill', 'market', 'tavern', 'archeryrange', 'windmill', 'mine', 'well']
+const BUILDINGS = ['castle', 'barracks', 'blacksmith', 'church', 'home_A', 'home_B', 'tower_A', 'tower_B', 'lumbermill', 'market', 'tavern']
   .map((n) => ({ name: `hex/${n}`, file: `Assets/gltf/buildings/blue/building_${n}_blue.gltf` }))
-  .concat(['destroyed', 'scaffolding', 'stage_A', 'stage_B', 'stage_C'].map((n) => ({ name: `hex/${n}`, file: `Assets/gltf/buildings/neutral/building_${n}.gltf` })));
+  .concat(['destroyed', 'stage_A', 'stage_B', 'stage_C'].map((n) => ({ name: `hex/${n}`, file: `Assets/gltf/buildings/neutral/building_${n}.gltf` })));
 
 /** Joints props may hang on even when no vertex is weighted to them. */
 const ATTACH_JOINTS = ['handslot.r', 'handslot.l', 'head', 'chest', 'hips'];
