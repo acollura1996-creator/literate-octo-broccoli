@@ -21,6 +21,7 @@ import type { BarkKind } from './audio.ts';
 import type { BabylonView } from './babylon/BabylonView.ts';
 import type { Quality } from './babylon/Graphics.ts';
 import type { SpatialAudio } from './babylon/SpatialAudio.ts';
+import { UnitSounds } from './unitSounds.ts';
 import type { PerfStats } from './globals.d.ts';
 
 /** An element of index.html (always present), as the element type the caller expects. */
@@ -110,6 +111,17 @@ let endShown = false;
 let ViewClass: typeof BabylonView | null = null;
 /** Spatial sound effects and ambience (src/babylon/SpatialAudio.ts). */
 let spatial: SpatialAudio | null = null;
+/** What each unit sounds like: turns the game's events into unit-specific sounds (src/unitSounds.ts). */
+const sounds = new UnitSounds(
+  {
+    sfx: (name, vol, x, z, rate) => sfx(name, vol, x, z, rate),
+    bark: (voice, kind, vol) => {
+      if (!spatial?.bark(voice, kind, vol)) playBark(voice, kind, vol);
+    },
+    movement: (loop, level, x, z) => spatial?.movement(loop, level, x, z),
+  },
+  () => (view ? view.cam.target : { x: 0, z: 0 }),
+);
 
 function ensureView(): void {
   if (view) return;
@@ -352,6 +364,7 @@ function teardown(): void {
   input!.cancelPlacement();
   input!.cancelLine();
   view.clearWorld();
+  sounds.attach(null);
   game = null;
 }
 
@@ -378,8 +391,8 @@ function initSound(): void {
 }
 
 /** Play a sound effect, at a map position when given (fading with distance from the camera target). */
-function sfx(name: string, vol = 1, x?: number, z?: number): void {
-  if (spatial?.play(name, vol, x, z)) return;
+function sfx(name: string, vol = 1, x?: number, z?: number, rate = 1): void {
+  if (spatial?.play(name, vol, x, z, rate)) return;
   if (x !== undefined && view) {
     const t = view.cam.target;
     const d = Math.hypot(t.x - x, t.z - z!);
@@ -389,22 +402,40 @@ function sfx(name: string, vol = 1, x?: number, z?: number): void {
   playSfx(name, vol);
 }
 
-/** A unit acknowledges a selection or an order ('select' | 'move' | 'attack'). */
+/**
+ * A unit acknowledges a selection or an order ('select' | 'move' | 'attack'). A building, or a unit
+ * that isn't the player's, answers a click with its own sound instead (a barracks' steel, a farm's
+ * animals, a creep's growl).
+ */
 function bark(u: Unit, kind: BarkKind): void {
+  if (u.isBuilding || u.owner !== game?.human) {
+    if (kind === 'select') sounds.selected(u);
+    return;
+  }
   const voice = barkVoice(u?.def);
   if (voice && !spatial?.bark(voice, kind)) playBark(voice, kind);
 }
 
+/** A unit joined the game: its sounds follow it, and the player's units get their voices ready. */
+function unitAdded(u: Unit): void {
+  view.addUnit(u);
+  sounds.unitAdded(u);
+  if (spatial && game && u.owner === game.human && !u.isBuilding) {
+    const voice = barkVoice(u.def);
+    if (voice) spatial.prepareBarks([voice]);
+  }
+}
+
 function createGame(): void {
   const hooks: SimHooks = {
-    onUnitAdded: (u) => view.addUnit(u),
+    onUnitAdded: unitAdded,
     onUnitRemoved: (u) => view.removeUnit(u),
     onUnitChanged: (u, modelChanged) => view.changeUnit(u, modelChanged),
     onItemDropped: (it) => view.addItem(it),
     onItemTaken: (it) => view.removeItem(it),
     isOnScreen: (x, z) => view.isOnScreen(x, z),
     centerOn: (x, z) => input?.centerOn(x, z),
-    sound: sfx,
+    sound: (name, vol, x, z) => sounds.simSound(name, vol, x, z),
     onGameOver: (over) => {
       setTimeout(() => showEnd(over), 2500);
     },
@@ -414,6 +445,8 @@ function createGame(): void {
   view.attachGame(game_);
   hooks.fx = view.fx!;
   game_.fx = view.fx!;
+  view.fx!.onHit = (t) => sounds.hitLanded(t as Unit);
+  sounds.attach(game_);
   game_.setup();
   if (params.get('reveal') === '1') game_.fog.reveal();
   // Test helper: let the computer play for the human too.
@@ -529,7 +562,13 @@ function frame(now: number): void {
     if (!paused) {
       const dt = realDt * speed;
       const steps = Math.max(1, Math.ceil(dt / 0.034));
-      for (let i = 0; i < steps; i++) game.update(dt / steps);
+      // The game's sounds are held back during the steps and played as unit sounds after them.
+      sounds.beginStep();
+      try {
+        for (let i = 0; i < steps; i++) game.update(dt / steps);
+      } finally {
+        sounds.endStep();
+      }
     }
     const t1 = performance.now();
     input!.update(realDt);
@@ -652,3 +691,4 @@ void Promise.all([import('./babylon/BabylonView.ts'), import('./babylon/SpatialA
 window.__setSpeed = (s: number) => (speed = s);
 window.__initSound = initSound;
 window.__audio = () => spatial;
+(window as unknown as { __sounds: UnitSounds }).__sounds = sounds;

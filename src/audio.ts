@@ -2899,6 +2899,7 @@ Object.assign(SFX, {
   rocketArty: asShot(sRocketArty, 1.4),
   flameRoar: asShot(sFlameRoar, 1.3),
   railShot: asShot(sRailShot, 0.75),
+  laserShot: asShot(sLaser, 2.4),
   laserTwin: asShot(sLaserTwin, 1.8),
   plasmaShot: asShot(sPlasmaShot),
   plasmaHeavy: asShot(sPlasmaHeavy, 0.7, 1),
@@ -4500,6 +4501,11 @@ export function hasSfx(name: string): boolean {
 }
 
 export const MAX_SFX_VOICES = MAX_VOICES;
+
+/** Live-synth voices playing now (tests). */
+export function sfxStats(): { voices: number } {
+  return { voices: voices.length };
+}
 
 /** The live AudioContext (null until initAudio). */
 export function getAudioContext(): AudioContext | OfflineAudioContext | null {

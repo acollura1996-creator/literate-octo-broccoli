@@ -10,6 +10,12 @@
 // New with Babylon: unit acknowledgements (barks) and an ambient bed (wind, birds by day, crickets
 // by night and the drone of Kalenden's citadel).
 //
+// M14: the game's own effects are rendered up front; the many unit sounds (every weapon on every
+// material, every death, creature and building) are rendered on first use, one at a time in the
+// background. Movement loops (tracks, hover engines, walkers, hooves, wheels) play from the centre of
+// the moving units near the camera. Shared group limits (synth.SFX_GROUPS) keep a big battle to a
+// handful of each kind of sound, and a full voice pool drops its quietest sound first.
+//
 // Until the engine exists (it needs the first user gesture) or a sound's buffers are rendered,
 // play() and bark() return false and the caller falls back to audio.ts's live synth.
 import { CreateAudioEngineAsync } from '@babylonjs/core/AudioV2/webAudio/webAudioEngine';
@@ -29,10 +35,29 @@ const FAR = 50;
  * panning hard left or right. The distance range is widened to match.
  */
 const LISTENER_HEIGHT = 8;
-/** Variants rendered per effect; effects longer than LONG seconds (fanfares, sirens, thunder) render once. */
-const VARIANTS = 3;
+/** Effects longer than LONG seconds (fanfares, sirens, thunder) render once, whatever their variant count. */
 const LONG = 2;
 const BIRD_VARIANTS = 6;
+/** Level of the movement loops at full strength. */
+const LOOP_GAIN = 0.7;
+/**
+ * Effects rendered at once. Each render is a short burst of graph building on the main thread and
+ * then waits for the audio thread, so overlapping a few keeps a slow frame rate from serializing them.
+ */
+const RENDER_BATCH = 4;
+
+/** The backend's own random source (Math.random belongs to the simulation). */
+function makeRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let x = a;
+    x = Math.imul(x ^ (x >>> 15), x | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const random = makeRng(Date.now() ^ 0xa0d10);
 
 const SPATIAL: Partial<IStaticSoundOptions> = {
   spatialEnabled: true,
@@ -54,6 +79,10 @@ interface Voice {
   sound: StaticSound;
   name: string;
   prio: number;
+  /** Its group (see synth.SFX_GROUPS), if any. */
+  group: string | null;
+  /** Volume it was started at, after the fall-off with distance (stealing drops the quietest). */
+  vol: number;
   start: number;
   busy: boolean;
   counted: boolean;
@@ -121,6 +150,12 @@ export class SpatialAudio {
   private readonly buffers = new Map<string, AudioBuffer[]>();
   private readonly pools = new Map<string, Pool>();
   private readonly building = new Map<string, Promise<void>>();
+  /** Effects waiting to be rendered on first use, and whether the renderer is busy. */
+  private readonly renderQueue: string[] = [];
+  private readonly requested = new Set<string>();
+  private renderBusy = false;
+  /** Movement loops: null while one renders. */
+  private readonly loops = new Map<string, StaticSound | null>();
   private readonly active: Voice[] = [];
   private readonly stats = new Map<string, { count: number; last: number }>();
 
@@ -139,22 +174,60 @@ export class SpatialAudio {
   private tz = CENTER;
   private yaw = Number.NaN;
 
-  /** Render the sound effects in the background (call once at boot; needs no user gesture). */
+  /**
+   * Render the game's own effects in the background (call once at boot; needs no user gesture). The
+   * unit sounds are rendered on first use (see request).
+   */
   prerender(): Promise<void> {
     this.rendering ??= (async () => {
-      for (const name of synth.SFX_NAMES) {
-        const list: AudioBuffer[] = [];
-        for (let i = 0; i < VARIANTS; i++) {
-          const b = await synth.renderSfx(name, i);
-          if (b) list.push(b);
-          if (!b || b.duration > LONG) break;
-        }
-        if (!list.length) continue;
-        this.buffers.set(name, list);
-        if (this.engine) await this.buildPool(name);
-      }
+      const names = synth.CORE_SFX.slice();
+      for (const n of names) this.requested.add(n);
+      while (names.length) await Promise.all(names.splice(0, RENDER_BATCH).map((n) => this.renderOne(n)));
     })().catch((e: unknown) => console.warn('[audio] pre-rendering failed; using the live synth:', e));
     return this.rendering;
+  }
+
+  /**
+   * Render an effect's variants (a long one once); once the engine runs, its voices are created in
+   * the background (that only waits on the engine, so the next renders needn't wait for it).
+   */
+  private async renderOne(name: string): Promise<void> {
+    const info = synth.sfxInfo(name);
+    if (!info || this.buffers.has(name)) return;
+    const first = await synth.renderSfx(name, 0);
+    if (!first) return;
+    const list = [first];
+    if (first.duration <= LONG && info.variants > 1) {
+      const more = await Promise.all(Array.from({ length: info.variants - 1 }, (_, i) => synth.renderSfx(name, i + 1)));
+      for (const b of more) if (b) list.push(b);
+    }
+    this.buffers.set(name, list);
+    if (this.engine) this.buildPool(name).catch((e: unknown) => console.warn('[audio] effect unavailable:', name, e));
+  }
+
+  /** Render an effect in the background, after those already waiting. */
+  private request(name: string): void {
+    if (this.requested.has(name) || !synth.hasSfx(name)) return;
+    this.requested.add(name);
+    this.renderQueue.push(name);
+    if (this.renderBusy) return;
+    this.renderBusy = true;
+    void (async () => {
+      try {
+        while (this.renderQueue.length) {
+          await Promise.all(this.renderQueue.splice(0, RENDER_BATCH).map((n) => this.renderOne(n)));
+        }
+      } catch (e) {
+        console.warn('[audio] rendering failed; using the live synth:', e);
+      } finally {
+        this.renderBusy = false;
+      }
+    })();
+  }
+
+  /** How many effects are rendered, and how many wait (tests). */
+  renderStats(): { rendered: number; waiting: number; active: number } {
+    return { rendered: this.pools.size, waiting: this.renderQueue.length, active: this.active.length };
   }
 
   /** Create the audio engine on audio.ts's context. Call after initAudio(), from a user gesture. */
@@ -179,7 +252,7 @@ export class SpatialAudio {
         engine.createBusAsync('ambience'),
       ]);
       this.engine = engine;
-      for (const name of [...this.buffers.keys()]) await this.buildPool(name);
+      for (const name of this.buffers.keys()) this.buildPool(name).catch((e: unknown) => console.warn('[audio] effect unavailable:', name, e));
       if (this.clock) void this.buildAmbience();
       this.prepareBarks(this.barkQueue.splice(0));
     })().catch((e: unknown) => {
@@ -205,16 +278,17 @@ export class SpatialAudio {
         const engine = this.engine!;
         const info = synth.sfxInfo(name)!;
         const bufs = await Promise.all(this.buffers.get(name)!.map((b) => engine.createSoundBufferAsync(b)));
-        const voices: Voice[] = [];
-        for (let i = 0; i < info.max; i++) {
-          const sound = await engine.createSoundAsync(`${name}-${i}`, bufs[i % bufs.length]!, { ...SPATIAL, outBus: this.sfxBus });
-          const v: Voice = { sound, name, prio: info.prio, start: 0, busy: false, counted: false, follow: false };
+        const sounds = await Promise.all(
+          Array.from({ length: info.max }, (_, i) => engine.createSoundAsync(`${name}-${i}`, bufs[i % bufs.length]!, { ...SPATIAL, outBus: this.sfxBus })),
+        );
+        const voices = sounds.map((sound): Voice => {
+          const v: Voice = { sound, name, prio: info.prio, group: info.group, vol: 0, start: 0, busy: false, counted: false, follow: false };
           sound.onEndedObservable.add(() => {
             this.release(v);
             v.busy = false;
           });
-          voices.push(v);
-        }
+          return v;
+        });
         this.pools.set(name, { voices, next: 0 });
       })();
       this.building.set(name, p);
@@ -235,19 +309,21 @@ export class SpatialAudio {
     if (!v.counted) return;
     v.counted = false;
     this.stat(v.name).count--;
+    if (v.group) this.stat(`group:${v.group}`).count--;
     const i = this.active.indexOf(v);
     if (i >= 0) this.active.splice(i, 1);
   }
 
   /**
-   * Free a slot for a sound of priority `prio`, as audio.ts does: lower priorities go first, and a
-   * sound of the same priority only once it is past its attack.
+   * Free a slot for a sound of priority `prio` and volume `vol`, as audio.ts does: lower priorities
+   * go first (the quietest of them), and a sound of the same priority only once it is past its
+   * attack and if it is no louder.
    */
-  private steal(prio: number, now: number): boolean {
+  private steal(prio: number, vol: number, now: number): boolean {
     let victim: Voice | null = null;
     for (const v of this.active) {
-      const ok = v.prio < prio || (v.prio === prio && now - v.start > 0.12);
-      if (ok && (!victim || v.prio < victim.prio)) victim = v;
+      const ok = v.prio < prio || (v.prio === prio && now - v.start > 0.12 && v.vol <= vol);
+      if (ok && (!victim || v.prio < victim.prio || (v.prio === victim.prio && v.vol < victim.vol))) victim = v;
     }
     if (!victim) return false;
     this.release(victim);
@@ -262,21 +338,30 @@ export class SpatialAudio {
   }
 
   /**
-   * Play effect `name` at map position (x, z), or centred when there is none. Returns false when
-   * this backend can't play it yet; true when it played or was dropped (throttled, muted, too far).
+   * Play effect `name` at map position (x, z), or centred when there is none; `rate` scales its pitch.
+   * Returns false when this backend can't play it yet (it is then rendered in the background); true
+   * when it played or was dropped (throttled, muted, too far).
    */
-  play(name: string, volume = 1, x?: number, z?: number): boolean {
+  play(name: string, volume = 1, x?: number, z?: number, rate = 1): boolean {
     const pool = this.pools.get(name);
     const engine = this.engine;
-    if (!pool || !engine) return false;
+    if (!engine) return false;
+    if (!pool) {
+      this.request(name);
+      return false;
+    }
     if (!synth.canPlayNow() || volume < 0.01) return true;
     const info = synth.sfxInfo(name)!;
     const positional = x !== undefined && z !== undefined;
-    if (positional && volume * attenuation(Math.hypot(x - this.tx, z - this.tz)) < 0.03) return true;
+    const heard = positional ? volume * attenuation(Math.hypot(x - this.tx, z - this.tz)) : volume;
+    if (heard < 0.03) return true;
     const now = engine.currentTime;
     const st = this.stat(name);
     if (now - st.last < info.gap || st.count >= info.max) return true;
-    if (this.active.length >= synth.MAX_SFX_VOICES && !this.steal(info.prio, now)) return true;
+    const grp = info.group ? synth.SFX_GROUPS[info.group] : undefined;
+    const gst = grp ? this.stat(`group:${info.group}`) : null;
+    if (grp && gst && (now - gst.last < grp.gap || gst.count >= grp.max)) return true;
+    if (this.active.length >= synth.MAX_SFX_VOICES && !this.steal(info.prio, heard, now)) return true;
     let v: Voice | null = null;
     for (let i = 0; i < pool.voices.length && !v; i++) {
       const c = pool.voices[(pool.next + i) % pool.voices.length]!;
@@ -287,13 +372,18 @@ export class SpatialAudio {
     v.busy = true;
     v.counted = true;
     v.start = now;
+    v.vol = heard;
     v.follow = !positional;
     st.count++;
     st.last = now;
+    if (gst) {
+      gst.count++;
+      gst.last = now;
+    }
     this.active.push(v);
     const s = v.sound;
     s.volume = volume * info.gain;
-    s.playbackRate = 1 + (Math.random() - 0.5) * 0.06;
+    s.playbackRate = rate * (1 + (random() - 0.5) * 0.06);
     this.place(s, positional ? x : this.tx, positional ? z : this.tz);
     s.play();
     if (info.duck) synth.duckMusicFor(info.duck);
@@ -315,7 +405,7 @@ export class SpatialAudio {
     if (!synth.canPlayNow()) return true;
     const now = engine.currentTime;
     if (now < this.barkUntil) return true; // one unit talks at a time
-    const s = lines[(Math.random() * lines.length) | 0]!;
+    const s = lines[(random() * lines.length) | 0]!;
     s.volume = volume;
     s.play();
     this.barkUntil = now + Math.min(1.2, s.buffer.duration) + 0.15;
@@ -333,13 +423,16 @@ export class SpatialAudio {
       if (this.barksRequested.has(id)) continue;
       this.barksRequested.add(id);
       void (async () => {
-        for (const kind of ['select', 'move', 'attack'] as const) {
-          const sounds: StaticSound[] = [];
-          for (let line = 0; line < synth.barkLines(id, kind); line++) {
-            const b = await synth.renderBark(id, kind, line);
-            if (b) sounds.push(await engine.createSoundAsync(`bark-${id}-${kind}-${line}`, b, { outBus: this.voiceBus }));
-          }
-          if (sounds.length) this.barks.set(`${id}:${kind}`, sounds);
+        for (const kind of synth.BARK_KINDS) {
+          const lines = Array.from({ length: synth.barkLines(id, kind) }, (_, line) => line);
+          const sounds = await Promise.all(
+            lines.map(async (line) => {
+              const b = await synth.renderBark(id, kind, line);
+              return b ? engine.createSoundAsync(`bark-${id}-${kind}-${line}`, b, { outBus: this.voiceBus }) : null;
+            }),
+          );
+          const ok = sounds.filter((x): x is StaticSound => x !== null);
+          if (ok.length) this.barks.set(`${id}:${kind}`, ok);
         }
       })().catch((e: unknown) => console.warn('[audio] bark rendering failed:', e));
     }
@@ -352,11 +445,38 @@ export class SpatialAudio {
     if (this.engine) void this.buildAmbience();
   }
 
-  /** Fade the ambient bed out (back to the title screen). */
+  /** Fade the ambient bed and the movement loops out (back to the title screen). */
   stopAmbience(): void {
     this.clock = null;
     const a = this.ambience;
     if (a) for (const s of [a.wind, a.crickets, a.drone]) s.setVolume(0, { duration: 1 });
+    for (const s of this.loops.values()) s?.setVolume(0, { duration: 0.5 });
+  }
+
+  /**
+   * A movement loop (tracks, hover, mech, hooves, wheels) at `level` (0-1, 0 = silent), centred on
+   * the moving units at (x, z). Rendered and started on first use.
+   */
+  movement(loop: synth.MoveLoop, level: number, x: number, z: number): void {
+    const engine = this.engine;
+    if (!engine) return;
+    const s = this.loops.get(loop);
+    if (s === undefined) {
+      if (level <= 0) return;
+      this.loops.set(loop, null);
+      void (async () => {
+        const b = await synth.renderAmbient(loop);
+        if (!b) return;
+        const snd = await engine.createSoundAsync(`loop-${loop}`, b, { ...SPATIAL, loop: true, volume: 0, outBus: this.sfxBus });
+        this.place(snd, x, z);
+        snd.play();
+        this.loops.set(loop, snd);
+      })().catch((e: unknown) => console.warn('[audio] movement loop unavailable:', e));
+      return;
+    }
+    if (!s) return;
+    if (level > 0) this.place(s, x, z);
+    s.setVolume(level * LOOP_GAIN, { duration: 0.3 });
   }
 
   private async buildAmbience(): Promise<void> {
@@ -423,15 +543,15 @@ export class SpatialAudio {
     a.crickets.setVolume(0.55 * (1 - day), { duration: 0.25 });
     a.drone.setVolume(0.16, { duration: 0.25 });
     if (now >= this.nextBird) {
-      this.nextBird = now + 1.5 + Math.random() * 5;
+      this.nextBird = now + 1.5 + random() * 5;
       const idle = a.birds.filter((s) => s.activeInstancesCount === 0);
-      if (idle.length && Math.random() < day) {
-        const s = idle[(Math.random() * idle.length) | 0]!;
-        const ang = Math.random() * Math.PI * 2;
-        const r = 4 + Math.random() * 24;
+      if (idle.length && random() < day) {
+        const s = idle[(random() * idle.length) | 0]!;
+        const ang = random() * Math.PI * 2;
+        const r = 4 + random() * 24;
         this.place(s, this.tx + Math.cos(ang) * r, this.tz + Math.sin(ang) * r);
-        s.volume = 0.5 + Math.random() * 0.4;
-        s.playbackRate = 0.9 + Math.random() * 0.2;
+        s.volume = 0.5 + random() * 0.4;
+        s.playbackRate = 0.9 + random() * 0.2;
         s.play();
       }
     }
