@@ -289,14 +289,24 @@ function toggleFullscreen(): void {
 
 function bindCameraOptions(input: Input): void {
   const s = input.settings;
-  const scroll = $<HTMLSelectElement>('opt-scroll');
+  const scroll = $<HTMLInputElement>('opt-scroll');
+  const scrollVal = $('opt-scroll-val');
+  const showScroll = (v: number): void => {
+    const name = v < 0.6 ? 'Very slow' : v < 0.85 ? 'Slow' : v <= 1.15 ? 'Normal' : v < 1.6 ? 'Fast' : 'Very fast';
+    scrollVal.textContent = `${name} (${Math.round(v * 100)}%)`;
+  };
   const wheel = $<HTMLSelectElement>('opt-wheel');
   const edge = $<HTMLInputElement>('opt-edge');
   const quality = $<HTMLSelectElement>('opt-quality');
-  scroll.value = String(s.scrollSpeed);
-  if (!scroll.value) scroll.value = '1';
+  scroll.value = String(s.scrollSpeed || 1);
+  showScroll(Number(scroll.value));
   wheel.value = s.wheelMode;
   edge.checked = !!s.edgeScroll;
+  // The speed applies while the slider moves; it is saved when it is let go.
+  scroll.addEventListener('input', () => {
+    s.scrollSpeed = Number(scroll.value);
+    showScroll(s.scrollSpeed);
+  });
   scroll.addEventListener('change', () => {
     s.scrollSpeed = Number(scroll.value);
     input.saveSettings();

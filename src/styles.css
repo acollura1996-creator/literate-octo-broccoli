@@ -1221,6 +1221,16 @@ label.difficulty {
   width: 16px;
   height: 16px;
 }
+.opts input[type='range'] {
+  display: block;
+  width: 100%;
+  margin: 6px 0 2px;
+  accent-color: var(--gold);
+}
+.opts .opt-val {
+  float: right;
+  color: var(--gold);
+}
 
 #cursor-label {
   position: absolute;

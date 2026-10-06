@@ -32,6 +32,7 @@ export class RTSCamera {
   yaw = 0;
   shake = 0;
 
+  private lastUpdate = 0;
   private readonly inv = new Matrix();
   private readonly near = new Vector3();
   private readonly far = new Vector3();
@@ -52,7 +53,12 @@ export class RTSCamera {
   /** Follow the terrain height under the target and place the camera (with optional shake). */
   update(terrain?: HeightSource | null, shakeAmount = 0): void {
     const ty = terrain ? terrain.heightAt(this.target.x, Math.min(MAP_SIZE - 0.01, this.target.z)) : 0;
-    this.target.y += (ty - this.target.y) * 0.15;
+    // Ease toward the ground height by real time, so the view glides over hills the same way at
+    // any frame rate (a fixed fraction per frame bobbed at high frame rates and lagged at low ones).
+    const now = performance.now();
+    const dt = this.lastUpdate ? Math.min(0.25, (now - this.lastUpdate) / 1000) : 1;
+    this.lastUpdate = now;
+    this.target.y += (ty - this.target.y) * (1 - Math.exp(-dt * 5));
     const d = this.distance;
     const c = this.camera;
     c.position.set(

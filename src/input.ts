@@ -17,6 +17,11 @@ import type { BarkKind } from './audio.ts';
 const MAX_SELECTION = 24;
 
 const MAX_LINE = 160;
+/** Edge scrolling: full speed within EDGE_FULL px of the window border, none beyond EDGE_ZONE px. */
+const EDGE_FULL = 3;
+const EDGE_ZONE = 12;
+/** Top scroll speed in camera distances per second (× the scroll speed setting). */
+const SCROLL_RATE = 1.45;
 
 /** What the next click does after a command-card button asked for a target. */
 export type TargetMode =
@@ -942,10 +947,11 @@ export class Input {
   update(dt: number): void {
     this.pruneSelection();
     const cam = this.view.cam;
-    // Smooth zoom.
-    cam.distance += (cam.zoomTarget - cam.distance) * Math.min(1, dt * 10);
-    // Desired scroll direction from the keys and the screen edges. The edge
-    // zone is wide and speed ramps up toward the very edge.
+    // Smooth zoom (exponential, so it eases the same at any frame rate).
+    cam.distance += (cam.zoomTarget - cam.distance) * (1 - Math.exp(-dt * 12));
+    // Desired scroll direction from the keys and the screen edges. As in Warcraft III, only a thin
+    // band at the very edge scrolls (so the HUD panels along the edges can be used without the map
+    // drifting), at full speed right at the border.
     let dx = 0;
     let dz = 0;
     if (this.keys.has('ArrowLeft')) dx -= 1;
@@ -953,8 +959,7 @@ export class Input {
     if (this.keys.has('ArrowUp')) dz -= 1;
     if (this.keys.has('ArrowDown')) dz += 1;
     if (this.settings.edgeScroll && this.mouse.inWindow && this.enabled && !this.drag && !this.panDrag && document.hasFocus()) {
-      const zone = 26;
-      const ramp = (d: number): number => (d >= zone ? 0 : 0.3 + 0.7 * (1 - d / zone));
+      const ramp = (d: number): number => (d <= EDGE_FULL ? 1 : d >= EDGE_ZONE ? 0 : 0.55 + 0.45 * (1 - (d - EDGE_FULL) / (EDGE_ZONE - EDGE_FULL)));
       const { x, y } = this.mouse;
       dx -= ramp(x);
       dx += ramp(this.view.width - 1 - x);
@@ -966,12 +971,16 @@ export class Input {
       dx /= len;
       dz /= len;
     }
-    const top = cam.distance * 1.7 * this.settings.scrollSpeed;
-    const k = Math.min(1, dt * (len > 0 ? 9 : 12));
+    // Constant speed on screen whatever the zoom: about two screen heights a second at Normal.
+    // It eases in over a fifth of a second and stops within a tenth, frame-rate independent.
+    const top = cam.distance * SCROLL_RATE * this.settings.scrollSpeed;
+    const k = 1 - Math.exp(-dt * (len > 0 ? 11 : 22));
     cam.vel.x += (dx * top - cam.vel.x) * k;
     cam.vel.z += (dz * top - cam.vel.z) * k;
     if (Math.abs(cam.vel.x) > 0.01 || Math.abs(cam.vel.z) > 0.01) {
-      cam.setTarget(cam.target.x + cam.vel.x * dt, cam.target.z + cam.vel.z * dt);
+      // A long frame (a hitch) doesn't throw the view across the map.
+      const step = Math.min(dt, 0.2);
+      cam.setTarget(cam.target.x + cam.vel.x * step, cam.target.z + cam.vel.z * step);
     }
 
     // Hover
