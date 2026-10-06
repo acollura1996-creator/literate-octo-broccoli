@@ -532,7 +532,8 @@ function frame(now: number): void {
     lastFrame = now;
     return;
   }
-  const realDt = Math.min(0.1, (now - lastFrame) / 1000);
+  // (Never negative: the first frame of a game can be timed against a later clock reading.)
+  const realDt = Math.max(0, Math.min(0.1, (now - lastFrame) / 1000));
   lastFrame = now;
   try {
     const t0 = performance.now();

@@ -21,6 +21,7 @@ import { Quaternion } from '@babylonjs/core/Maths/math.vector';
 import type { Scene } from '@babylonjs/core/scene';
 import '@babylonjs/core/Meshes/instancedMesh';
 import type { GhostMode, ModelInstance, ModelLibrary, ModelParts } from './ModelLibrary';
+import type { CharacterInstance, CharacterLibrary } from './Characters';
 import type { FogOfWarPlugin } from './FogOfWar';
 import { TeamColorPlugin } from './TeamColor';
 import type { Unit } from '../game/unit.ts';
@@ -120,7 +121,12 @@ export class UnitAssets {
    */
   inView: (x: number, y: number, z: number, r: number) => boolean = () => true;
 
-  constructor(readonly scene: Scene, readonly models: ModelLibrary) {
+  constructor(
+    readonly scene: Scene,
+    readonly models: ModelLibrary,
+    /** Rigged characters (M14): units with a recipe are drawn by them instead of a baked model. */
+    readonly characters: CharacterLibrary | null = null,
+  ) {
     const unlit = (name: string, color: number, alpha: number, additive: boolean): StandardMaterial => {
       const m = new StandardMaterial(name, scene);
       m.disableLighting = true;
@@ -209,6 +215,12 @@ export class UnitView {
   private ghostMode: GhostMode | null = null;
   private doorOpen = 0;
   private rootScale = 1;
+  /** The rigged character, when the unit has one (M14). */
+  private character: CharacterInstance | null = null;
+  /** Animation bookkeeping for characters. */
+  private anim = { attackStart: -1, attackIndex: 0, lastFight: -99, idleUntil: 0, deathClip: '', spawned: false };
+  /** Game time the view was made (units made after the start are new: raised, trained, summoned). */
+  private readonly bornAt: number;
 
   constructor(
     readonly unit: Unit,
@@ -216,6 +228,7 @@ export class UnitView {
     private readonly assets: UnitAssets,
   ) {
     this.group = new TransformNode(`unit-${unit.id}`, assets.scene);
+    this.bornAt = game.time;
     this.buildModel();
   }
 
@@ -230,7 +243,10 @@ export class UnitView {
     const u = this.unit;
     this.model?.dispose();
     this.poses.clear();
-    this.model = this.assets.models.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost);
+    const chars = this.assets.characters;
+    this.character = !u.isBuilding && chars?.has(u.modelId) ? chars.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost) : null;
+    if (this.character && this.anim.deathClip) this.character.animator.play(this.anim.deathClip, { loop: false, fade: 0, at: 99 });
+    this.model = this.character ?? this.assets.models.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost);
     this.model.root.parent = this.group;
     this.height = this.model.height ?? 1.2;
     this.parts = this.model.parts;
@@ -312,6 +328,13 @@ export class UnitView {
 
     if (u.dead) {
       const t = time - u.deathTime;
+      if (this.character) {
+        this.animateCharacterDeath(u, dt, t);
+        root.apply();
+        this.ring!.setEnabled(false);
+        this.syncBuffVisuals(u, dt, time, true);
+        return;
+      }
       if (u.isBuilding) {
         rootNode.position.y = -Math.min(1, t / 2.2) * this.height * 0.8;
         root.rz = Math.min(1, t / 2.2) * 0.12;
@@ -328,7 +351,8 @@ export class UnitView {
     root.rx = 0;
     if (!u.isBuilding) root.rz = 0;
     rootNode.position.y = 0;
-    this.animate(u, dt, time, this.parts);
+    if (this.character) this.animateCharacter(u, dt, time);
+    else this.animate(u, dt, time, this.parts);
     root.apply();
     this.syncBuffVisuals(u, dt, time, false);
     this.syncCarry(u);
@@ -361,6 +385,90 @@ export class UnitView {
       this.scaffold.dispose();
       this.scaffold = null;
     }
+  }
+
+  /**
+   * Rigged characters (M14): pick the clip for the simulation's animation state. Attacks are timed
+   * so the blow lands when the simulation deals the damage (the end of the wind-up); walks are sped
+   * up or slowed to the unit's speed so the feet don't slide; idles vary.
+   */
+  private animateCharacter(u: Unit, dt: number, time: number): void {
+    const c = this.character!;
+    const r = c.recipe;
+    const a = c.animator;
+    const st = this.anim;
+    const scale = this.assets.characters!.scaleOf(u.modelId) * this.rootScale;
+    a.update(dt);
+    // Raised and summoned undead climb out of the ground once.
+    if (!st.spawned) {
+      st.spawned = true;
+      if (r.spawn && this.bornAt > 1 && time - this.bornAt < 0.5) {
+        a.play(r.spawn, { loop: false, fade: 0 });
+        st.idleUntil = time + (c.animator.clipInfo(r.spawn)?.duration ?? 1);
+      }
+    }
+    if (time < st.idleUntil && a.current === r.spawn && !u.moving) {
+      c.syncFrames();
+      return;
+    }
+    if (u.hasBuff('bladestorm') && r.spin) {
+      a.play(r.spin, { loop: true, rate: 1.4 });
+      c.syncFrames();
+      return;
+    }
+    const attackStart = u.anim === 'attack' ? time - u.animTime : -1;
+    if (u.anim === 'attack' && Math.abs(attackStart - st.attackStart) > 0.05) {
+      // A new swing or shot: the clip's impact lands at the end of the simulation's wind-up.
+      st.attackStart = attackStart;
+      st.lastFight = time;
+      const name = r.attack[st.attackIndex++ % r.attack.length]!;
+      const info = a.clipInfo(name);
+      const windup = Math.max(0.08, Math.min(0.45, u.attackCooldown * 0.32));
+      const rate = info ? Math.max(0.7, Math.min(2.6, info.impact / windup)) : 1;
+      a.play(name, { loop: false, rate, restart: true, fade: 0.08, at: u.animTime * rate > 0 ? u.animTime : 0 });
+    } else if (u.anim === 'cast' && a.current !== r.cast) {
+      st.lastFight = time;
+      a.play(r.cast, { loop: false, rate: 1.25, restart: true, fade: 0.1 });
+    } else if (u.anim === 'walk' || u.moving) {
+      const speed = u.speed;
+      const run = r.run && speed > (r.runAbove ?? 3.6) ? r.run : r.walk;
+      const info = a.clipInfo(run);
+      // Feet planted: the clip's ground speed (model units) × the scale → world speed.
+      const rate = info ? Math.max(0.55, Math.min(2.2, speed / Math.max(0.2, info.groundSpeed * scale))) : 1;
+      a.play(run, { loop: true, rate });
+    } else if (u.anim === 'work' && r.work) {
+      a.play(r.work, { loop: true, rate: 1 });
+    } else {
+      // Finish a swing or cast before settling; then idle, a fighting stance right after a fight.
+      const busy = (a.current !== r.walk && a.current !== r.run && r.attack.includes(a.current)) || a.current === r.cast;
+      if (!busy || a.finished) {
+        const fighting = time - st.lastFight < 3 && r.combatIdle;
+        let idle = fighting ? r.combatIdle! : r.idle[0]!;
+        // Now and then an idle variation (each unit on its own beat).
+        if (!fighting && r.idle.length > 1) {
+          const beat = Math.floor((time + u.id * 1.7) / 7);
+          if ((beat * 31 + u.id) % 4 === 0) idle = r.idle[1 + ((beat + u.id) % (r.idle.length - 1))]!;
+        }
+        a.play(idle, { loop: true, rate: 1, fade: 0.25 });
+      }
+    }
+    c.syncFrames();
+  }
+
+  /** A character's death: one of its death clips, held, then sinking into the ground. */
+  private animateCharacterDeath(u: Unit, dt: number, t: number): void {
+    const c = this.character!;
+    const st = this.anim;
+    if (!st.deathClip) {
+      const list = c.recipe.death;
+      st.deathClip = list[u.id % list.length]!;
+      c.animator.play(st.deathClip, { loop: false, fade: 0.1, restart: true });
+    }
+    c.animator.update(dt);
+    c.syncFrames();
+    const length = c.animator.clipInfo(st.deathClip)?.duration ?? 1;
+    const sink = length + 1.2;
+    this.model.root.position.y = t > sink ? -(t - sink) * 0.35 : 0;
   }
 
   private animate(u: Unit, dt: number, time: number, P: ModelParts): void {

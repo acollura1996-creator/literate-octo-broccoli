@@ -17,6 +17,7 @@ import { TerrainView, RoadView } from './TerrainView';
 import { FogOfWar, registerFogOfWar } from './FogOfWar';
 import { registerLinearLighting } from './Lighting';
 import { ModelLibrary, type ModelInstance } from './ModelLibrary';
+import { CharacterLibrary } from './Characters';
 import { UnitAssets, UnitView, ItemView, quatFromEulerXYZ } from './UnitView';
 import { ITEMS } from '../data/items.ts';
 import { Effects } from './Effects';
@@ -87,6 +88,7 @@ export class BabylonView {
   private fog: FogOfWar | null = null;
   private citadel: ModelInstance[] = [];
   private models: ModelLibrary | null = null;
+  private characters: CharacterLibrary | null = null;
   private unitAssets: UnitAssets | null = null;
   readonly unitViews = new Map<number, UnitView>();
   /** Visual effects (the game's `hooks.fx`). */
@@ -119,12 +121,15 @@ export class BabylonView {
     // First run: start on High and step down if the frame rate is low (once; the result is saved).
     if (!chosen) this.autoQuality = { warm: 2.5, time: 0, frames: 0 };
     this.particles = new ParticleFx(scene, () => this.graphics.particleDensity);
-    this.ready = Promise.all([ModelLibrary.load(scene), UiRenderer.create(engine)]).then(([lib, ui]) => {
+    this.ready = Promise.all([ModelLibrary.load(scene), UiRenderer.create(engine), CharacterLibrary.load(scene)]).then(([lib, ui, chars]) => {
       this.models = lib;
       lib.onCaster = (m) => this.graphics.addCaster(m);
       for (const m of lib.receivers) this.graphics.addReceiver(m);
       for (const m of lib.glowSources) this.graphics.addGlow(m);
-      this.unitAssets = new UnitAssets(scene, lib);
+      chars.onCaster = (m) => this.graphics.addCaster(m);
+      chars.onSource = (m) => this.graphics.addReceiver(m);
+      this.characters = chars;
+      this.unitAssets = new UnitAssets(scene, lib, chars);
       this.unitAssets.inView = (x, y, z, r) => this.inView(x, y, z, r);
       this.previews = new Previews(scene, lib);
       this.ui = ui;

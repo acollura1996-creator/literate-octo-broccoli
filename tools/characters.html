@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Character Gallery</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #8fbbe0; font-family: system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #labels { position: absolute; inset: 0; pointer-events: none; }
+      .lbl {
+        position: absolute; transform: translate(-50%, 0); white-space: nowrap;
+        font: 600 11px/1.2 system-ui, sans-serif; color: #fff; background: rgba(0, 0, 0, 0.55);
+        padding: 1px 5px; border-radius: 3px;
+      }
+      #help {
+        position: absolute; left: 8px; bottom: 8px; color: #fff; background: rgba(0, 0, 0, 0.45);
+        font: 11px/1.4 monospace; padding: 4px 8px; border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="labels"></div>
+    <div id="help">?ids=footman,paladin &amp;role=idle|walk|attack|cast|death|work &amp;clip=Name &amp;t=0.4 (freeze) &amp;team=0042ff &amp;dist=12 &amp;pitch=30</div>
+    <script type="module" src="./characters.ts"></script>
+  </body>
+</html>
