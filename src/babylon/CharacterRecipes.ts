@@ -120,6 +120,9 @@ export const CHARACTER_RECIPES: Record<string, CharacterRecipe> = {
   blademaster: heavy('Rogue', ['Rogue/Rogue_Cape', 'Knight/2H_Sword'], 1.9, { attack: ['2H_Melee_Attack_Slice', '2H_Melee_Attack_Chop', '2H_Melee_Attack_Stab'], walk: 'Running_A', runAbove: 0 }),
   mountainking: heavy('Barbarian', ['Barbarian/Barbarian_Hat', 'Barbarian/Barbarian_Cape', 'Barbarian/2H_Axe'], 1.8),
   ranger: shooter('Rogue_Hooded', ['Rogue_Hooded/Rogue_Cape', 'Rogue_Hooded/2H_Crossbow'], 1.85, '2H_Ranged_Shoot'),
+  // Brigands and their lord (camps, captives' guards, a lair boss).
+  brigand: soldier('Rogue_Hooded', ['Rogue_Hooded/Rogue_Cape', 'Rogue_Hooded/Knife'], 1.35, { idle: ['Idle', '2H_Melee_Idle'] }),
+  bandit_lord: heavy('Barbarian', ['Barbarian/Barbarian_Cape', 'Barbarian/Barbarian_Round_Shield', 'Barbarian/1H_Axe'], 2.3, { attack: SLASHES, idle: ['2H_Melee_Idle'], cast: 'Cheer' }),
   // Kalenden's Legion.
   skeleton: undead('Skeleton_Warrior', ['Skeleton_Blade', 'Skeleton_Shield_Small_A'], 1.35, SLASHES),
   skeleton_archer: undead('Skeleton_Rogue', ['Skeleton_Rogue/Skeleton_Rogue_Hood', 'Skeleton_Crossbow'], 1.35, ['1H_Ranged_Shoot']),
