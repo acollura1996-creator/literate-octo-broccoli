@@ -423,7 +423,7 @@ const DEFS = {
       }
       game.fx.ring(c.x, c.z, 0x9ae8ff, this.radius, 0.6);
       game.fx.burst(c.x, 0.5, c.z, 0xc8f4ff, 18);
-      game.sound('magicHit', c.x, c.z);
+      game.sound('frostNova', c.x, c.z);
     },
   }),
   dragon_breath: ab({
@@ -436,7 +436,7 @@ const DEFS = {
       const r = this.aoe;
       game.fx.explosion(x, z, 1.6);
       game.fx.burst(x, 0.6, z, 0xff7a20, 28, 3, 0.12, 0.8);
-      game.sound('fire', x, z);
+      game.sound('dragonFire', x, z);
       for (let i = 0; i < 4; i++) {
         game.later(i * 0.5, () => {
           if (c.dead) return;
@@ -458,7 +458,7 @@ const DEFS = {
       }
       game.fx.ring(c.x, c.z, 0x9aff3a, this.radius, 0.6);
       game.fx.burst(c.x, 0.8, c.z, 0x9aff3a, 22);
-      game.sound('magicHit', c.x, c.z);
+      game.sound('acidSpray', c.x, c.z);
     },
   }),
   bandit_call: ab({
@@ -467,7 +467,7 @@ const DEFS = {
     tooltip: () => 'Calls two brigands to fight at his side for 40 seconds.',
     cast(game, c) {
       summonGuards(game, c, 'brigand', 2, 40);
-      game.sound('horn', c.x, c.z, 0.6);
+      game.sound('banditLaugh', c.x, c.z, 0.8);
     },
   }),
   brood_spawn: ab({
@@ -476,7 +476,7 @@ const DEFS = {
     tooltip: () => 'Hatches three giant spiders that fight for 30 seconds.',
     cast(game, c) {
       summonGuards(game, c, 'spider', 3, 30);
-      game.sound('roar', c.x, c.z, 0.5);
+      game.sound('spiderScreech', c.x, c.z, 0.7);
     },
   }),
   web: ab({

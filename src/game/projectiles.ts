@@ -197,7 +197,10 @@ export class Projectiles {
         }
       }
       if (done) {
-        const target = p.target && !p.target.dead && !p.arc ? p.target : null;
+        // A lobbed shot lands where its target stood when it was thrown: it hits the target only if
+        // it is still there (it can be dodged); splash shots hurt whoever is near the point.
+        let target = p.target && !p.target.dead && !p.target.removed ? p.target : null;
+        if (target && p.arc && Math.hypot(target.x - p.dest.x, target.z - p.dest.z) > target.radius + 0.7) target = null;
         try {
           p.onHit?.(target, { x: p.dest.x, z: p.dest.z });
         } catch (e) {

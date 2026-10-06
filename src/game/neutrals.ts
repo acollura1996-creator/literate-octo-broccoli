@@ -145,7 +145,7 @@ export class Neutrals {
       finishOrder(g, u);
     }
     g.fx.burst(u.x, 0.8, u.z, 0x8ad8ff, 12);
-    g.sound('teleport', u.x, u.z, 0.6);
+    g.sound('waygate', u.x, u.z, 0.6);
     // Units following this one take the gate too.
     for (const f of g.unitsNear(from.x, from.z, 30)) {
       if (f.owner !== u.owner || f === u || f.isBuilding || f.dead || f.order.type !== 'follow' || f.order.target !== u) continue;
@@ -215,7 +215,7 @@ export class Neutrals {
       }
       g.fx.ring(s.x, s.z, 0xfff0a0, 10, 1.0);
       g.fx.beam(s.x, s.z, 0xfff0a0, 8, 0.8, 1.2);
-      g.sound('levelUp', s.x, s.z, 0.7);
+      g.sound('shrine', s.x, s.z, 0.7);
       if (p.isHuman) g.message(`The Shrine of the Ancients blesses ${n} of your units: +4 armor, +12 damage and swift healing for 90 seconds.`, '#ffe680');
       else if (g.isAlliedToHuman(p)) g.notify(p, `${p.name} has drawn on a Shrine of the Ancients.`);
     }
@@ -263,7 +263,7 @@ export class Neutrals {
       freed.push(u);
     });
     g.fx.ring(cage.x, cage.z, 0xfff0a0, 3, 0.8);
-    g.sound('buildComplete', cage.x, cage.z);
+    g.sound('cageOpen', cage.x, cage.z);
     if (p.hero && !p.hero.dead && p.mode === 'hero') for (const u of freed) g.issueOrder(u, { type: 'follow', target: p.hero });
     g.quests?.onCaptivesFreed(cage, p, freed);
   }

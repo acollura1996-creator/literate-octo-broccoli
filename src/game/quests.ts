@@ -91,7 +91,7 @@ export class QuestManager {
       }
       if (camps.length) {
         g.message(`⛓️ New quests: brigands keep captives caged in ${camps.length} camps across the land. Kill the guards and bring a unit to a cage: the captives will fight for you.`, '#ffe680');
-        g.sound('horn');
+        g.sound('questNew');
       }
     }
     if (t >= this.due.treasure && !this.active.some((q) => q.kind === 'treasure')) {
@@ -128,7 +128,7 @@ export class QuestManager {
     this.version++;
     if (announce) {
       g.message(`${ICONS[q.kind]} New quest: ${q.title}. ${q.text}`, '#ffe680');
-      g.sound('horn');
+      g.sound('questNew');
       g.ping(q.at.x, q.at.z, '#ffd700');
     }
     return quest;
@@ -246,6 +246,7 @@ export class QuestManager {
       }
       if (u.distTo(s) <= 2.2) {
         g.fx.burst(s.x, 0.5, s.z, 0xffd700, 24, 2.5);
+        g.sound('dig', s.x, s.z);
         this.complete(q, u.owner, s);
         return;
       }
@@ -407,7 +408,7 @@ export class QuestManager {
       .join(', ');
     if (p.isHuman) {
       g.message(`✔ Quest completed: ${q.title}! Reward: ${got}.`, '#9fe89f');
-      g.sound('levelUp');
+      g.sound('questDone');
     } else g.message(`${ICONS[q.kind]} ${p.name} has completed the quest ${q.title}.`, g.nameColor(p));
     g.ping(where.x, where.z, '#9fe89f');
   }
@@ -419,6 +420,7 @@ export class QuestManager {
     q.ends = g.time;
     this.version++;
     g.message(`✖ ${text}`, '#ffae5a');
+    g.sound('questFail');
   }
 
   /** Quest marker for the computer generals: where a general should go to work on it (null if nowhere useful). */

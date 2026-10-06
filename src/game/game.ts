@@ -1465,7 +1465,7 @@ export class Game {
     this.hooks.fx?.holyLight(h);
     if (p.isHuman) {
       this.message(`${h.def.name} joins your cause at level ${h.level}! Your town center revives your Hero if it falls.`, '#9fe89f');
-      this.sound('levelUp', h.x, h.z);
+      this.sound('recruit', h.x, h.z);
     } else this.notify(p, `${p.name} has recruited a ${h.def.name} at a Tavern.`);
     p.ai?.onHeroRevived?.(h);
     return h;
@@ -1583,12 +1583,12 @@ export class Game {
         }
         this.hooks.fx?.explosion(h.x, h.z, 1.4);
         this.shake(0.4);
-        this.sound('explosion', h.x, h.z);
+        this.sound('goblinBomb', h.x, h.z);
         break;
       case 'reveal':
         if (this.isAlliedToHuman(h.owner)) this.fog.flares.push({ x: h.x, z: h.z, r: def.radius ?? 24, until: this.time + (def.duration ?? 20) });
         this.hooks.fx?.beam(h.x, h.z, 0xff6a3a, 12, 0.5, 1.5);
-        this.sound('magicCast', h.x, h.z, 0.5);
+        this.sound('flare', h.x, h.z, 0.6);
         break;
       case 'gold':
         h.owner.gold += def.amount!;
