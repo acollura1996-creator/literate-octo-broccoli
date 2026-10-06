@@ -1,9 +1,11 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **done.** All twelve milestones are complete (section 3). The game is strict TypeScript on
-Babylon.js, built with Vite and packaged with Electron; three.js is used only at build time, to bake
-the procedural models. One item couldn't be checked in this environment: running the installed game
-from the Windows `.exe` needs a Windows PC (D5).
+Status: **done.** All milestones are complete (section 3), including M13, the art pass added after
+review: M8's upgrade kept the original look under post-processing, and the result still looked like
+the three.js version. The game is strict TypeScript on Babylon.js, built with Vite and packaged with
+Electron; three.js is used only at build time, to bake the procedural models. One item couldn't be
+checked in this environment: running the installed game from the Windows `.exe` needs a Windows PC
+(D5).
 
 Branch: `babylon-migration`, created from `claude/heroes-empires-3d-game-gytx45` at `fbda849`. The
 original stays untouched on its own branch. The three.js version kept running alongside the port until
@@ -522,10 +524,35 @@ The three.js renderer kept working in parallel, behind `?renderer=three`, until 
     | Audio | M7 (spatial mix, voice limits, mute, music); the M12 synth equivalence check above. |
     | Tools | `tools/gallery.html` (three.js builders) and `tools/gallery-babylon.html` (baked models); `build-artifact.mjs`. |
 
-  - [x] Before and after screenshots: [`docs/migration/`](docs/migration/). Each image shows the three.js and JavaScript version (left) and the Babylon.js and TypeScript version on High (right), at the same camera position and hour.
+  - [x] Before and after screenshots: [`docs/migration/`](docs/migration/). Each image shows the three.js and JavaScript version (left) and the Babylon.js and TypeScript version on High (right), at the same camera position and hour. Since M13 the right-hand side shows the Warcraft III art pass.
     - [Home base](docs/migration/compare_home.jpg), [close-up](docs/migration/compare_closeup.jpg), [the citadel](docs/migration/compare_citadel.jpg) and [close](docs/migration/compare_citadelclose.jpg), [dusk](docs/migration/compare_dusk.jpg), [night](docs/migration/compare_night.jpg), [zoomed out](docs/migration/compare_zoomout.jpg) and [a 120-unit battle](docs/migration/compare_battle.jpg).
     - Rendered in software (SwiftShader). Both shots of each pair are taken from the same headless setup.
   - [x] `README.md`: TypeScript and Babylon.js throughout, the run and build commands, the code layout without `src/render/`, and the model builders under `tools/models/`.
+- [x] **M13 – Warcraft III art pass** (added after review). M8 added HDR, grading, shadows and a faint paint layer, but kept the original flat colours, faceted low-poly props and blurry ground, so the game looked the same as the three.js version. M13 replaces the art itself. Everything is still generated in code, and the simulation is untouched (its seeded hashes are unchanged).
+  - [x] Hand-painted ground (`GroundPaint.ts`, `GroundMaterial.ts`).
+    - Eight tileable 512 × 512 paintings made with Canvas 2D at load: Lordaeron grass (layered blades, tufts, a few flowers), forest floor with fallen leaves and needles, dirt with painted pebbles and cracks, rough road, flagstones for the citadel, wet shore with ripple marks, veined blight, cliff rock. Each has a height map. `tools/textures.html` previews them.
+    - A splat shader blends them from the simulation's ground types (one weight per map cell; steep banks turn to rock). Height blending gives the crisp, irregular borders of Warcraft III's tiles. A rotated second sample hides tiling, and a macro noise map varies brightness and warmth. Ground at the waterline is darker, as if wet.
+    - Replaces the 2048 px colour map and noise detail map (still painted, for the minimap).
+  - [x] Water: turquoise shallows to deep blue by the real depth, scrolling ripples with sky reflection and sun glints, painted caustic streaks, and foam lapping at the shore.
+  - [x] Foliage (`Foliage.ts`).
+    - Trees built from lumpy blob clusters with soft normals and vertex ambient occlusion: full broadleaf crowns on stout trunks, drooping five-tier pines, crooked blighted dead trees. Bushes, mossy boulders, and flower clumps.
+    - 32,688 grass tufts over the meadows. Trees, grass, bushes, boulders and flowers are batched per 32 × 32-cell chunk, so they're culled per batch.
+    - A foliage shader paints greyscale leaf, needle, bark and stone textures into warm sunlit and cool shaded colour, adds moss to the tops of stones, and sways canopies and grass in the wind. Grass and flowers sink away where buildings, gates or roads stand (a per-cell mask from the path grid and roads).
+    - Deep, saturated canopy colours instead of pale mint. Canopies cast shadows but don't receive them, so forests stay green.
+  - [x] Models (`MergedModel.ts`).
+    - Smooth normals with a 42° crease angle. The baked parts carried no normals, so every face had been lit flat; now round parts shade round and box edges stay crisp.
+    - Buildings get painted structure by surface kind: brick courses on stone, planks on wood, overlapping rows of straw on thatch, tiles on team-coloured roofs.
+    - Ground contact (models darken toward the terrain below them), a rim light in the sky's colour, and a painted sheen on metal and gold.
+    - Player-built roads use painted cobbles, tinted per age as before.
+  - [x] Low preset: no grass tufts or flowers, broadleaf crowns with fewer facets, one ground sample per layer instead of two, and plain model colours. The painted textures are made while the models load, before the first game.
+  - [x] Grading: Khronos PBR Neutral tone mapping instead of ACES (which greyed out bold colours), saturated warm days, and warm-light / cool-shade shading in the lighting plugin. Night keeps the blue moonlight.
+  - [x] Checks:
+    - `npm run typecheck` and the builds pass. The seeded headless runs give the same world hashes, since the simulation wasn't touched.
+    - The 67 scenario checks pass.
+    - Opening view, software rendered: High draws 1.27M triangles in 255 draw calls, Low 0.70M in 64 (M12: 228 and 53 draw calls).
+    - The 120-unit benchmark on High: 658–674 draw calls (595–611 before M13).
+    - CPU-side frame time is unchanged. The extra cost is GPU work: in this environment's software renderer, the opening view runs at about 1.7 fps on Low against M12's 3.3, and at 0.38 fps on High against 0.52. That is 1.4–1.9× the rasterization for a much richer scene. A graphics card absorbs this easily, and the first-run quality check still steps slow machines down to Medium or Low. **Real-GPU frame rates still need checking on real hardware**, as for M9.
+  - Screenshots: [`docs/migration/`](docs/migration/) now compares the three.js version with the M13 look; the M12 images, which looked almost the same as the three.js version, were replaced. The battle shot fast-forwards until the armies meet, since software rendering on High draws about one frame per second.
 
 ---
 
