@@ -339,8 +339,16 @@ export class UnitView {
         rootNode.position.y = -Math.min(1, t / 2.2) * this.height * 0.8;
         root.rz = Math.min(1, t / 2.2) * 0.12;
       } else {
-        const k = Math.min(1, t / 0.45);
-        root.rx = -k * k * 1.45;
+        // A fall with a small bounce as the body lands; four-legged creatures roll onto a side.
+        const k = Math.min(1, t / 0.5);
+        const fall = k < 0.8 ? (k / 0.8) ** 2 : 1 - Math.sin(((k - 0.8) / 0.2) * Math.PI) * 0.08;
+        if ((this.parts.legs?.length ?? 0) >= 4 || this.parts.wings) root.rz = (u.id % 2 ? 1 : -1) * fall * 1.5;
+        else root.rx = -fall * 1.45;
+        for (const leg of this.parts.legs ?? []) {
+          const p = this.pose(leg.obj)!;
+          p.rx = (leg.phase ? 0.5 : -0.4) * fall;
+          p.apply();
+        }
         rootNode.position.y = t > 1.8 ? -(t - 1.8) * 0.35 : 0;
       }
       root.apply();
@@ -398,6 +406,7 @@ export class UnitView {
     const a = c.animator;
     const st = this.anim;
     const scale = this.assets.characters!.scaleOf(u.modelId) * this.rootScale;
+    st.deathClip = ''; // alive (again, for a revived hero)
     a.update(dt);
     // Raised and summoned undead climb out of the ground once.
     if (!st.spawned) {
@@ -499,9 +508,33 @@ export class UnitView {
       touched.push(p);
     }
     const body = this.pose(P.body);
+    const head = this.pose(P.head);
+    // Creatures without a weapon bite: the head rears back, then snaps forward as the body lunges.
+    let lunge = 0;
+    if (!P.weapon && anim === 'attack' && head) {
+      const wind = Math.max(0.12, Math.min(0.45, u.attackCooldown * 0.32));
+      let bite: number;
+      if (t < wind) bite = -(t / wind) * 0.45;
+      else if (t < wind + 0.12) bite = -0.45 + ((t - wind) / 0.12) * 0.9;
+      else bite = 0.45 * Math.max(0, 1 - (t - wind - 0.12) / 0.3);
+      head.rx = head.rest.rx + bite;
+      lunge = t < wind ? -(t / wind) * 0.05 : Math.max(0, 0.14 * (1 - Math.abs(t - wind - 0.08) / 0.25));
+      touched.push(head);
+    } else if (head && P.head !== P.body) {
+      // Idle creatures and soldiers look about now and then.
+      const look = anim === 'stand' ? Math.sin(time * 0.6 + u.id * 1.3) * Math.max(0, Math.sin(time * 0.23 + u.id)) * 0.35 : 0;
+      lerpTo(head, 'ry', head.rest.ry + look, 3);
+      if (!P.weapon) lerpTo(head, 'rx', head.rest.rx, 8);
+      touched.push(head);
+    }
     if (body) {
       const bob = walking ? Math.abs(Math.sin(u.walkCycle)) * 0.04 : Math.sin(time * 2 + u.id) * 0.01;
       body.node.position.y = body.rest.y + bob;
+      body.node.position.z = body.rest.z + lunge;
+      // Lean into the walk, and sway with each step.
+      lerpTo(body, 'rx', body.rest.rx + (walking && !u.def.vehicle ? 0.07 : 0), 6);
+      body.rz = body.rest.rz + (walking && !u.def.vehicle ? Math.sin(u.walkCycle) * 0.035 : 0);
+      touched.push(body);
     }
     const weapon = this.pose(P.weapon);
     if (weapon) {

@@ -28,6 +28,7 @@ import { Matrix } from '@babylonjs/core/Maths/math.vector';
 import { Constants } from '@babylonjs/core/Engines/constants';
 import { PainterlyPlugin } from './Painterly';
 import { GroundSplatPlugin } from './GroundMaterial';
+import { CharacterPlugin } from './Characters';
 
 export type Quality = 'low' | 'medium' | 'high';
 export const QUALITIES: Quality[] = ['low', 'medium', 'high'];
@@ -183,9 +184,10 @@ export class Graphics {
     this.quality = q;
     this.preset = PRESETS[q];
     // Low draws plain model colours and a cheaper ground.
-    if (PainterlyPlugin.enabled !== this.preset.post || GroundSplatPlugin.fast === this.preset.post) {
+    if (PainterlyPlugin.enabled !== this.preset.post || GroundSplatPlugin.fast === this.preset.post || CharacterPlugin.fast === this.preset.post) {
       PainterlyPlugin.enabled = this.preset.post;
       GroundSplatPlugin.fast = !this.preset.post;
+      CharacterPlugin.fast = !this.preset.post;
       for (const s of this.scene.getEngine().scenes) s.markAllMaterialsAsDirty(Constants.MATERIAL_AllDirtyFlag);
     }
     this.rebuild();

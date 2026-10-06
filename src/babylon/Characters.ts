@@ -104,7 +104,9 @@ export interface Clip {
 }
 
 // ------------------------------------------------------------------ material plugin
-class CharacterPlugin extends MaterialPluginBase {
+export class CharacterPlugin extends MaterialPluginBase {
+  /** Nearest frame only, no crossfade (the Low preset; the quality presets toggle it). */
+  static fast = false;
   /** Linear tint and amount (illusions are blended toward blue), team colour for non-instanced draws. */
   tint: [number, number, number, number] = [0, 0, 0, 0];
   fallback: [number, number, number] = [0.58, 0.59, 0.59];
@@ -115,7 +117,7 @@ class CharacterPlugin extends MaterialPluginBase {
     private readonly atlas: RawTexture2DArray,
     private readonly vatWidth: number,
   ) {
-    super(material, 'Character', 140, { KAYKIT: false }, true, true);
+    super(material, 'Character', 140, { KAYKIT: false, KAYKITFAST: false }, true, true);
   }
 
   override getClassName(): string {
@@ -124,6 +126,7 @@ class CharacterPlugin extends MaterialPluginBase {
 
   override prepareDefines(defines: MaterialDefines): void {
     defines['KAYKIT'] = true;
+    defines['KAYKITFAST'] = CharacterPlugin.fast;
   }
 
   override getAttributes(attributes: string[]): void {
@@ -205,8 +208,8 @@ class CharacterPlugin extends MaterialPluginBase {
           vec4 kkS0 = vec4(0.0);
           vec4 kkS1 = vec4(0.0);
           vec4 kkS2 = vec4(0.0);
-        #ifdef SM_ESM
-          // Shadow maps (their passes define SM_*): the nearest frame is plenty.
+        #if defined(SM_ESM) || defined(KAYKITFAST)
+          // Shadow maps (their passes define SM_*) and the Low preset: the nearest frame is plenty.
           kkSkin(floor(kkFrame.x + 0.5), 1.0, kkS0, kkS1, kkS2);
         #else
           kkSkin(kkFrame.x, 1.0 - kkFrame.z, kkS0, kkS1, kkS2);
