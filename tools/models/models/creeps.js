@@ -1,6 +1,6 @@
 // Neutral hostile creeps and Kalenden's Dark Legion.
 import {
-  THREE, mat, geo, P, CG, glowMat, grp, add, beam, rig, scaled, legMesh, armMesh, grip, sword, MELEE_TILT,
+  THREE, mat, geo, P, CG, glowMat, grp, add, beam, rig, scaled, legMesh, armMesh, grip, sword, MELEE_TILT, STAFF_TILT,
   roundShield, bowMesh, quiver, fire,
 } from './common.js';
 
@@ -232,23 +232,30 @@ export function ogre_lord() {
 }
 
 // ---------------------------------------------------------------------------
-export function spider() {
+function spiderBody({ shell, back, legC, mark, eye, s = 1, sac = false }) {
   const root = new THREE.Group();
-  const black = mat(0x2a2030), purple = mat(0x5a2a7a), legM = mat(0x1e1824);
-  const body = grp(root, 0, 0.3, 0);
+  const black = mat(shell), purple = mat(back), legM = mat(legC);
+  const outer = grp(root, 0, 0, 0);
+  outer.scale.setScalar(s);
+  const body = grp(outer, 0, 0.3, 0);
   add(body, geo.sphere(0.16, 8, 6), black, [0, 0, 0.1], null, [1, 0.8, 1.1]);
   add(body, geo.sphere(0.27, 8, 6), purple, [0, 0.08, -0.27], null, [1, 0.85, 1.15]);
-  add(body, geo.box(0.06, 0.04, 0.3), mat(0xc83a2a), [0, 0.3, -0.26], [0.15, 0, 0]); // marking
-  add(body, geo.box(0.16, 0.04, 0.05), mat(0xc83a2a), [0, 0.3, -0.24], [0.15, 0, 0]);
+  add(body, geo.box(0.06, 0.04, 0.3), mat(mark), [0, 0.3, -0.26], [0.15, 0, 0]); // marking
+  add(body, geo.box(0.16, 0.04, 0.05), mat(mark), [0, 0.3, -0.24], [0.15, 0, 0]);
+  const glows = [];
+  if (sac) {
+    // a pulsing egg sac on the abdomen
+    add(body, geo.sphere(0.17, 7, 5), mat(0xd8d0b8), [0, 0.12, -0.55], null, [1, 0.8, 1]);
+    for (const [x, y, z] of [[0.08, 0.2, -0.5], [-0.07, 0.18, -0.6], [0.0, 0.26, -0.58]]) {
+      glows.push(add(body, geo.sphere(0.045, 5, 4), glowMat(0xb8ff6a, 0.6), [x, y, z]));
+    }
+  }
   const head = grp(body, 0, 0.02, 0.24);
   add(head, geo.sphere(0.09, 7, 5), black, [0, 0, 0]);
-  const eyes = [];
   for (const [x, y] of [[0.035, 0.04], [-0.035, 0.04], [0.06, 0.0], [-0.06, 0.0]]) {
-    const e = add(head, geo.sphere(0.022, 5, 4), glowMat(0xff1a1a, 1), [x, y, 0.075]);
-    e.castShadow = false;
-    eyes.push(e);
+    glows.push(add(head, geo.sphere(0.022, 5, 4), glowMat(eye, 1), [x, y, 0.075]));
   }
-  for (const s of [1, -1]) add(head, geo.cone(0.02, 0.1, 4), mat(0x6a2a2a), [s * 0.03, -0.07, 0.07], [2.6, 0, 0]); // fangs
+  for (const sd of [1, -1]) add(head, geo.cone(0.02, 0.1, 4), mat(0x6a2a2a), [sd * 0.03, -0.07, 0.07], [2.6, 0, 0]); // fangs
   // 8 legs: each hangs from a yaw group so that rotation.x (about the outward axis) lifts/swings it
   const legs = [];
   const yaws = [-0.75, -0.25, 0.3, 0.8];
@@ -267,7 +274,16 @@ export function spider() {
       legs.push({ obj: lg, phase, amp: 0.35 });
     }
   }
-  return { root, parts: { body, head, legs, glow: eyes }, height: 0.6, radius: 0.6 };
+  for (const m of glows) m.castShadow = false;
+  return { root, parts: { body, head, legs, glow: glows }, height: 0.6 * s, radius: 0.6 * s };
+}
+
+export function spider() {
+  return spiderBody({ shell: 0x2a2030, back: 0x5a2a7a, legC: 0x1e1824, mark: 0xc83a2a, eye: 0xff1a1a });
+}
+
+export function broodmother() {
+  return spiderBody({ shell: 0x1e1a22, back: 0x3a1a4a, legC: 0x141016, mark: 0xe8c83a, eye: 0x9aff3a, s: 2.3, sac: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +368,302 @@ export function drake() {
     wings.push({ obj: w, side });
   }
   return { root, parts: { body, head, bob: [hover], wings }, height: 1.4, radius: 0.6 };
+}
+
+// ---------------------------------------------------------------------------
+export function murloc() {
+  const L = 0.2;
+  const r = rig({ legLen: L, hipW: 0.07, shoulderX: 0.16, shoulderY: 0.2, neckY: 0.22, headZ: 0.06, legAmp: 0.7 });
+  const skin = mat(0x3a9a8a), belly = mat(0xc8d8a0), fin = mat(0xd84a3a), skinD = mat(0x2a6a6a);
+  for (const l of r.legs) legMesh(l.obj, L, 0.08, skin, skinD, { bootH: 0.35, toe: 0.5 });
+  add(r.body, geo.sphere(0.17, 8, 6), skin, [0, 0.12, 0.02], null, [1, 1.05, 0.9]);
+  add(r.body, geo.sphere(0.13, 7, 5), belly, [0, 0.08, 0.07], null, [1, 1, 0.8]);
+  add(r.body, geo.box(0.26, 0.06, 0.2), mat(0x8a6a3a), [0, 0.0, 0]); // loincloth
+  // big fish head with a gaping mouth and a fin crest
+  add(r.head, geo.sphere(0.15, 8, 6), skin, [0, 0.08, 0.02], null, [1, 0.95, 1.15]);
+  add(r.head, geo.box(0.2, 0.05, 0.12), mat(0x5a1a1a), [0, 0.02, 0.13]); // mouth
+  for (let i = 0; i < 4; i++) add(r.head, geo.cone(0.012, 0.04, 3), mat(P.white), [-0.06 + i * 0.04, 0.045, 0.17], [Math.PI, 0, 0]);
+  for (const sd of [1, -1]) {
+    add(r.head, geo.sphere(0.04, 6, 4), mat(0xf2f0d0), [sd * 0.08, 0.15, 0.1]);
+    add(r.head, geo.sphere(0.02, 4, 3), mat(P.black), [sd * 0.085, 0.155, 0.135]);
+    add(r.head, geo.cone(0.05, 0.14, 4), fin, [sd * 0.14, 0.08, -0.02], [0, 0, -sd * 1.3], [0.4, 1, 1]); // cheek fins
+  }
+  for (let i = 0; i < 3; i++) add(r.head, geo.cone(0.05, 0.16 - i * 0.03, 4), fin, [0, 0.22 - i * 0.04, -0.03 - i * 0.07], [-0.7, 0, 0], [0.3, 1, 1]);
+  const armOpt = { upper: 0.11, fore: 0.1, w: 0.055, upperMat: skin, foreMat: skin, handMat: skinD, bend: 0.6 };
+  armMesh(r.armL, armOpt);
+  const hand = armMesh(r.weapon, { ...armOpt, bend: 0.7 });
+  const g = grip(hand, 1.75);
+  add(g, geo.cyl(0.012, 0.014, 0.5, 5), mat(P.wood), [0, 0.12, 0]);
+  add(g, geo.cone(0.03, 0.12, 4), mat(P.bone), [0, 0.42, 0]);
+  return pack(r, 0.75, 0.28);
+}
+
+// ---------------------------------------------------------------------------
+function brigandBase({ cloak = 0x3a4a2a, hood = 0x2e3a22, leather = 0x5a3a20 } = {}) {
+  const L = 0.4;
+  const r = rig({ legLen: L, hipW: 0.09, shoulderX: 0.2, shoulderY: 0.36, neckY: 0.42, headZ: 0.02 });
+  const lth = mat(leather), lthD = mat(P.leatherDark), cl = mat(cloak), hd = mat(hood), skin = mat(P.skinShade);
+  for (const l of r.legs) legMesh(l.obj, L, 0.1, mat(0x4a3a2a), lthD);
+  add(r.body, CG.frustum(1.3), lth, [0, 0.22, 0], null, [0.32, 0.4, 0.22]);
+  add(r.body, geo.box(0.34, 0.06, 0.24), lthD, [0, 0.04, 0]); // belt
+  add(r.body, geo.box(0.06, 0.06, 0.03), mat(P.goldDark), [0, 0.04, 0.125]);
+  add(r.body, geo.box(0.07, 0.42, 0.25), lthD, [0, 0.22, 0.01], [0, 0, 0.6]); // bandolier
+  add(r.body, geo.box(0.36, 0.62, 0.04), cl, [0, 0.12, -0.14], [0.12, 0, 0]); // cloak
+  add(r.body, geo.box(0.12, 0.14, 0.08), lth, [0.14, -0.02, 0.06]); // pouch
+  // hooded head with a scarf over the face
+  add(r.head, geo.sphere(0.1, 7, 5), skin, [0, 0.08, 0.01]);
+  add(r.head, geo.sphere(0.125, 7, 5), hd, [0, 0.1, -0.025], null, [1, 1.05, 1.08]);
+  add(r.head, geo.cone(0.06, 0.18, 5), hd, [0, 0.06, -0.12], [-0.6, 0, 0]);
+  add(r.head, geo.box(0.17, 0.08, 0.06), mat(0x7a2a2a), [0, 0.04, 0.08]); // scarf
+  for (const sd of [1, -1]) add(r.head, geo.box(0.035, 0.02, 0.02), mat(P.black), [sd * 0.04, 0.1, 0.1]);
+  const armOpt = { upper: 0.17, fore: 0.16, w: 0.075, upperMat: lth, foreMat: lthD, handMat: skin, bend: 0.5 };
+  const handL = armMesh(r.armL, armOpt);
+  const hand = armMesh(r.weapon, { ...armOpt, bend: 0.6 });
+  return { r, hand, handL, cl, hd };
+}
+
+export function brigand() {
+  const { r, hand, handL } = brigandBase();
+  const g = grip(hand, MELEE_TILT);
+  add(g, geo.cyl(0.017, 0.017, 0.12, 5), mat(P.leatherDark), [0, 0, 0]);
+  add(g, geo.box(0.12, 0.025, 0.04), mat(P.steelDark), [0, 0.065, 0]);
+  add(g, CG.curvedBlade(), mat(P.steelLight), [0, 0.07, 0], null, [0.9, 0.5, 1]);
+  // a dagger in the off hand
+  const d = grip(handL, MELEE_TILT);
+  add(d, geo.box(0.03, 0.2, 0.012), mat(P.steel), [0, 0.12, 0]);
+  return pack(r, 1.25, 0.32);
+}
+
+export function bandit_lord() {
+  const { r, hand, cl } = brigandBase({ cloak: 0x6a1a1a, hood: 0x3a2a1a, leather: 0x6a4424 });
+  const gold = mat(P.gold), plate = mat(0x7a7e88);
+  // plate pauldrons and a breastplate over the leathers
+  add(r.body, geo.box(0.3, 0.24, 0.05), plate, [0, 0.26, 0.11], [-0.1, 0, 0]);
+  add(r.body, geo.box(0.08, 0.08, 0.02), gold, [0, 0.28, 0.14], [0, 0, Math.PI / 4]);
+  for (const sd of [1, -1]) {
+    add(r.body, geo.sphere(0.11, 7, 5), plate, [sd * 0.21, 0.38, 0], null, [1.15, 0.75, 1.1]);
+    add(r.body, geo.cone(0.03, 0.12, 4), mat(P.steelLight), [sd * 0.24, 0.47, 0], [0, 0, -sd * 0.4]);
+  }
+  add(r.body, geo.box(0.44, 0.75, 0.04), cl, [0, 0.08, -0.16], [0.14, 0, 0]); // long red cape
+  // wide-brimmed hat with a plume instead of the hood point
+  add(r.head, geo.cyl(0.2, 0.2, 0.03, 10), mat(0x2a1a10), [0, 0.2, 0]);
+  add(r.head, geo.cyl(0.09, 0.11, 0.13, 8), mat(0x2a1a10), [0, 0.27, 0]);
+  add(r.head, geo.box(0.03, 0.2, 0.06), mat(0xe8e0c6), [0.08, 0.36, -0.06], [-0.5, 0, -0.3]);
+  add(r.head, geo.cyl(0.012, 0.012, 0.03, 5), gold, [0.12, 0.08, 0.06], [0, 0, HALF_PI]); // earring
+  // a great cutlass
+  const g = grip(hand, MELEE_TILT);
+  add(g, geo.cyl(0.02, 0.02, 0.16, 5), mat(P.leatherDark), [0, 0, 0]);
+  add(g, geo.torus(0.06, 0.012, 3, 8, Math.PI), gold, [0, 0.06, 0.02], [0, HALF_PI, 0]);
+  add(g, CG.curvedBlade(), mat(P.steelLight), [0, 0.09, 0], null, [1.6, 0.85, 1.4]);
+  scaled(r, 1.4);
+  return pack(r, 1.8, 0.45);
+}
+
+// ---------------------------------------------------------------------------
+export function harpy() {
+  const L = 0.36;
+  const r = rig({ legLen: L, hipW: 0.07, shoulderX: 0.16, shoulderY: 0.3, neckY: 0.38, headZ: 0.03, legAmp: 0.5 });
+  const skin = mat(0xb87ab8), feather = mat(0x6a3a8a), featherL = mat(0x9a6ac8), talon = mat(0xd8c060);
+  for (const l of r.legs) {
+    add(l.obj, geo.box(0.06, L * 0.5, 0.07), feather, [0, -L * 0.25, -0.02]);
+    add(l.obj, geo.box(0.03, L * 0.5, 0.03), talon, [0, -L * 0.72, 0.02], [0.25, 0, 0]);
+    for (const tx of [-0.03, 0.03]) add(l.obj, geo.cone(0.015, 0.08, 3), talon, [tx, -L + 0.01, 0.06], [HALF_PI, 0, 0]);
+  }
+  add(r.body, geo.cone(0.18, 0.3, 7), feather, [0, 0.02, 0], [Math.PI, 0, 0]); // feathered skirt
+  add(r.body, CG.frustum(1.2), skin, [0, 0.22, 0.01], null, [0.22, 0.28, 0.15]);
+  add(r.body, geo.box(0.2, 0.08, 0.06), feather, [0, 0.27, 0.06]);
+  // head with a wild crest of feathers
+  add(r.head, geo.sphere(0.085, 7, 5), skin, [0, 0.06, 0]);
+  for (let i = 0; i < 5; i++) add(r.head, geo.cone(0.03, 0.2, 4), i % 2 ? featherL : feather, [(i - 2) * 0.03, 0.12, -0.04], [-0.9 + (i - 2) * 0.1, 0, (i - 2) * 0.25]);
+  for (const sd of [1, -1]) add(r.head, geo.box(0.03, 0.015, 0.02), glowMat(0xffe03a, 0.8), [sd * 0.035, 0.07, 0.075]);
+  add(r.head, geo.cone(0.02, 0.06, 3), talon, [0, 0.04, 0.09], [HALF_PI, 0, 0]);
+  // wings from the shoulders (they flap; the hands are claws)
+  const wings = [];
+  for (const side of [1, -1]) {
+    const w = grp(r.body, side * 0.12, 0.32, -0.04);
+    const flapper = grp(w, 0, 0, 0);
+    flapper.rotation.z = side * 0.35;
+    const mirror = grp(flapper, 0, 0, 0);
+    mirror.scale.x = side;
+    add(mirror, CG.wing(), featherL, [0, 0, 0], null, [0.6, 1, 0.75]);
+    add(mirror, geo.box(0.4, 0.035, 0.035), feather, [0.18, 0.01, 0.12], [0, 0.25, 0]);
+    wings.push({ obj: w, side });
+  }
+  const armOpt = { upper: 0.13, fore: 0.12, w: 0.045, upperMat: skin, foreMat: skin, handMat: talon, bend: 0.7 };
+  armMesh(r.armL, armOpt);
+  armMesh(r.weapon, armOpt);
+  return pack(r, 1.15, 0.32, { wings });
+}
+
+// ---------------------------------------------------------------------------
+export function troll_shaman() {
+  const L = 0.44;
+  const r = rig({ legLen: L, hipW: 0.09, shoulderX: 0.2, shoulderY: 0.34, neckY: 0.38, headZ: 0.12, shoulderZ: 0.06 });
+  const skin = mat(0x5aa86a), skinD = mat(0x3a7a4a), cloth = mat(0x7a3a8a), bone = mat(P.bone), hair = mat(0x2a2a3a);
+  for (const l of r.legs) {
+    add(l.obj, geo.box(0.07, L * 0.6, 0.075), skin, [0, -L * 0.3, 0]);
+    add(l.obj, geo.box(0.065, L * 0.42, 0.07), skin, [0, -L * 0.75, -0.02]);
+    add(l.obj, geo.box(0.09, 0.06, 0.16), skinD, [0, -L + 0.03, 0.04]);
+  }
+  add(r.body, CG.frustum(1.4), skin, [0, 0.19, 0.04], [0.35, 0, 0], [0.26, 0.36, 0.18]);
+  add(r.body, geo.cone(0.2, 0.36, 6), cloth, [0, -0.04, 0], [Math.PI, 0, 0]); // robe skirt
+  add(r.body, geo.torus(0.1, 0.015, 3, 8), bone, [0, 0.34, 0.12], [1.2, 0, 0]);
+  for (let i = 0; i < 3; i++) add(r.body, geo.sphere(0.03, 4, 3), mat([0xd83a2a, 0xe8c83a, 0x3a8ae8][i]), [-0.06 + i * 0.06, 0.28, 0.16]);
+  // painted wooden mask, tusks and long ears
+  add(r.head, geo.sphere(0.1, 7, 5), skin, [0, 0.07, 0], null, [1, 1, 1.15]);
+  add(r.head, geo.box(0.16, 0.2, 0.04), mat(0xb8843a), [0, 0.08, 0.12]);
+  add(r.head, geo.box(0.12, 0.03, 0.045), mat(0xd83a2a), [0, 0.12, 0.125]);
+  for (const sd of [1, -1]) {
+    add(r.head, geo.box(0.035, 0.03, 0.045), mat(P.black), [sd * 0.04, 0.1, 0.13]);
+    add(r.head, geo.cone(0.016, 0.1, 4), bone, [sd * 0.045, 0.0, 0.12], [-0.3, 0, -sd * 0.3]);
+    add(r.head, geo.cone(0.03, 0.2, 4), skin, [sd * 0.15, 0.09, -0.03], [0, 0, -sd * 1.35]);
+  }
+  add(r.head, geo.box(0.035, 0.16, 0.24), hair, [0, 0.17, -0.04], [-0.25, 0, 0]);
+  for (let i = 0; i < 3; i++) add(r.head, geo.box(0.02, 0.18, 0.05), mat([0xd83a2a, 0x3a8ae8, 0xe8c83a][i]), [(i - 1) * 0.05, 0.26, -0.08], [-0.4, 0, (i - 1) * 0.3]);
+  const armOpt = { upper: 0.2, fore: 0.19, w: 0.06, upperMat: skin, foreMat: skin, handMat: skinD, bend: 0.4, handR: 0.05 };
+  armMesh(r.armL, armOpt);
+  const hand = armMesh(r.weapon, { ...armOpt, bend: 0.6 });
+  // staff topped with a skull and a glowing orb
+  const g = grip(hand, STAFF_TILT);
+  add(g, geo.cyl(0.018, 0.022, 0.95, 5), mat(P.woodDark), [0, 0.25, 0]);
+  add(g, geo.sphere(0.06, 6, 5), bone, [0, 0.74, 0]);
+  const orb = add(g, geo.sphere(0.055, 7, 5), glowMat(0x7ad8ff, 1), [0, 0.84, 0]);
+  orb.castShadow = false;
+  for (const sd of [1, -1]) add(g, geo.box(0.02, 0.14, 0.04), mat(0xd83a2a), [sd * 0.05, 0.66, 0], [0, 0, sd * 0.4]);
+  return pack(r, 1.2, 0.3, { glow: [orb] });
+}
+
+// ---------------------------------------------------------------------------
+export function naga_siren() {
+  const root = new THREE.Group();
+  const scale = mat(0x2a8a8a), scaleD = mat(0x1a5a6a), skin = mat(0x6ac8b8), fin = mat(0x8a3ab8);
+  // the coiled tail lies on the ground; the upper body sways above it
+  const tail = [[0, 0.12, -0.05, 0.2], [0.14, 0.1, -0.25, 0.17], [0.0, 0.08, -0.42, 0.14], [-0.18, 0.07, -0.34, 0.12], [-0.24, 0.06, -0.12, 0.1], [-0.16, 0.05, 0.06, 0.08]];
+  tail.forEach(([x, y, z, rr], i) => add(root, geo.sphere(rr, 7, 5), i % 2 ? scaleD : scale, [x, y, z], null, [1.2, 0.7, 1.2]));
+  add(root, geo.cone(0.06, 0.2, 4), fin, [-0.1, 0.05, 0.16], [HALF_PI, 0, 0.6]);
+  const hover = grp(root, 0, 0, 0);
+  const body = grp(hover, 0, 0.36, 0.05);
+  add(body, geo.cyl(0.13, 0.19, 0.3, 7), scale, [0, -0.08, 0]);
+  add(body, CG.frustum(1.3), skin, [0, 0.2, 0.01], null, [0.24, 0.28, 0.16]);
+  add(body, geo.box(0.18, 0.1, 0.05), mat(0xe8c83a), [0, 0.24, 0.08]); // shell bodice
+  for (const sd of [1, -1]) add(body, geo.cone(0.05, 0.2, 4), fin, [sd * 0.13, 0.3, -0.05], [0, 0, -sd * 0.8], [0.4, 1, 1]);
+  const head = grp(body, 0, 0.4, 0.02);
+  add(head, geo.sphere(0.085, 7, 5), skin, [0, 0.05, 0]);
+  add(head, geo.cone(0.11, 0.32, 6), mat(0x3a5ac8), [0, 0.06, -0.12], [-1.2, 0, 0]); // flowing hair
+  for (const sd of [1, -1]) {
+    add(head, geo.cone(0.03, 0.12, 4), fin, [sd * 0.08, 0.07, -0.01], [0, 0, -sd * 1.2]);
+    const e = add(head, geo.box(0.03, 0.015, 0.02), glowMat(0x9affff, 1), [sd * 0.033, 0.06, 0.075]);
+    e.castShadow = false;
+  }
+  const armL = grp(body, 0.16, 0.3, 0.02);
+  armMesh(armL, { upper: 0.15, fore: 0.14, w: 0.05, upperMat: skin, foreMat: skin, handMat: skin, bend: 0.6 });
+  const weapon = grp(body, -0.16, 0.3, 0.02);
+  const hand = armMesh(weapon, { upper: 0.15, fore: 0.14, w: 0.05, upperMat: skin, foreMat: skin, handMat: skin, bend: 0.7 });
+  const g = grip(hand, STAFF_TILT);
+  add(g, geo.cyl(0.014, 0.014, 0.85, 5), mat(P.goldDark), [0, 0.2, 0]);
+  for (const x of [-0.05, 0, 0.05]) add(g, geo.cone(0.016, 0.1, 4), mat(P.gold), [x, 0.66, 0]);
+  add(g, geo.box(0.12, 0.02, 0.02), mat(P.gold), [0, 0.6, 0]);
+  return { root, parts: { body, head, arms: [{ obj: armL, phase: Math.PI }], weapon, bob: [hover] }, height: 1.1, radius: 0.4 };
+}
+
+// ---------------------------------------------------------------------------
+export function dragon() {
+  const root = new THREE.Group();
+  const outer = grp(root, 0, 0, 0);
+  outer.scale.setScalar(2.1);
+  const red = mat(0xa81c14), redD = mat(0x5a0e0a), belly = mat(0xe8a040), horn = mat(0x2a2224), gold = mat(P.goldDark);
+  const legs = [];
+  for (const [x, z, ph] of [[0.18, 0.2, 0], [-0.18, 0.2, Math.PI], [0.2, -0.28, Math.PI], [-0.2, -0.28, 0]]) {
+    const lg = grp(outer, x, 0.42, z);
+    add(lg, geo.box(0.12, 0.26, 0.15), red, [0, -0.12, 0]);
+    add(lg, geo.box(0.09, 0.18, 0.1), redD, [0, -0.3, 0.02]);
+    for (const tx of [-0.035, 0.035]) add(lg, geo.cone(0.025, 0.08, 3), horn, [tx, -0.4, 0.08], [HALF_PI, 0, 0]);
+    legs.push({ obj: lg, phase: ph, amp: 0.4 });
+  }
+  const body = grp(outer, 0, 0.5, 0);
+  add(body, geo.sphere(0.3, 9, 7), red, [0, 0.02, 0], null, [0.95, 0.85, 1.55]);
+  add(body, geo.sphere(0.24, 8, 6), belly, [0, -0.07, 0.06], null, [0.9, 0.75, 1.5]);
+  for (let i = 0; i < 6; i++) add(body, geo.cone(0.05, 0.16, 4), gold, [0, 0.27 - i * 0.015, 0.3 - i * 0.14], [-0.4, 0, 0]);
+  // neck and horned head
+  add(body, geo.cyl(0.11, 0.16, 0.5, 7), red, [0, 0.22, 0.46], [0.75, 0, 0]);
+  const head = grp(body, 0, 0.46, 0.68);
+  add(head, geo.box(0.22, 0.17, 0.26), red, [0, 0, 0]);
+  add(head, geo.box(0.16, 0.09, 0.22), red, [0, -0.01, 0.21]);
+  add(head, geo.box(0.14, 0.05, 0.24), redD, [0, -0.09, 0.16], [0.25, 0, 0]);
+  for (let i = 0; i < 4; i++) add(head, geo.cone(0.012, 0.04, 3), mat(P.bone), [-0.05 + i * 0.033, -0.065, 0.28], [Math.PI, 0, 0]);
+  const glows = [];
+  for (const sd of [1, -1]) {
+    add(head, geo.cone(0.04, 0.32, 5), horn, [sd * 0.08, 0.13, -0.16], [-1.15, 0, -sd * 0.25]);
+    add(head, geo.cone(0.025, 0.16, 4), horn, [sd * 0.12, 0.04, -0.08], [-1.3, 0, -sd * 0.6]);
+    glows.push(add(head, geo.box(0.045, 0.025, 0.02), glowMat(0xffd820, 1), [sd * 0.09, 0.05, 0.11]));
+  }
+  // smouldering nostrils
+  for (const sd of [1, -1]) glows.push(add(head, geo.sphere(0.015, 4, 3), glowMat(0xff6a1a, 1), [sd * 0.04, 0.02, 0.33]));
+  // long tail
+  const tail = grp(body, 0, -0.02, -0.42);
+  add(tail, geo.cone(0.14, 0.6, 6), red, [0, -0.06, -0.26], [-1.85, 0, 0]);
+  add(tail, geo.cone(0.08, 0.5, 5), red, [0, -0.2, -0.7], [-2.05, 0, 0]);
+  add(tail, CG.pennant(), gold, [0, -0.3, -0.98], [0, HALF_PI, -0.5], [0.16, 0.14, 0.02]);
+  // great wings
+  const wings = [];
+  for (const side of [1, -1]) {
+    const w = grp(body, side * 0.2, 0.18, 0.12);
+    const flapper = grp(w, 0, 0, 0);
+    flapper.rotation.z = side * 0.3;
+    const mirror = grp(flapper, 0, 0, 0);
+    mirror.scale.x = side;
+    add(mirror, CG.wing(), mat(0xc8401c), [0, 0, 0], null, [1.05, 1, 1.2]);
+    add(mirror, geo.box(0.55, 0.045, 0.045), redD, [0.25, 0.01, 0.26], [0, 0.28, 0]);
+    add(mirror, geo.box(0.5, 0.04, 0.04), redD, [0.75, 0.01, 0.22], [0, -0.45, 0]);
+    wings.push({ obj: w, side });
+  }
+  for (const m of glows) m.castShadow = false;
+  return { root, parts: { body, head, legs, wings, glow: glows }, height: 2.6, radius: 1.2 };
+}
+
+// ---------------------------------------------------------------------------
+export function hydra() {
+  const root = new THREE.Group();
+  const outer = grp(root, 0, 0, 0);
+  outer.scale.setScalar(2.2);
+  const green = mat(0x3a7a4a), greenD = mat(0x24502e), belly = mat(0xb8c87a), spine = mat(0x7a3a8a);
+  const legs = [];
+  for (const [x, z, ph] of [[0.22, 0.12, 0], [-0.22, 0.12, Math.PI], [0.24, -0.22, Math.PI], [-0.24, -0.22, 0]]) {
+    const lg = grp(outer, x, 0.3, z);
+    add(lg, geo.box(0.14, 0.22, 0.16), green, [0, -0.1, 0]);
+    add(lg, geo.box(0.16, 0.08, 0.2), greenD, [0, -0.25, 0.04]);
+    legs.push({ obj: lg, phase: ph, amp: 0.3 });
+  }
+  const body = grp(outer, 0, 0.42, 0);
+  add(body, geo.sphere(0.36, 9, 7), green, [0, 0, -0.05], null, [1.1, 0.8, 1.2]);
+  add(body, geo.sphere(0.3, 8, 6), belly, [0, -0.08, 0.02], null, [1, 0.6, 1.1]);
+  for (let i = 0; i < 5; i++) add(body, geo.cone(0.05, 0.16, 4), spine, [0, 0.28 - i * 0.01, 0.15 - i * 0.12], [-0.5, 0, 0]);
+  add(body, geo.cone(0.12, 0.5, 6), green, [0, -0.06, -0.55], [-1.9, 0, 0]); // tail
+  // three necks: the middle one strikes (the weapon), the side ones sway (the arms)
+  const glows = [];
+  const neck = (parent, x, rz) => {
+    const n = grp(parent, x, 0.15, 0.25);
+    n.rotation.z = rz;
+    add(n, geo.cyl(0.07, 0.1, 0.5, 7), green, [0, 0.22, 0.04], [0.25, 0, 0]);
+    add(n, geo.cyl(0.06, 0.07, 0.3, 7), green, [0, 0.52, 0.14], [0.55, 0, 0]);
+    const hd = grp(n, 0, 0.66, 0.24);
+    add(hd, geo.box(0.15, 0.11, 0.2), green, [0, 0, 0.04]);
+    add(hd, geo.box(0.12, 0.05, 0.16), greenD, [0, -0.07, 0.07], [0.3, 0, 0]);
+    add(hd, geo.cone(0.03, 0.12, 4), spine, [0, 0.07, -0.04], [-1.2, 0, 0]);
+    for (const sd of [1, -1]) glows.push(add(hd, geo.box(0.03, 0.02, 0.02), glowMat(0xd8ff3a, 1), [sd * 0.05, 0.03, 0.12]));
+    return n;
+  };
+  const weapon = neck(body, 0, 0);
+  const armL = neck(body, 0.17, -0.35);
+  const armR = neck(body, -0.17, 0.35);
+  const head = grp(body, 0, 0, 0);
+  for (const m of glows) m.castShadow = false;
+  return {
+    root,
+    parts: { body, head, legs, weapon, arms: [{ obj: armL, phase: 0 }, { obj: armR, phase: Math.PI }], glow: glows },
+    height: 2.7,
+    radius: 1.2,
+  };
 }
 
 // ---------------------------------------------------------------------------
