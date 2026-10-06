@@ -75,6 +75,13 @@ export class BabylonView {
   /** First-run frame-rate check (see the constructor). */
   private autoQuality: { warm: number; time: number; frames: number } | null = null;
   private lastFrameAt = 0;
+  /**
+   * Frames left before material change tracking resumes (High). While the models load and the
+   * first game's world is built, each new material makes the prepass renderer re-flag every
+   * submesh in the scene (materials × meshes, seconds per pass on SwiftShader); one full refresh at
+   * the end costs a fraction of that.
+   */
+  private settling = 3;
   /** Called when the first-run check settles on a lower preset. */
   onQualityLowered: ((q: Quality) => void) | null = null;
   private instrumentation: SceneInstrumentation | null = null;
@@ -116,6 +123,9 @@ export class BabylonView {
     this.graphics = new Graphics(scene, this.cam.camera, this.sun);
     const chosen = chosenQuality();
     this.graphics.setQuality(chosen ?? 'high');
+    // With High's prepass (for SSAO), hold material change tracking until the first game frames are
+    // drawn (see `settling`); without it the final refresh would cost more than it saves.
+    scene.blockMaterialDirtyMechanism = !!scene.prePassRenderer;
     // First run: start on High and step down if the frame rate is low (once; the result is saved).
     if (!chosen) this.autoQuality = { warm: 2.5, time: 0, frames: 0 };
     this.particles = new ParticleFx(scene, () => this.graphics.particleDensity);
@@ -279,6 +289,7 @@ export class BabylonView {
     this.engine.beginFrame();
     this.bscene.render();
     this.engine.endFrame();
+    if (this.settling > 0 && --this.settling === 0) this.bscene.blockMaterialDirtyMechanism = false;
     this.checkAutoQuality();
   }
 
