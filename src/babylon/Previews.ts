@@ -11,6 +11,7 @@ import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { Scene } from '@babylonjs/core/scene';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 import type { ModelInstance, ModelLibrary } from './ModelLibrary';
+import type { CharacterLibrary } from './Characters';
 import { TeamColorPlugin } from './TeamColor';
 import type { FogOfWarPlugin } from './FogOfWar';
 import { hexToColor3 } from './FxKit';
@@ -39,6 +40,7 @@ export class Previews {
   constructor(
     private readonly scene: Scene,
     private readonly models: ModelLibrary,
+    private readonly characters: CharacterLibrary | null = null,
   ) {
     this.ok = basic(scene, 'ghost-ok', 0x40ff60, 0.45);
     this.bad = basic(scene, 'ghost-bad', 0xff3030, 0.45);
@@ -49,7 +51,7 @@ export class Previews {
 
   beginPlacement(modelId: string, _color: number, footprint: number): void {
     this.endPlacement();
-    const model = this.models.instantiateFlat(modelId, this.ok, 'placement');
+    const model = this.characters?.instantiateBuildingFlat(modelId, this.ok, 'placement') ?? this.models.instantiateFlat(modelId, this.ok, 'placement');
     const tiles = CreateGround('placement-tiles', { width: footprint, height: footprint, subdivisions: footprint }, this.scene);
     tiles.material = this.ok;
     tiles.position.y = 0.12;

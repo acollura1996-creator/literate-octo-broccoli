@@ -1,6 +1,7 @@
 // Imports the rigged, animated KayKit characters (Kay Lousberg, CC0: "Adventurers" and "Skeletons"
-// character packs, https://github.com/KayKit-Game-Assets) into the game's own compact format,
-// src/assets/kaykit/kaykit.bin, with their texture atlases next to it.
+// character packs, https://github.com/KayKit-Game-Assets) and some buildings of the "Medieval
+// Hexagon" pack into the game's own compact format, src/assets/kaykit/kaykit.bin, with their
+// texture atlases next to it.
 //
 //   node tools/kaykit/import.mjs [--src <dir>]
 //
@@ -18,6 +19,7 @@
 //     so any prop fits any body of any rig).
 //   - Per vertex: position (float), normal (int8), uv (uint16), four joints and weights (uint8). (Which atlas swatches take the team
 //     colour is decided by the game, per character and prop: see CharacterRecipes.ts.)
+//   - Buildings: static pieces in model space (one mesh each).
 //   - Per animation: frame range, duration, and for walks and runs the ground speed of the feet, for
 //     attacks the moment of impact (the weapon hand's fastest point), so the game can match them to
 //     movement speed and to the simulation's attack timing.
@@ -34,6 +36,7 @@ const FPS = 30;
 const REPOS = {
   adv: { url: 'https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0', dir: 'addons/kaykit_character_pack_adventures' },
   skel: { url: 'https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0', dir: 'addons/kaykit_character_pack_skeletons' },
+  hex: { url: 'https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0', dir: 'addons/kaykit_medieval_hexagon_pack', sparse: ['Assets/gltf/buildings/blue', 'Assets/gltf/buildings/neutral'] },
 };
 
 // ------------------------------------------------------------------ selection
@@ -83,6 +86,11 @@ const PROPS = [
   { name: 'Skeleton_Shield_Large_B', repo: 'skel', file: 'Assets/gltf/Skeleton_Shield_Large_B.gltf', texture: 'skeleton_texture.png', ...LEFT_HAND },
 ];
 
+/** Buildings of the Medieval Hexagon pack (the blue set: its blue swatches take the team colour). */
+const BUILDINGS = ['castle', 'barracks', 'blacksmith', 'church', 'home_A', 'home_B', 'tower_A', 'tower_B', 'lumbermill', 'market', 'tavern', 'archeryrange', 'windmill', 'mine', 'well']
+  .map((n) => ({ name: `hex/${n}`, file: `Assets/gltf/buildings/blue/building_${n}_blue.gltf` }))
+  .concat(['destroyed', 'scaffolding', 'stage_A', 'stage_B', 'stage_C'].map((n) => ({ name: `hex/${n}`, file: `Assets/gltf/buildings/neutral/building_${n}.gltf` })));
+
 /** Joints props may hang on even when no vertex is weighted to them. */
 const ATTACH_JOINTS = ['handslot.r', 'handslot.l', 'head', 'chest', 'hips'];
 
@@ -95,7 +103,9 @@ function fetchSources() {
       console.log(`[kaykit] cloning ${r.url}`);
       execFileSync('git', ['clone', '--depth', '1', '--filter=blob:none', '--sparse', r.url, dir], { stdio: 'inherit' });
     }
-    execFileSync('git', ['-C', dir, 'sparse-checkout', 'set', `${r.dir}/Characters/gltf`, `${r.dir}/Assets/gltf`], { stdio: 'inherit' }); // (cone mode keeps the files of parent folders: the licence)
+    // (Cone mode keeps the files of parent folders: the licence.)
+    const dirs = (r.sparse ?? ['Characters/gltf', 'Assets/gltf']).map((d) => `${r.dir}/${d}`);
+    execFileSync('git', ['-C', dir, 'sparse-checkout', 'set', ...dirs], { stdio: 'inherit' });
   }
   return CACHE;
 }
@@ -524,6 +534,24 @@ for (const pr of PROPS) {
   const sw = [...pc.cells.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}:${v}`).join(' ');
   console.log(`[kaykit]   prop ${pc.piece.name} on ${pr.joint}: ${pc.piece.indices / 3} triangles; swatches ${sw}`);
 }
+for (const b of BUILDINGS) {
+  textures.add('hexagons_medieval.png');
+  const g = readGltf(srcPath('hex', b.file));
+  const parts = [];
+  for (const root of g.json.scenes[g.json.scene ?? 0].nodes) {
+    const visit = (i, pm) => {
+      const n = g.json.nodes[i];
+      const m = mul(pm, localOf(n));
+      if (n.mesh !== undefined) parts.push(...meshGeometry(g, n.mesh, m));
+      for (const c of n.children ?? []) visit(c, m);
+    };
+    visit(root, ident());
+  }
+  const rigid = parts.map((part) => ({ ...part, jnt: new Array((part.pos.length / 3) * 4).fill('hips'), wgt: Float32Array.from({ length: (part.pos.length / 3) * 4 }, (_, k) => (k % 4 === 0 ? 1 : 0)) }));
+  const pc = writePiece(b.name, 'hero', 'hexagons_medieval.png', rigid, { kind: 'static' });
+  const sw = [...pc.cells.entries()].sort((a, c) => c[1] - a[1]).slice(0, 8).map(([k, v]) => `${k}:${v}`).join(' ');
+  console.log(`[kaykit] building ${b.name}: ${pc.piece.indices / 3} triangles, ${(pc.piece.bounds.maxY - pc.piece.bounds.minY).toFixed(2)} tall; swatches ${sw}`);
+}
 out.textures = [...textures];
 
 // ------------------------------------------------------------------ write
@@ -535,9 +563,10 @@ header.write('KKC1', 0, 'ascii');
 header.writeUInt32LE(json.length + jsonPad.length, 4);
 writeFileSync(path.join(OUT_DIR, 'kaykit.bin'), Buffer.concat([header, json, jsonPad, ...chunks]));
 for (const t of textures) {
-  const from = CHARACTERS.find((c) => c.texture === t);
+  const from = CHARACTERS.find((c) => c.texture === t) ?? { repo: 'hex', file: BUILDINGS[0].file };
   copyFileSync(srcPath(from.repo, path.join(path.dirname(from.file), t)), path.join(OUT_DIR, t));
 }
 copyFileSync(srcPath('adv', 'LICENSE.txt'), path.join(OUT_DIR, 'LICENSE-adventurers.txt'));
 copyFileSync(srcPath('skel', 'LICENSE.txt'), path.join(OUT_DIR, 'LICENSE-skeletons.txt'));
+copyFileSync(path.join(SRC, 'hex', 'LICENSE.txt'), path.join(OUT_DIR, 'LICENSE-medieval-hexagon.txt'));
 console.log(`[kaykit] wrote ${path.relative(ROOT, OUT_DIR)}/kaykit.bin (${((8 + json.length + binLength) / 1024 / 1024).toFixed(2)} MB) and ${textures.size} textures`);

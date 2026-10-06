@@ -13,6 +13,29 @@ export const TEAM_CELLS: Record<string, TeamCells> = {
   'mage_texture.png': [[0, 1], [1, 1], [2, 1], [1, 2]],
   'rogue_texture.png': [[0, 1], [1, 1], [1, 2]],
   'skeleton_texture.png': [[7, 1], [1, 2], [2, 2]],
+  'hexagons_medieval.png': [[0, 3]],
+};
+
+/**
+ * Buildings drawn with the KayKit Medieval Hexagon pack's models (its blue set, whose blue roofs and
+ * banners take the team colour): the piece, and the width it is scaled to (about its footprint).
+ */
+export interface BuildingRecipe {
+  piece: string;
+  size: number;
+}
+export const BUILDING_RECIPES: Record<string, BuildingRecipe> = {
+  castle: { piece: 'hex/castle', size: 3.9 }, // the Medieval Age town center
+  house_2: { piece: 'hex/home_A', size: 1.95 },
+  house_3: { piece: 'hex/home_B', size: 1.95 },
+  barracks: { piece: 'hex/barracks', size: 3.0 },
+  lumberyard: { piece: 'hex/lumbermill', size: 2.95 },
+  research_1: { piece: 'hex/blacksmith', size: 2.9 },
+  sanctum: { piece: 'hex/church', size: 2.7 },
+  scouttower: { piece: 'hex/tower_A', size: 1.9 },
+  guardtower: { piece: 'hex/tower_B', size: 1.9 },
+  tavern: { piece: 'hex/tavern', size: 2.95 },
+  marketplace: { piece: 'hex/market', size: 3.0 },
 };
 
 /** A prop by piece name, or with its own team swatches. */

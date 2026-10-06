@@ -41,7 +41,7 @@ import type { Scene } from '@babylonjs/core/scene';
 import '@babylonjs/core/Meshes/instancedMesh';
 import binUrl from '../assets/kaykit/kaykit.bin?url';
 import { MergedModelPlugin } from './MergedModel';
-import { CHARACTER_RECIPES, TEAM_CELLS, type CharacterRecipe } from './CharacterRecipes';
+import { BUILDING_RECIPES, CHARACTER_RECIPES, TEAM_CELLS, type CharacterRecipe } from './CharacterRecipes';
 import { PROCEDURAL_PROPS } from './CharacterProps';
 import type { GhostMode, ModelInstance } from './ModelLibrary';
 
@@ -72,7 +72,7 @@ interface PieceInfo {
   name: string;
   rig: string;
   texture: string;
-  kind: 'body' | 'prop';
+  kind: 'body' | 'prop' | 'static';
   joint?: string;
   vertices: number;
   indices: number;
@@ -116,8 +116,10 @@ export class CharacterPlugin extends MaterialPluginBase {
     private readonly vat: RawTexture,
     private readonly atlas: RawTexture2DArray,
     private readonly vatWidth: number,
+    /** Buildings: no skinning. */
+    private readonly isStatic = false,
   ) {
-    super(material, 'Character', 140, { KAYKIT: false, KAYKITFAST: false }, true, true);
+    super(material, 'Character', 140, { KAYKIT: false, KAYKITFAST: false, KKSTATIC: false }, true, true);
   }
 
   override getClassName(): string {
@@ -127,6 +129,7 @@ export class CharacterPlugin extends MaterialPluginBase {
   override prepareDefines(defines: MaterialDefines): void {
     defines['KAYKIT'] = true;
     defines['KAYKITFAST'] = CharacterPlugin.fast;
+    defines['KKSTATIC'] = this.isStatic;
   }
 
   override getAttributes(attributes: string[]): void {
@@ -205,6 +208,7 @@ export class CharacterPlugin extends MaterialPluginBase {
           }
         #endif`,
         CUSTOM_VERTEX_UPDATE_POSITION: `#ifdef KAYKIT
+        #ifndef KKSTATIC
           vec4 kkS0 = vec4(0.0);
           vec4 kkS1 = vec4(0.0);
           vec4 kkS2 = vec4(0.0);
@@ -219,11 +223,12 @@ export class CharacterPlugin extends MaterialPluginBase {
             vec4 p = vec4(positionUpdated, 1.0);
             positionUpdated = vec3(dot(kkS0, p), dot(kkS1, p), dot(kkS2, p));
           }
+        #endif
           vKkUV = kkUV;
           vKkMeta = kkMeta;
           vKkTeam = kkTeam.a > 0.0 ? kkTeam.rgb : vec3(-1.0);
         #endif`,
-        CUSTOM_VERTEX_UPDATE_NORMAL: `#if defined(KAYKIT) && defined(NORMAL)
+        CUSTOM_VERTEX_UPDATE_NORMAL: `#if defined(KAYKIT) && defined(NORMAL) && !defined(KKSTATIC)
           normalUpdated = vec3(dot(kkS0.xyz, normalUpdated), dot(kkS1.xyz, normalUpdated), dot(kkS2.xyz, normalUpdated));
         #endif`,
       };
@@ -524,15 +529,15 @@ export class CharacterLibrary {
     return !!CHARACTER_RECIPES[modelId];
   }
 
-  private material(ghost: GhostMode | null): StandardMaterial {
-    const key = ghost ?? 'solid';
+  private material(ghost: GhostMode | null, isStatic = false): StandardMaterial {
+    const key = `${ghost ?? 'solid'}${isStatic ? '-static' : ''}`;
     let m = this.materials.get(key);
     if (m) return m;
     m = new StandardMaterial(`kaykit-${key}`, this.scene);
     m.diffuseColor = Color3.White();
     m.specularColor = Color3.Black();
-    m.backFaceCulling = false; // the packs' capes and hats are single-sided
-    const plugin = new CharacterPlugin(m, this.vat, this.atlas, this.vatWidth);
+    m.backFaceCulling = isStatic; // the packs' capes and hats are single-sided; buildings are closed
+    const plugin = new CharacterPlugin(m, this.vat, this.atlas, this.vatWidth, isStatic);
     if (!this.fog) {
       const fog = m.pluginManager?.getPlugin('FogOfWar') as { fogEnabled: boolean } | null;
       if (fog) fog.fogEnabled = false;
@@ -612,7 +617,6 @@ export class CharacterLibrary {
         meta.push(teamCells.some(([c, r]) => c === col && r === row) ? 1 : 0, layer, 0);
       }
       const I = p.index32 ? new Uint32Array(this.bin, this.dataStart + p.index, p.indices) : new Uint16Array(this.bin, this.dataStart + p.index, p.indices);
-      // glTF winds counter-clockwise; this right-handed scene draws counter-clockwise front faces.
       for (let i = 0; i < I.length; i++) idx.push(base + I[i]!);
     };
     add(body, recipe.bodyTeam ?? TEAM_CELLS[body.texture] ?? []);
@@ -650,6 +654,7 @@ export class CharacterLibrary {
       add(p, typeof spec === 'string' ? TEAM_CELLS[p.texture] ?? [] : spec.team);
     }
     mesh = new Mesh(`kaykit-${key}`, this.scene);
+    mesh.sideOrientation = Material.CounterClockWiseSideOrientation; // glTF winding
     const vd = new VertexData();
     vd.positions = pos;
     vd.normals = nrm;
@@ -679,6 +684,102 @@ export class CharacterLibrary {
       this.onSource?.(mesh);
     }
     return mesh;
+  }
+
+  hasBuilding(modelId: string): boolean {
+    return !!BUILDING_RECIPES[modelId];
+  }
+
+  /** The mesh of a building recipe (built once, hidden), and its size once scaled. */
+  private buildingMesh(modelId: string, ghost: GhostMode | null): { mesh: Mesh; scale: number; height: number; radius: number } {
+    const key = `building:${modelId}|${ghost ?? ''}`;
+    const recipe = BUILDING_RECIPES[modelId]!;
+    const piece = this.pieces.get(recipe.piece);
+    if (!piece) throw new Error(`kaykit: no piece ${recipe.piece}`);
+    let mesh = this.meshes.get(key);
+    if (!mesh) {
+      mesh = this.pieceMesh(key, piece, TEAM_CELLS[piece.texture] ?? [], ghost);
+      this.meshes.set(key, mesh);
+      if (!ghost) {
+        this.sources.push(mesh);
+        this.onSource?.(mesh);
+      }
+    }
+    const bb = mesh.getBoundingInfo().boundingBox;
+    const w = Math.max(bb.maximum.x - bb.minimum.x, bb.maximum.z - bb.minimum.z);
+    const scale = recipe.size / Math.max(0.1, w);
+    return { mesh, scale, height: bb.maximum.y * scale, radius: (w / 2) * scale };
+  }
+
+  /** A static piece as a mesh (buildings): exact bounds, the static material. */
+  private pieceMesh(name: string, p: PieceInfo, teamCells: ReadonlyArray<readonly [number, number]>, ghost: GhostMode | null): Mesh {
+    const P = this.f32(p.position, p.vertices * 3);
+    const N8 = new Int8Array(this.bin, this.dataStart + p.normal, p.vertices * 3);
+    const UV16 = new Uint16Array(this.bin, this.dataStart + p.uv, p.vertices * 2);
+    const layer = this.layer.get(p.texture) ?? 0;
+    const nrm = new Float32Array(p.vertices * 3);
+    const uv = new Float32Array(p.vertices * 2);
+    const meta = new Float32Array(p.vertices * 3);
+    for (let i = 0; i < p.vertices; i++) {
+      for (let k = 0; k < 3; k++) nrm[i * 3 + k] = N8[i * 3 + k]! / 127;
+      const u = UV16[i * 2]! / 65535;
+      const v = UV16[i * 2 + 1]! / 65535;
+      uv[i * 2] = u;
+      uv[i * 2 + 1] = v;
+      const col = Math.min(7, Math.floor(u * 8));
+      const row = Math.min(3, Math.floor(v * 4));
+      meta[i * 3] = teamCells.some(([c, r]) => c === col && r === row) ? 1 : 0;
+      meta[i * 3 + 1] = layer;
+    }
+    const I = p.index32 ? new Uint32Array(this.bin, this.dataStart + p.index, p.indices) : new Uint16Array(this.bin, this.dataStart + p.index, p.indices);
+    const mesh = new Mesh(`kaykit-${name}`, this.scene);
+    mesh.sideOrientation = Material.CounterClockWiseSideOrientation; // glTF winding
+    const vd = new VertexData();
+    vd.positions = Float32Array.from(P);
+    vd.normals = nrm;
+    vd.indices = Array.from(I);
+    vd.applyToMesh(mesh, false);
+    const zeros = new Float32Array(p.vertices * 4);
+    mesh.setVerticesData('kkJ', zeros, false, 4);
+    mesh.setVerticesData('kkW', zeros, false, 4);
+    mesh.setVerticesData('kkUV', uv, false, 2);
+    mesh.setVerticesData('kkMeta', meta, false, 3);
+    mesh.registerInstancedBuffer('kkTeam', 4);
+    mesh.instancedBuffers.kkTeam = new Color4(0.58, 0.59, 0.59, 0);
+    mesh.registerInstancedBuffer('kkFrame', 4);
+    mesh.instancedBuffers.kkFrame = new Vector4(0, 0, 0, 0);
+    mesh.material = this.material(ghost, true);
+    mesh.isVisible = false;
+    mesh.isPickable = false;
+    return mesh;
+  }
+
+  /** A building drawn with the KayKit model (null when the model id has no building recipe). */
+  instantiateBuilding(modelId: string, team: number, name: string, ghost: GhostMode | null = null): ModelInstance | null {
+    if (!BUILDING_RECIPES[modelId]) return null;
+    const { mesh, scale, height, radius } = this.buildingMesh(modelId, ghost);
+    const root = new TransformNode(name, this.scene);
+    const inst = mesh.createInstance(`${name}-kk`);
+    inst.parent = root;
+    inst.scaling.setAll(scale);
+    inst.isPickable = false;
+    inst.instancedBuffers.kkTeam = new Color4(((team >> 16) & 255) / 255, ((team >> 8) & 255) / 255, (team & 255) / 255, 1);
+    inst.instancedBuffers.kkFrame = new Vector4(0, 0, 0, 0);
+    if (!ghost) this.onCaster?.(inst);
+    return { id: modelId, root, parts: {}, height, radius, meshes: [inst], dispose: () => root.dispose(false, false) };
+  }
+
+  /** A building in one flat material (placement previews). */
+  instantiateBuildingFlat(modelId: string, material: Material, name: string): ModelInstance | null {
+    if (!BUILDING_RECIPES[modelId]) return null;
+    const { mesh, scale, height, radius } = this.buildingMesh(modelId, null);
+    const root = new TransformNode(name, this.scene);
+    const copy = new Mesh(`${name}-flat`, this.scene, root, mesh, true);
+    copy.material = material;
+    copy.isVisible = true;
+    copy.isPickable = false;
+    copy.scaling.setAll(scale);
+    return { id: modelId, root, parts: {}, height, radius, meshes: [copy], dispose: () => root.dispose(false, false) };
   }
 
   /** A character for a unit of the given model id (null when the model has no recipe). */

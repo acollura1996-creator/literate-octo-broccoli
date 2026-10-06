@@ -141,7 +141,7 @@ export class BabylonView {
       this.characters = chars;
       this.unitAssets = new UnitAssets(scene, lib, chars);
       this.unitAssets.inView = (x, y, z, r) => this.inView(x, y, z, r);
-      this.previews = new Previews(scene, lib);
+      this.previews = new Previews(scene, lib, chars);
       this.ui = ui;
       // The painted ground and foliage textures (M13), so the first game frame doesn't wait for them.
       prepareGroundTextures();

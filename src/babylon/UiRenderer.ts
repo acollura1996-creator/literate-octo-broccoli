@@ -169,6 +169,8 @@ export class UiRenderer {
 
   /** A model or, for units with a recipe, a rigged character (posed in its idle). */
   instantiate(modelId: string, color: number, name: string): ModelInstance {
+    const b = this.characters.instantiateBuilding(modelId, color, name);
+    if (b) return b;
     const c = this.characters.instantiate(modelId, color, name);
     if (c) {
       c.animator.update(0.35);

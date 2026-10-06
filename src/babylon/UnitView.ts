@@ -246,7 +246,8 @@ export class UnitView {
     const chars = this.assets.characters;
     this.character = !u.isBuilding && chars?.has(u.modelId) ? chars.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost) : null;
     if (this.character && this.anim.deathClip) this.character.animator.play(this.anim.deathClip, { loop: false, fade: 0, at: 99 });
-    this.model = this.character ?? this.assets.models.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost);
+    const building = u.isBuilding ? chars?.instantiateBuilding(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost) : null;
+    this.model = this.character ?? building ?? this.assets.models.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost);
     this.model.root.parent = this.group;
     this.height = this.model.height ?? 1.2;
     this.parts = this.model.parts;
