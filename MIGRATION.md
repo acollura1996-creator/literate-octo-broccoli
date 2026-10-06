@@ -581,6 +581,15 @@ The three.js renderer kept working in parallel, behind `?renderer=three`, until 
     - The computer generals use the waygates, taverns, mercenary camps and quests, and expand to the new mines.
   - **Scrolling.** As in Warcraft III, only a thin band at the window edge scrolls, at full speed from the start, so the HUD along the edges no longer drags the map. Acceleration, braking, zoom and the camera's height over hills ease by real time, so they feel the same at any frame rate. A slider in the menu sets the speed from 40 to 250 %.
   - **Fixes on the way:** lobbed stones and javelins never dealt damage (arcing shots reached their target as null); the first frame of a game could run the clocks backwards; an AI empire without a town hall crashed the general AI.
+  - [x] Checks:
+    - `npm run typecheck` and the builds pass; the single-file build (15.6 MB) runs from `file://` with the characters.
+    - The 67 scenario checks pass, and a 35-check script covers the map's mechanics (waygates, markets, labs, fountains of mana, shrines, taverns, runes, boss treasure, tiered drops, all five quests).
+    - The simulation's seeded hashes change, as they must with the new map. 30-minute headless games, AI generals on every side:
+      - Empire mode, seeds 12345, 777 and 4242: the rival empire reaches ages 12, 11 and 11; the other empire reaches 7, 9 and 9.
+      - Hero mode, seed 12345: the empires reach ages 8 and 11.
+    - Opening view, software rendered: Low draws 0.52M triangles in 57 draw calls (M13: 0.70M, 64); High 0.98M in 260 (M13: 1.27M, 255). The 384 map's ground is split into chunks that are culled one by one, and start-up on High is faster than M13's (the exposure setting no longer re-flags every material).
+    - The 120-unit benchmark (355 units with the new map's creeps): Low 201 draw calls, High 577 (M13: 658–674). Each character or KayKit building type is one draw call whatever its units are doing. Skinning runs in the vertex shader, which a graphics card absorbs. In this environment's software renderer it is costly, so Low skins from the nearest frame without crossfades.
+    - Not checked here: listening to the sounds (they were checked by rendering them offline: levels, durations, spectra, no clipping), and frame rates on real hardware.
 
 ---
 
