@@ -27,6 +27,7 @@ import type { Game } from '../game/game.ts';
 import type { Roads } from '../game/roads.ts';
 import type { Terrain, Tree } from '../world/terrain.ts';
 
+/** Trees and grass are batched per CHUNK × CHUNK cells (one draw call each), culled per batch. */
 const CHUNK = 32;
 
 /** Canvas → texture (Babylon samples canvases with row 0 at v = 1, like three.js). */
@@ -175,7 +176,7 @@ function mat(scene: Scene, name: string, color: Color3): StandardMaterial {
 
 interface TreeSlot {
   trunks: Mesh;
-  canopy: Mesh;
+  canopies: Mesh[];
   index: number;
 }
 
@@ -189,6 +190,10 @@ export class TerrainView {
   private readonly mask: RawTexture;
   private readonly maskData: Uint8Array;
   private maskVersion = -1;
+  private detail = true;
+  /** Grass, flower and full-crown batches (hidden on Low), and the Low preset's simpler crowns. */
+  private readonly detailMeshes: Mesh[] = [];
+  private readonly lowMeshes: Mesh[] = [];
   /** Meshes that cast and receive shadows (trees, rocks, bushes) and the ground, which receives. */
   readonly casters: Mesh[] = [];
   readonly receivers: Mesh[] = [];
@@ -360,9 +365,12 @@ export class TerrainView {
     const sc = this.scene;
     const shapes = [pineGeo(), broadleafGeo(), deadTreeGeo()];
     const bases = shapes.map((sh, i) => ({ trunk: this.keep(geoMesh(`trunk-${i}`, sh.trunk, sc)), canopy: this.keep(geoMesh(`canopy-${i}`, sh.canopy, sc)) }));
+    // Broadleaf crowns with fewer facets per lump for the Low preset (swapped in by setDetail).
+    const lowBroadleaf = this.keep(geoMesh('canopy-1-low', broadleafGeo(1).canopy, sc));
+    lowBroadleaf.setEnabled(false);
     const bark = this.keep(foliageMaterial(sc, 'bark', { channel: [0, 0, 1, 0], scale: 1.6, hue: 0.4 }, Color3.FromHexString('#7d5833')));
     const deadBark = this.keep(foliageMaterial(sc, 'bark-dead', { channel: [0, 0, 1, 0], scale: 1.6, hue: 0.3 }, Color3.FromHexString('#5b4a5a')));
-    const needles = this.keep(foliageMaterial(sc, 'needles', { channel: [0, 1, 0, 0], scale: 0.6, hue: 0.5, wind: 0.025, windFrom: 1.0 }));
+    const needles = this.keep(foliageMaterial(sc, 'needles', { channel: [0, 1, 0, 0], scale: 0.6, hue: 0.75, wind: 0.025, windFrom: 1.0 }));
     const leaves = this.keep(foliageMaterial(sc, 'leaves', { channel: [1, 0, 0, 0], scale: 0.55, hue: 0.85, wind: 0.035, windFrom: 1.2 }));
     const trunkMats = [bark, bark, deadBark];
     const canopyMats = [needles, leaves, deadBark];
@@ -383,7 +391,7 @@ export class TerrainView {
       [0.32, 0.27, 0.3],
     ];
 
-    // Batch per 32×32-cell chunk and species, so off-screen forests are culled.
+    // Batch per chunk and species, so off-screen forests are culled.
     const chunksPerSide = Math.ceil(this.terrain.size / CHUNK);
     const buckets = new Map<string, Tree[]>();
     for (const t of this.terrain.trees) {
@@ -412,7 +420,7 @@ export class TerrainView {
         const v = Math.max(0.82, Math.min(1.18, t.tint[1] / m[1]));
         const warm = Math.max(-0.15, Math.min(0.15, t.tint[0] / m[0] - 1));
         colors.set([b[0] * v * (1 + warm), b[1] * v, b[2] * v * (1 - warm), 1], i * 4);
-        this.treeSlots.set(t, { trunks, canopy, index: i });
+        this.treeSlots.set(t, { trunks, canopies: [canopy], index: i });
       });
       for (const m of [trunks, canopy]) {
         // Thin-instance buffers live on the geometry, which clones share: each chunk needs its own.
@@ -421,12 +429,27 @@ export class TerrainView {
         m.isPickable = false;
         m.thinInstanceSetBuffer('matrix', matrices.slice(), 16, false);
         m.thinInstanceRefreshBoundingInfo(false);
-        this.casters.push(m);
       }
-      // Canopies carry their own painted shading; shadows from the next tree would make the forest
-      // a black mass. Trunks stand in the canopy's shade.
+      // Canopies cast (a trunk's shadow falls inside its canopy's) and carry their own painted
+      // shading: shadows from the next tree would make the forest a black mass. Trunks stand in
+      // the canopy's shade.
+      this.casters.push(canopy);
       this.receivers.push(trunks);
       canopy.thinInstanceSetBuffer('color', colors, 4, true);
+      if (s === 1) {
+        const low = this.keep(lowBroadleaf.clone(`canopy-low-${key}`));
+        low.material = canopy.material;
+        low.makeGeometryUnique();
+        low.isPickable = false;
+        low.thinInstanceSetBuffer('matrix', matrices.slice(), 16, false);
+        low.thinInstanceSetBuffer('color', colors.slice(), 4, true);
+        low.thinInstanceRefreshBoundingInfo(false);
+        low.setEnabled(!this.detail);
+        this.casters.push(low);
+        this.detailMeshes.push(canopy);
+        this.lowMeshes.push(low);
+        for (const t of list) this.treeSlots.get(t)!.canopies.push(low);
+      }
     }
   }
 
@@ -436,7 +459,15 @@ export class TerrainView {
     if (!slot) return;
     const y = this.terrain.heightAt(tree.x, tree.z) - 0.05;
     slot.trunks.thinInstanceSetMatrixAt(slot.index, compose(tree.x, y, tree.z, 0, 0, 0, tree.scale * 1.1, 0.16, tree.scale * 1.1), true);
-    slot.canopy.thinInstanceSetMatrixAt(slot.index, compose(tree.x, y, tree.z, 0, 0, 0, 0, 0, 0), true);
+    for (const c of slot.canopies) c.thinInstanceSetMatrixAt(slot.index, compose(tree.x, y, tree.z, 0, 0, 0, 0, 0, 0), true);
+  }
+
+  /** Full detail: grass tufts, flowers and full broadleaf crowns (off on the Low preset, for weaker machines). */
+  setDetail(on: boolean): void {
+    if (on === this.detail) return;
+    this.detail = on;
+    for (const m of this.detailMeshes) m.setEnabled(on);
+    for (const m of this.lowMeshes) m.setEnabled(!on);
   }
 
   /** Thin instances of `mesh` (one draw call); it casts shadows if asked and receives them if `receive`. */
@@ -465,39 +496,68 @@ export class TerrainView {
 
     const rock = geoMesh('boulders', boulderGeo(), sc);
     rock.material = stone;
-    const rm = new Float32Array(d.rocks.length * 16);
-    const rc = new Float32Array(d.rocks.length * 4);
-    d.rocks.forEach((p, i) => {
-      compose(p.x, p.y, p.z, p.rot[0], p.rot[1], p.rot[2], p.scale[0], p.scale[1], p.scale[2]).copyToArray(rm, i * 16);
-      const v = toGamma(p.color[0]) * 0.8;
-      rc.set([v, v * 0.96, v * 0.9, 1], i * 4);
-    });
-    this.place(rock, rm, rc, true);
+    this.placeChunked(
+      'boulders',
+      rock,
+      d.rocks.map((p) => {
+        const v = toGamma(p.color[0]) * 0.8;
+        return { x: p.x, z: p.z, m: compose(p.x, p.y, p.z, p.rot[0], p.rot[1], p.rot[2], p.scale[0], p.scale[1], p.scale[2]), c: [v, v * 0.96, v * 0.9] };
+      }),
+      { cast: true, receive: true },
+    );
 
     const bush = geoMesh('bushes', bushGeo(), sc);
     bush.material = leafy;
-    const bm = new Float32Array(d.bushes.length * 16);
-    const bc = new Float32Array(d.bushes.length * 4);
-    d.bushes.forEach((p, i) => {
-      compose(p.x, t.heightAt(p.x, p.z) - 0.04, p.z, 0, p.rot[1], 0, p.scale[0], p.scale[1], p.scale[2]).copyToArray(bm, i * 16);
-      const v = Math.max(0.85, Math.min(1.15, p.color[1] / 0.44));
-      bc.set([0.33 * v, 0.58 * v, 0.17 * v, 1], i * 4);
-    });
-    this.place(bush, bm, bc, true, false);
+    this.placeChunked(
+      'bushes',
+      bush,
+      d.bushes.map((p) => {
+        const v = Math.max(0.85, Math.min(1.15, p.color[1] / 0.44));
+        return { x: p.x, z: p.z, m: compose(p.x, t.heightAt(p.x, p.z) - 0.04, p.z, 0, p.rot[1], 0, p.scale[0], p.scale[1], p.scale[2]), c: [0.33 * v, 0.58 * v, 0.17 * v] };
+      }),
+      { cast: true, receive: false },
+    );
 
     const { stems, heads } = flowerGeo();
     const stemMesh = geoMesh('flower-stems', stems, sc);
     const headMesh = geoMesh('flower-heads', heads, sc);
     stemMesh.material = stemMat;
     headMesh.material = headMat;
-    const fm = new Float32Array(d.flowers.length * 16);
-    const fc = new Float32Array(d.flowers.length * 4);
-    d.flowers.forEach((p, i) => {
-      compose(p.x, t.heightAt(p.x, p.z) - 0.01, p.z, 0, p.rot[1], 0, p.scale[0], p.scale[0], p.scale[0]).copyToArray(fm, i * 16);
-      fc.set([p.color[0], p.color[1], p.color[2], 1], i * 4);
-    });
-    this.place(stemMesh, fm, null, false);
-    this.place(headMesh, fm.slice(), fc, false);
+    const flowers = d.flowers.map((p) => ({ x: p.x, z: p.z, m: compose(p.x, t.heightAt(p.x, p.z) - 0.01, p.z, 0, p.rot[1], 0, p.scale[0], p.scale[0], p.scale[0]), c: [p.color[0], p.color[1], p.color[2]] as [number, number, number] }));
+    this.placeChunked('flower-stems', stemMesh, flowers.map((f) => ({ ...f, c: null })), { cast: false, receive: true, detail: true });
+    this.placeChunked('flower-heads', headMesh, flowers, { cast: false, receive: true, detail: true });
+  }
+
+  /** Thin-instance batches of `proto`, one per chunk with items in it (culled per chunk). */
+  private placeChunked(
+    name: string,
+    proto: Mesh,
+    items: Array<{ x: number; z: number; m: Matrix; c: [number, number, number] | null }>,
+    opts: { cast: boolean; receive: boolean; detail?: boolean },
+  ): void {
+    this.keep(proto);
+    proto.setEnabled(false);
+    const perSide = Math.ceil(this.terrain.size / CHUNK);
+    const groups = new Map<number, typeof items>();
+    for (const it of items) {
+      const key = Math.floor(it.x / CHUNK) + Math.floor(it.z / CHUNK) * perSide;
+      let list = groups.get(key);
+      if (!list) groups.set(key, (list = []));
+      list.push(it);
+    }
+    for (const [key, list] of groups) {
+      const m = proto.clone(`${name}-${key}`);
+      m.makeGeometryUnique();
+      m.setEnabled(true);
+      const matrices = new Float32Array(list.length * 16);
+      const colors = list[0]!.c ? new Float32Array(list.length * 4) : null;
+      list.forEach((it, i) => {
+        it.m.copyToArray(matrices, i * 16);
+        if (colors && it.c) colors.set([it.c[0], it.c[1], it.c[2], 1], i * 4);
+      });
+      this.place(m, matrices, colors, opts.cast, opts.receive);
+      if (opts.detail) this.detailMeshes.push(m);
+    }
   }
 
   /** Grass tufts over the meadows (fewer on the forest floor and on dirt), batched per chunk. */
@@ -550,6 +610,7 @@ export class TerrainView {
       m.setEnabled(true);
       m.material = mat;
       this.place(m, matrices, colors, false);
+      this.detailMeshes.push(m);
     }
   }
 

@@ -42,6 +42,11 @@ const smoothstep = (a: number, b: number, x: number): number => {
 let layerPixels: Uint8Array | null = null;
 const layerTextures = new WeakMap<Scene, RawTexture2DArray>();
 
+/** Paint the ground layers ahead of the first game (about half a second of canvas work). */
+export function prepareGroundTextures(): void {
+  layerPixels ??= groundLayerPixels(paintGroundLayers());
+}
+
 /** The painted layers as a texture array (painted once per session, uploaded once per scene). */
 function layerTexture(scene: Scene): RawTexture2DArray {
   let t = layerTextures.get(scene);
@@ -111,6 +116,8 @@ function dataTexture(data: Uint8Array, size: number, scene: Scene): RawTexture {
 }
 
 export class GroundSplatPlugin extends MaterialPluginBase {
+  /** One sample per layer instead of two (the Low preset; the quality presets toggle it). */
+  static fast = false;
   private readonly layers: RawTexture2DArray;
   private readonly splatA: RawTexture;
   private readonly splatB: RawTexture;
@@ -118,7 +125,7 @@ export class GroundSplatPlugin extends MaterialPluginBase {
   private readonly size: number;
 
   constructor(material: Material, terrain: Terrain) {
-    super(material, 'GroundSplat', 120, { GROUNDSPLAT: false }, true, true);
+    super(material, 'GroundSplat', 120, { GROUNDSPLAT: false, GROUNDSPLATFAST: false }, true, true);
     const scene = material.getScene();
     this.size = terrain.size;
     this.layers = layerTexture(scene);
@@ -134,6 +141,7 @@ export class GroundSplatPlugin extends MaterialPluginBase {
 
   override prepareDefines(defines: MaterialDefines): void {
     defines['GROUNDSPLAT'] = true;
+    defines['GROUNDSPLATFAST'] = GroundSplatPlugin.fast;
   }
 
   override getSamplers(samplers: string[]): void {
@@ -197,8 +205,12 @@ export class GroundSplatPlugin extends MaterialPluginBase {
             if (w[i] > 0.004) {
               vec2 uv = p * sc[i];
               vec4 t1 = textureGrad(gsLayers, vec3(uv, float(i)), dx * sc[i], dy * sc[i]);
+            #ifdef GROUNDSPLATFAST
+              s[i] = t1;
+            #else
               vec4 t2 = textureGrad(gsLayers, vec3(rot * uv * 0.73 + 0.37, float(i)), rot * dx * sc[i] * 0.73, rot * dy * sc[i] * 0.73);
               s[i] = mix(t1, t2, alt);
+            #endif
               hgt[i] = s[i].a + w[i];
               top = max(top, hgt[i]);
             }

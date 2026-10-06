@@ -21,6 +21,8 @@ import { UnitAssets, UnitView, ItemView, quatFromEulerXYZ } from './UnitView';
 import { ITEMS } from '../data/items.ts';
 import { Effects } from './Effects';
 import { MergedModelPlugin } from './MergedModel';
+import { prepareGroundTextures } from './GroundMaterial';
+import { prepareFoliageTexture } from './Foliage';
 import { ProjectileView } from './Projectiles';
 import { Previews } from './Previews';
 import { UiRenderer } from './UiRenderer';
@@ -126,6 +128,9 @@ export class BabylonView {
       this.unitAssets.inView = (x, y, z, r) => this.inView(x, y, z, r);
       this.previews = new Previews(scene, lib);
       this.ui = ui;
+      // The painted ground and foliage textures (M13), so the first game frame doesn't wait for them.
+      prepareGroundTextures();
+      prepareFoliageTexture();
     });
 
     this.resize();
@@ -326,6 +331,7 @@ export class BabylonView {
       this.roadView = g.roads ? new RoadView(this.bscene, g.roads, g) : null;
     }
     this.terrainView.update(g.time);
+    this.terrainView.setDetail(this.graphics.quality !== 'low');
     this.terrainView.updateClearMask(g.roads ?? null);
     this.terrainView.setWaterGrading(this.graphics.linear, this.cam.camera.position, this.graphics.haze);
     this.terrainView.setWaterLight(this.toSun.copyFrom(this.sun.direction).scaleInPlace(-1), this.sunColor.copyFrom(this.sun.diffuse).scaleInPlace((this.sun.intensity * Math.PI) / 2.3), this.hemi.diffuse);

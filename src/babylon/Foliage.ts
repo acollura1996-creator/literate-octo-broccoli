@@ -136,7 +136,7 @@ function limb(a: [number, number, number], b: [number, number, number], r0: numb
   const ref: [number, number, number] = Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
   const u = normalize3(d[1] * ref[2] - d[2] * ref[1], d[2] * ref[0] - d[0] * ref[2], d[0] * ref[1] - d[1] * ref[0]);
   const v: [number, number, number] = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
-  const rings = 4;
+  const rings = 2;
   for (let ri = 0; ri <= rings; ri++) {
     const t = ri / rings;
     const r = (r0 + (r1 - r0) * t) * (1 + flare * Math.pow(1 - t, 3));
@@ -171,8 +171,8 @@ function limb(a: [number, number, number], b: [number, number, number], r0: numb
   return g;
 }
 
-/** Broadleaf (Lordaeron summer) tree: a stout trunk and a full canopy of seven lumps. */
-export function broadleafGeo(): { trunk: Geo; canopy: Geo } {
+/** Broadleaf (Lordaeron summer) tree: a stout trunk and a full canopy of seven lumps (`subdivisions` 1 for the Low preset). */
+export function broadleafGeo(subdivisions = 2): { trunk: Geo; canopy: Geo } {
   const trunk = newGeo();
   append(trunk, limb([0, -0.1, 0], [0.02, 1.55, 0.03], 0.19, 0.11, 7, [0.55, 0.9], 0.9));
   append(trunk, limb([0.02, 1.05, 0.02], [0.42, 1.75, 0.12], 0.08, 0.04, 5, [0.75, 0.9]));
@@ -186,7 +186,7 @@ export function broadleafGeo(): { trunk: Geo; canopy: Geo } {
     { x: 0.2, y: 1.9, z: -0.62, r: 0.6 },
     { x: 0.05, y: 2.8, z: 0.05, r: 0.62 },
   ];
-  const canopy = blobCluster(blobs, [0, 2.1, 0], 1.25, 3.3, { subdivisions: 2, bumpiness: 0.18, soften: 0.7 });
+  const canopy = blobCluster(blobs, [0, 2.1, 0], 1.25, 3.3, { subdivisions, bumpiness: 0.18, soften: 0.7 });
   return { trunk, canopy };
 }
 
@@ -202,22 +202,23 @@ export function pineGeo(): { trunk: Geo; canopy: Geo } {
     const R = 1.12 - t * 0.78;
     const H = 0.95 - t * 0.2;
     const tier = newGeo();
-    const spokes = 12;
+    const spokes = 16;
     // Apex, then an outer ring (alternating long and short tips that droop), then an inner
     // underside ring that closes the skirt.
     tier.p.push(0, y + H, 0);
     tier.n.push(0, 1, 0);
-    const topAo = 0.95;
+    const topAo = 0.8;
     tier.c.push(topAo, topAo, topAo, 1);
     for (let s = 0; s < spokes; s++) {
       const a = (s / spokes) * Math.PI * 2 + k * 0.4 + rand() * 0.15;
       const long = s % 2 === 0;
-      const r = R * (long ? 1 : 0.8) * (0.92 + rand() * 0.16);
-      const droop = long ? 0.14 : 0.05;
-      const [nx, ny, nz] = normalize3(Math.cos(a), 0.9, Math.sin(a));
+      const r = R * (long ? 1.05 : 0.72) * (0.9 + rand() * 0.2);
+      const droop = long ? 0.18 + rand() * 0.08 : 0.04;
+      // Tips lean outward so they catch the side light; the notches between them stay darker.
+      const [nx, ny, nz] = normalize3(Math.cos(a), long ? 0.55 : 0.95, Math.sin(a));
       tier.p.push(Math.cos(a) * r, y - droop, Math.sin(a) * r);
       tier.n.push(nx, ny, nz);
-      const ao = 0.68 + 0.22 * t + (long ? 0.1 : 0);
+      const ao = long ? 0.95 + 0.1 * t : 0.62 + 0.15 * t;
       tier.c.push(ao, ao, ao, 1);
     }
     for (let s = 0; s < spokes; s++) {
@@ -259,14 +260,13 @@ export function deadTreeGeo(): { trunk: Geo; canopy: Geo } {
   return { trunk, canopy };
 }
 
-/** A bush: three or four leafy lumps sitting on the ground. */
+/** A bush: three leafy lumps sitting on the ground. */
 export function bushGeo(): Geo {
   return blobCluster(
     [
-      { x: 0, y: 0.45, z: 0, r: 0.62 },
-      { x: 0.5, y: 0.32, z: 0.15, r: 0.45 },
-      { x: -0.42, y: 0.34, z: -0.18, r: 0.48 },
-      { x: 0.05, y: 0.3, z: 0.48, r: 0.4 },
+      { x: 0, y: 0.45, z: 0, r: 0.64 },
+      { x: 0.5, y: 0.32, z: 0.2, r: 0.47 },
+      { x: -0.45, y: 0.34, z: -0.15, r: 0.5 },
     ],
     [0, 0.35, 0],
     -0.1,
@@ -379,6 +379,11 @@ export interface FoliageSpec {
 
 let paintingPixels: Uint8Array | null = null;
 const paintings = new WeakMap<Scene, RawTexture>();
+
+/** Paint the foliage texture ahead of the first game. */
+export function prepareFoliageTexture(): void {
+  paintingPixels ??= foliagePixels();
+}
 
 function foliageTexture(scene: Scene): RawTexture {
   let t = paintings.get(scene);
