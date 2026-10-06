@@ -108,7 +108,11 @@ export class Effects implements EffectsApi {
     });
   }
 
+  /** Told of every attack that lands, before its spark (the unit sounds listen; see src/unitSounds.ts). */
+  onHit: ((target: { x: number; z: number }) => void) | null = null;
+
   hit(target: { x: number; z: number; view?: { height?: number } | null }, color = 0xffeecc): void {
+    this.onHit?.(target);
     const y = (target.view?.height ?? 1) * 0.6;
     this.burst(target.x, y, target.z, color, 4, 2, 0.05, 0.35);
   }

@@ -151,10 +151,14 @@ export class Input {
     }
   }
 
-  /** The lead unit of the selection acknowledges, Warcraft III style ('select' | 'move' | 'attack'). */
+  /**
+   * The lead unit of the selection acknowledges, Warcraft III style ('select' | 'move' | 'attack').
+   * Without one of the player's units, a selected building or creep answers the click itself.
+   */
   barkFor(kind: BarkKind): void {
     const u = this.selection.find((s) => s.owner === this.game.human && !s.isBuilding && !s.dead);
     if (u) this.onBark?.(u, kind);
+    else if (kind === 'select' && this.selection[0] && !this.selection[0].dead) this.onBark?.(this.selection[0], kind);
   }
 
   pruneSelection(): void {
