@@ -180,25 +180,28 @@ export class SpatialAudio {
    */
   prerender(): Promise<void> {
     this.rendering ??= (async () => {
-      const names = synth.CORE_SFX.slice();
-      for (const n of names) this.requested.add(n);
-      while (names.length) await Promise.all(names.splice(0, RENDER_BATCH).map((n) => this.renderOne(n)));
+      // One at a time: this runs while the first game loads and starts, and shouldn't crowd it.
+      for (const n of synth.CORE_SFX) this.requested.add(n);
+      for (const n of synth.CORE_SFX) await this.renderOne(n, false);
     })().catch((e: unknown) => console.warn('[audio] pre-rendering failed; using the live synth:', e));
     return this.rendering;
   }
 
   /**
-   * Render an effect's variants (a long one once); once the engine runs, its voices are created in
-   * the background (that only waits on the engine, so the next renders needn't wait for it).
+   * Render an effect's variants (a long one once), together or (`parallel` false) one by one; once
+   * the engine runs, its voices are created in the background (that only waits on the engine, so the
+   * next renders needn't wait for it).
    */
-  private async renderOne(name: string): Promise<void> {
+  private async renderOne(name: string, parallel = true): Promise<void> {
     const info = synth.sfxInfo(name);
     if (!info || this.buffers.has(name)) return;
     const first = await synth.renderSfx(name, 0);
     if (!first) return;
     const list = [first];
     if (first.duration <= LONG && info.variants > 1) {
-      const more = await Promise.all(Array.from({ length: info.variants - 1 }, (_, i) => synth.renderSfx(name, i + 1)));
+      const rest = Array.from({ length: info.variants - 1 }, (_, i) => i + 1);
+      const more = parallel ? await Promise.all(rest.map((i) => synth.renderSfx(name, i))) : [];
+      if (!parallel) for (const i of rest) more.push(await synth.renderSfx(name, i));
       for (const b of more) if (b) list.push(b);
     }
     this.buffers.set(name, list);
