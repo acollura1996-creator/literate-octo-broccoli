@@ -1,8 +1,9 @@
 # Migration plan: three.js → TypeScript + Babylon.js + Vite + Electron
 
-Status: **done.** All milestones are complete (section 3), including M13, the art pass added after
-review: M8's upgrade kept the original look under post-processing, and the result still looked like
-the three.js version. The game is strict TypeScript on Babylon.js, built with Vite and packaged with
+Status: **done.** All milestones are complete (section 3), including two added after review: M13,
+the art pass (M8's upgrade kept the original look under post-processing, and the result still looked
+like the three.js version), and M14: rigged and animated characters and buildings, unit sounds, a
+larger map with more to do, and Warcraft III-style scrolling. The game is strict TypeScript on Babylon.js, built with Vite and packaged with
 Electron; three.js is used only at build time, to bake the procedural models. One item couldn't be
 checked in this environment: running the installed game from the Windows `.exe` needs a Windows PC
 (D5).
@@ -553,6 +554,33 @@ The three.js renderer kept working in parallel, behind `?renderer=three`, until 
     - The 120-unit benchmark on High: 658–674 draw calls (595–611 before M13).
     - CPU-side frame time is unchanged. The extra cost is GPU work: in this environment's software renderer, the opening view runs at about 1.7 fps on Low against M12's 3.3, and at 0.38 fps on High against 0.52. That is 1.4–1.9× the rasterization for a much richer scene. A graphics card absorbs this easily, and the first-run quality check still steps slow machines down to Medium or Low. **Real-GPU frame rates still need checking on real hardware**, as for M9.
   - Screenshots: [`docs/migration/`](docs/migration/) now compares the three.js version with the M13 look; the M12 images, which looked almost the same as the three.js version, were replaced. The battle shot fast-forwards until the armies meet, since software rendering on High draws about one frame per second.
+- [x] **M14 – Rigged characters and buildings, unit sounds, a larger map, scrolling** (added after review: "the models and animations are low quality … more sound effects for all of the units … the map is still too small and there should be more to do on it … scrolling is still a little weird").
+  - **Characters.** Infantry, casters and heroes from the Stone to the Galactic Age, and Kalenden's Legion, are now rigged and animated characters: Kay Lousberg's KayKit *Adventurers* and *Skeletons* packs (CC0; fetched from GitHub by `tools/kaykit/import.mjs`, which writes `src/assets/kaykit/kaykit.bin` with the packs' licences beside it).
+    - 38 unit types use them (`src/babylon/CharacterRecipes.ts`), brigands and the Bandit Lord included: a body, props (helmets, capes, shields, swords, axes, staves, crossbows), a height and the clips for each simulation state. Firearms for the gunpowder to galactic ages are built in code in the packs' style (`CharacterProps.ts`), some with glowing parts.
+    - Rendering (`Characters.ts`): one material for every character, skinned on the GPU from a vertex animation texture (every frame of every clip as half-float skinning matrices). Each unit is an instance with its team colour and its frames as instance attributes, so a unit type is one draw call whatever its units are doing. Frames are interpolated, clips crossfade, and shadow maps run the same skinning (nearest frame).
+    - Animation (`UnitView.ts`): the blow lands when the simulation deals damage (the clip's impact moment, found by the importer, is timed to the wind-up), walks are paced to the unit's speed, idles vary, fighters keep a combat stance for a moment, rapid-fire units loop their firing clip, deaths play out and sink, raised undead climb out of the ground, Bladestorm spins.
+    - Portraits and command-card icons show the characters.
+    - Cavalry, siege, vehicles and beasts keep their procedural models, with livelier animation: beasts bite and lunge, bodies lean into a walk, heads look about, and four-legged creatures roll onto their side when they die.
+  - **Buildings.** The *Medieval Hexagon* pack (same author, CC0) supplies the Medieval Age town center (a castle), the Dark and Medieval Age houses, barracks, lumber yard, research center (a smithy), arcane sanctum (a church), scout and guard towers, the tavern and the marketplace. Their blue roofs and banners take the team colour, as on Warcraft III's human buildings. They rise through the pack's construction stages and collapse into its rubble. The character material draws them unskinned, one draw call per building type. Other buildings, and every age's other styles, stay procedural.
+  - **Sounds** (`src/unitSounds.ts`, `src/audio.ts`). Every unit and building sounds like itself, still synthesized in code:
+    - melee blows by weapon and by what they strike (flesh, armour, wood, stone, bone, water);
+    - shots and impacts for every weapon from slings to graviton lances, and deaths by kind (soldiers, riders, beasts, undead, machines, buildings);
+    - select, move, attack and ready voices for every class;
+    - building clicks that change with the age;
+    - creature calls near creep camps and a roar when a camp is attacked;
+    - movement loops for tracks, hover engines, walkers, hooves and wheels;
+    - effects for the new map content.
+    - A director turns the simulation's generic sound names into the unit-specific sounds, so the simulation didn't change for it. New sounds render in the background on first use. Group limits and a soft clipper keep 200-unit battles clear: peaks of −6 dBFS and no clipped samples, measured.
+  - **Map** (`src/world/layout.ts`, `src/game/neutrals.ts`, `src/game/quests.ts`). 384 × 384 instead of 256 × 256, still four-fold symmetric.
+    - Regions: four quadrants, edge outposts and four ring-road villages.
+    - Camps and bosses: 64 creep camps (tiers 1–5) with new creeps (murlocs, brigands, harpies, troll shamans, naga sirens), and four lair bosses with spells and their own artifacts.
+    - Items: tiered loot scaled to the camp.
+    - Neutral buildings: taverns to recruit Heroes, marketplaces, themed mercenary camps, fountains of health and mana, goblin labs, linked waygates and shrines.
+    - Quests, shown in a quest log: free caged captives, bounties on bosses, buried treasure, wagon escorts, and clearing a region.
+    - Expansions and secrets: guarded expansion mines with lumber groves, secret glades, hidden tome stashes, runes.
+    - The computer generals use the waygates, taverns, mercenary camps and quests, and expand to the new mines.
+  - **Scrolling.** As in Warcraft III, only a thin band at the window edge scrolls, at full speed from the start, so the HUD along the edges no longer drags the map. Acceleration, braking, zoom and the camera's height over hills ease by real time, so they feel the same at any frame rate. A slider in the menu sets the speed from 40 to 250 %.
+  - **Fixes on the way:** lobbed stones and javelins never dealt damage (arcing shots reached their target as null); the first frame of a game could run the clocks backwards; an AI empire without a town hall crashed the general AI.
 
 ---
 

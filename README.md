@@ -288,6 +288,8 @@ src/
   main.ts              title screen, game setup, main loop
   input.ts             selection, smart orders, targeting, building placement, hotkeys
   audio.ts             synthesized sound effects, unit acknowledgements, ambience and music (Web Audio)
+  unitSounds.ts        which sound each unit makes: weapon on armour, shots, impacts, deaths, voices,
+                       building clicks, creature calls, movement loops
   globals.d.ts         the desktop bridge and the debug handles on `window`
   data/                units, buildings, heroes, items (types.ts: UnitDef, ItemDef, ...)
   game/                simulation: Game, Unit, orders/behaviour, abilities, fog of war, roads,
