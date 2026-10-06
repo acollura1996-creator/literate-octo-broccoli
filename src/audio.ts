@@ -2820,6 +2820,395 @@ function aWheels(v: Voice, t: number, out: GainNode, dur: number): void {
   for (let tt = t + 0.2; tt < t + dur - 0.5; tt += 0.8) creak(v, tt, 0.35, rand(60, 85), 0.18, out, 22);
 }
 
+// --- the map's places, quests, bosses, spells and gadgets (M14 map) -------------------------
+
+/** A waygate: a portal hums open and a rushing whoosh carries the units through. */
+function sWaygate(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.5);
+  const dur = 1.3;
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t, 0.25, 0.22, dur - 0.6, 0.35);
+  for (const [f, det] of [[110, 0], [111.6, 0], [220, 4], [330, -5]] as const) oscNode(v, 'sine', f, t, t + dur + 0.05, g).detune.value = det;
+  oscNode(v, 'sine', 6, t, t + dur, gainNode(v, 0.08, g.gain)); // the portal throbs
+  noiseBurst(v, t + 0.1, { type: 'bandpass', freq: 300, freqTo: 3500, sweep: 0.5, Q: 2.5, a: 0.4, peak: 0.4, d: 0.5, dest: out }); // the rush
+  for (let i = 0; i < 5; i++) ping(v, t + 0.35 + i * 0.07, mtof(pick([84, 88, 91, 95, 96])), 0.05, 0.4, out);
+}
+
+/** A shrine's blessing: a rising chime arpeggio over a soft choir. */
+function sShrine(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.55);
+  [72, 76, 79, 83, 86].forEach((m, i) => chime(v, t + i * 0.09, mtof(m), 0.11, 0.9, out));
+  for (const m of [60, 64, 67]) cry(v, t + 0.05, { f0: [mtof(m), mtof(m)], vowels: 'aa', dur: 1.2, size: 1.1, peak: 0.07, a: 0.3, breath: 0.1, vib: 12, vibRate: 5 }, out);
+  noiseBurst(v, t + 0.2, { type: 'highpass', freq: 6500, a: 0.3, peak: 0.06, d: 0.8, dest: out });
+}
+
+/** A hero recruited at the tavern: a tankard thumps the table, then a short fanfare and a cheer. */
+function sRecruit(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.3);
+  thump(v, t, 180, 90, 0.6, 0.1, out); // the tankard
+  noiseBurst(v, t, { type: 'bandpass', freq: 800, Q: 2, a: 0.001, peak: 0.45, d: 0.06, dest: out });
+  metal(v, t + 0.005, 1450, [1, 2.3, 3.6], [0.06, 0.04, 0.02], [0.25, 0.15, 0.08], out); // pewter rings
+  brass(v, t + 0.18, mtof(67), 0.1, 0.2, out);
+  brass(v, t + 0.3, mtof(72), 0.1, 0.2, out);
+  brass(v, t + 0.42, mtof(76), 0.5, 0.22, out, true);
+  brass(v, t + 0.42, mtof(64), 0.5, 0.1, out);
+  for (let i = 0; i < 4; i++) {
+    const f = rand(150, 230);
+    cry(v, t + 0.45 + i * 0.05, { f0: [f, f * 1.15, f], vowels: 'eaa', dur: 0.35, rough: 0.2, breath: 0.3, peak: 0.05 }, out); // "hey!"
+  }
+}
+
+function sQuestNew(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.4);
+  timpani(v, t, 73.4, 0.35, out);
+  brass(v, t, mtof(62), 0.22, 0.2, out); // D4
+  brass(v, t + 0.25, mtof(69), 0.75, 0.22, out, true); // A4
+  brass(v, t + 0.25, mtof(62), 0.75, 0.1, out);
+  chime(v, t + 0.25, mtof(86), 0.06, 0.8, out);
+}
+
+function sQuestDone(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.4);
+  [60, 64, 67].forEach((m, i) => brass(v, t + i * 0.11, mtof(m), 0.09, 0.19, out));
+  brass(v, t + 0.33, mtof(72), 0.9, 0.22, out, true);
+  brass(v, t + 0.33, mtof(64), 0.9, 0.1, out);
+  brass(v, t + 0.33, mtof(48), 0.9, 0.1, out);
+  timpani(v, t + 0.33, 65.4, 0.5, out);
+  for (let i = 0; i < 6; i++) ping(v, t + 0.35 + i * 0.08, mtof(pick([84, 88, 91, 96])), 0.05, 0.4, out);
+}
+
+function sQuestFail(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.45);
+  const L = (dt: number, m: number, dur: number): void => brass(v, t + dt, mtof(m), dur, 0.17, out, true, 0.5);
+  L(0, 64, 0.3); // E4
+  L(0.32, 60, 0.3); // C4
+  L(0.64, 57, 0.85); // A3
+  pad(v, t + 0.64, [45, 48, 52], 0.85, 0.05, out);
+  fmBell(v, t + 0.64, 110, 1.4, 90, 0.1, 1.2, out); // a distant gong
+}
+
+/** Vyrnax the dragon: an enormous roar with fire in its throat. */
+function sDragonRoar(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.4);
+  const p = rand(0.95, 1.05);
+  cry(v, t, { f0: [70 * p, 115 * p, 105 * p, 62 * p], vowels: 'oaao', dur: 1.8, size: 0.55, rough: 0.8, growl: 0.5, growlRate: 26, drive: 3, peak: 0.32, breath: 0.5, a: 0.15 }, out);
+  noiseBurst(v, t + 0.2, { type: 'bandpass', freq: 300, freqTo: 1200, sweep: 0.8, Q: 0.8, a: 0.3, peak: 0.3, d: 1.0, dest: out }); // fire in the throat
+  thump(v, t, 55, 25, 0.6, 0.6, out);
+}
+
+/** The hydra: three heads hissing at once, and a wet gurgle. */
+function sHydraHiss(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.3);
+  for (const [dt, f] of [[0, 3200], [0.12, 4300], [0.22, 5600]] as const) {
+    const g = gainNode(v, 0, out);
+    swell(g.gain, t + dt, 0.06, 0.28, 0.45, 0.3);
+    const am = gainNode(v, 0.6, g);
+    noiseNode(v, t + dt, t + dt + 0.9, biquad(v, 'bandpass', f * rand(0.95, 1.05), 2, am));
+    oscNode(v, 'sine', rand(9, 14), t + dt, t + dt + 0.9, gainNode(v, 0.4, am.gain)); // the tongue flickers
+  }
+  cry(v, t + 0.1, { f0: [90, 80], vowels: 'ou', dur: 0.8, size: 0.7, rough: 0.6, growl: 0.7, growlRate: 17, breath: 0.4, peak: 0.16 }, out);
+}
+
+/** The Broodmother's screech. */
+function sSpiderScreech(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.25);
+  const p = rand(0.92, 1.06);
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t, 0.04, 0.3, 0.45, 0.25);
+  const o = oscNode(v, 'sawtooth', 1800 * p, t, t + 0.8, biquad(v, 'bandpass', 2600, 2.5, g));
+  sweep(o.frequency, t, 1800 * p, 850 * p, 0.7);
+  oscNode(v, 'sine', 47, t, t + 0.8, gainNode(v, 260, o.frequency)); // a rasping flutter
+  const n = gainNode(v, 0, out);
+  swell(n.gain, t, 0.02, 0.25, 0.4, 0.2);
+  const am = gainNode(v, 0.5, n);
+  noiseNode(v, t, t + 0.7, biquad(v, 'bandpass', 4200, 1.5, am));
+  oscNode(v, 'sine', 45, t, t + 0.7, gainNode(v, 0.5, am.gain));
+  sSpiderChitter(v, t + 0.6, out);
+}
+
+/** Varrok the Bandit Lord laughs: a gruff "har har har... haaar". */
+function sBanditLaugh(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.2);
+  const p = rand(0.94, 1.06);
+  for (let i = 0; i < 3; i++) {
+    const tt = t + i * 0.2;
+    noiseBurst(v, tt, { type: 'bandpass', freq: 1200, Q: 0.8, a: 0.01, peak: 0.12, d: 0.04, dest: out }); // the "h"
+    cry(v, tt + 0.03, { f0: [108 * p, 98 * p], vowels: 'aa', dur: 0.15, size: 0.88, rough: 0.55, breath: 0.25, drive: 1.6, peak: 0.34 }, out);
+  }
+  noiseBurst(v, t + 0.6, { type: 'bandpass', freq: 1200, Q: 0.8, a: 0.01, peak: 0.12, d: 0.04, dest: out });
+  cry(v, t + 0.63, { f0: [118 * p, 104 * p, 84 * p], vowels: 'aao', dur: 0.5, size: 0.88, rough: 0.55, breath: 0.25, drive: 1.6, peak: 0.36 }, out);
+}
+
+/** Frost nova: a crack of ice and a ring of shimmering shards flying out. */
+function sFrostNova(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.4);
+  noiseBurst(v, t, { type: 'highpass', freq: 3500, a: 0.0005, peak: 0.6, d: 0.05, dest: out });
+  thump(v, t, 260, 90, 0.45, 0.15, out);
+  noiseBurst(v, t + 0.02, { type: 'bandpass', freq: 6500, freqTo: 1500, sweep: 0.6, Q: 1.5, a: 0.03, peak: 0.3, d: 0.6, dest: out });
+  for (let i = 0; i < 12; i++) ping(v, t + 0.03 + rand(0, 0.5), mtof(pick([91, 95, 98, 100, 103, 107])), rand(0.04, 0.08), rand(0.15, 0.35), out);
+  crackle(v, t + 0.05, 0.5, 12, 0.2, 5000, out);
+}
+
+/** Acid spray: a hissing, spitting jet and sizzling droplets. */
+function sAcidSpray(v: Voice, t: number, out: GainNode): void {
+  const dur = 0.65;
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t, 0.04, 0.4, dur - 0.2, 0.15);
+  const am = gainNode(v, 0.55, g);
+  noiseNode(v, t, t + dur + 0.05, biquad(v, 'bandpass', 3000, 0.9, am));
+  oscNode(v, 'sine', 23, t, t + dur, gainNode(v, 0.45, am.gain)); // spurts
+  for (let i = 0; i < 5; i++) noiseBurst(v, t + 0.1 + i * 0.11 + rand(0, 0.04), { type: 'lowpass', freq: 900, a: 0.002, peak: 0.25, d: 0.05, dest: out }); // splats
+  crackle(v, t + 0.15, dur + 0.3, 18, 0.25, 4500, out); // sizzle
+}
+
+/** A dragon's breath: a long, roaring jet of fire over a growl. */
+function sDragonFire(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.2);
+  const dur = 1.2;
+  noiseBurst(v, t, { type: 'lowpass', freq: 250, a: 0.01, peak: 0.6, d: 0.15, dest: out }); // the whoomp
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t, 0.08, 0.6, dur - 0.4, 0.3);
+  const bp = biquad(v, 'bandpass', 450, 0.6, g);
+  sweep(bp.frequency, t, 450, 900, dur);
+  noiseNode(v, t, t + dur + 0.05, bp);
+  oscNode(v, 'sine', 11, t, t + dur, gainNode(v, 0.18, g.gain)); // turbulence
+  noiseBurst(v, t + 0.05, { type: 'highpass', freq: 3000, a: 0.1, peak: 0.12, d: dur, dest: out });
+  crackle(v, t + 0.1, dur, 20, 0.3, 1800, out);
+  cry(v, t, { f0: [80, 95, 70], vowels: 'ooo', dur: dur * 0.8, size: 0.55, rough: 0.7, growl: 0.5, growlRate: 24, drive: 2, peak: 0.12, breath: 0.4 }, out);
+}
+
+/** A goblin blasting charge: the fuse fizzes, then a boom and debris. */
+function sGoblinBomb(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.2);
+  noiseBurst(v, t, { type: 'highpass', freq: 4500, a: 0.02, peak: 0.2, d: 0.5, dest: out });
+  crackle(v, t, 0.5, 14, 0.2, 5000, out);
+  const b = t + 0.55;
+  noiseBurst(v, b, { type: 'highpass', freq: 1200, a: 0.0004, peak: 0.7, d: 0.05, dest: out });
+  noiseBurst(v, b, { type: 'lowpass', freq: 1800, freqTo: 120, sweep: 0.5, a: 0.002, peak: 0.9, d: 0.55, dest: out });
+  thump(v, b, 120, 35, 1.0, 0.4, out);
+  debris(v, b + 0.05, 0.6, 10, 'stone', 0.3, out);
+}
+
+/** A goblin flare: it whistles up, pops and sparkles. */
+function sFlare(v: Voice, t: number, out: GainNode): void {
+  noiseBurst(v, t, { type: 'bandpass', freq: 400, freqTo: 3000, sweep: 0.5, Q: 1.5, a: 0.1, peak: 0.35, d: 0.45, dest: out });
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t, 0.1, 0.07, 0.3, 0.1);
+  const o = oscNode(v, 'sine', 900, t, t + 0.55, g);
+  sweep(o.frequency, t, 900, 2600, 0.5);
+  const p = t + 0.55;
+  noiseBurst(v, p, { type: 'highpass', freq: 1500, a: 0.0005, peak: 0.5, d: 0.04, dest: out });
+  thump(v, p, 300, 120, 0.4, 0.08, out);
+  crackle(v, p + 0.02, 0.6, 16, 0.2, 5000, out);
+}
+
+/** A cage door: metal creaks open, a chain rattles, the door clanks against its bars. */
+function sCageOpen(v: Voice, t: number, out: GainNode): void {
+  const g = gainNode(v, 0, out);
+  const bp = biquad(v, 'bandpass', 1300, 9, g);
+  const o = oscNode(v, 'sawtooth', 190, t, t + 0.6, bp);
+  sweep(o.frequency, t, 190, 150, 0.55);
+  g.gain.setValueAtTime(0, t);
+  for (let tt = t; tt < t + 0.55; tt += rand(0.02, 0.04)) {
+    g.gain.setValueAtTime(rand(0.1, 0.3), tt); // the hinge sticks and slips
+    g.gain.setTargetAtTime(0, tt + 0.004, 0.008);
+  }
+  for (let i = 0; i < 6; i++) ping(v, t + 0.15 + i * 0.05 + rand(0, 0.02), rand(1800, 3200), 0.1, 0.05, out, 'triangle', 0.0005); // the chain
+  const c = t + 0.65;
+  metal(v, c, 520, [1, 1.47, 2.09, 2.76], [0.16, 0.12, 0.08, 0.05], [0.5, 0.35, 0.25, 0.15], out); // clank
+  thump(v, c, 220, 100, 0.4, 0.08, out, 'triangle');
+}
+
+/** Digging: a few shovelfuls of earth, then the jingle of buried coins. */
+function sDig(v: Voice, t: number, out: GainNode): void {
+  for (let i = 0; i < 3; i++) {
+    const tt = t + i * 0.3;
+    noiseBurst(v, tt, { type: 'bandpass', freq: 1700, freqTo: 900, Q: 1.5, a: 0.01, peak: 0.35, d: 0.1, dest: out }); // the blade bites
+    thump(v, tt + 0.02, 140, 70, 0.35, 0.08, out);
+    noiseBurst(v, tt + 0.14, { type: 'lowpass', freq: 700, a: 0.02, peak: 0.25, d: 0.1, dest: out }); // earth thrown aside
+  }
+  for (let i = 0; i < 5; i++) coin(v, t + 0.95 + i * 0.05 + rand(0, 0.02), rand(0.85, 1.15), 0.12, out);
+}
+
+// --- the map's creeps: murlocs, harpies, naga, troll shamans, brigands and the lair bosses -----
+
+/** A murloc's "mrglglgl": a bubbling, gargled warble (`yell` louder and higher). */
+function murloc(v: Voice, t: number, out: GainNode, dur: number, yell: boolean): void {
+  const p = rand(0.92, 1.1) * (yell ? 1.2 : 1);
+  cry(v, t, { f0: [420 * p, 560 * p, 470 * p, 380 * p], vowels: 'ouuo', dur, size: 1.35, growl: 0.9, growlRate: rand(16, 22), breath: 0.2, peak: yell ? 0.34 : 0.26, vib: 60, vibRate: 9, drive: yell ? 1.4 : 0 }, out);
+  bubbles(v, t, dur, 4, 0.08, out);
+}
+
+function sMurlocGurgle(v: Voice, t: number, out: GainNode): void {
+  murloc(v, t, out, 0.45, false);
+}
+
+function sMurlocYell(v: Voice, t: number, out: GainNode): void {
+  murloc(v, t, out, 0.6, true);
+}
+
+function sDieMurloc(v: Voice, t: number, out: GainNode): void {
+  const p = rand(0.92, 1.08);
+  cry(v, t, { f0: [520 * p, 640 * p, 300 * p], vowels: 'ouo', dur: 0.55, size: 1.35, growl: 0.9, growlRate: 14, breath: 0.3, peak: 0.32 }, out);
+  noiseBurst(v, t + 0.5, { type: 'bandpass', freq: 900, Q: 1, a: 0.003, peak: 0.3, d: 0.08, dest: out }); // a wet flop
+  thump(v, t + 0.5, 160, 70, 0.3, 0.08, out);
+}
+
+/** A harpy: a shrill, raspy shriek (`len` seconds) and a beat of its wings. */
+function harpy(v: Voice, t: number, out: GainNode, len: number, peak: number): void {
+  const p = rand(0.92, 1.08);
+  cry(v, t, { f0: [1100 * p, 1500 * p, 1250 * p, 900 * p], vowels: 'iiea', dur: len, size: 1.4, rough: 0.3, breath: 0.45, drive: 2, peak, vib: 90, vibRate: 13 }, out);
+  for (let i = 0; i < 2; i++) noiseBurst(v, t + len + i * 0.16, { type: 'lowpass', freq: 600, a: 0.04, peak: 0.25, d: 0.09, dest: out });
+}
+
+function sHarpyCall(v: Voice, t: number, out: GainNode): void {
+  harpy(v, t, out, 0.35, 0.2);
+}
+
+function sHarpyScreech(v: Voice, t: number, out: GainNode): void {
+  harpy(v, t, out, 0.6, 0.3);
+}
+
+function sDieHarpy(v: Voice, t: number, out: GainNode): void {
+  const p = rand(0.92, 1.08);
+  cry(v, t, { f0: [1300 * p, 1600 * p, 700 * p], vowels: 'iea', dur: 0.6, size: 1.4, rough: 0.3, breath: 0.4, drive: 2, peak: 0.3 }, out);
+  for (let i = 0; i < 3; i++) noiseBurst(v, t + 0.3 + i * 0.1, { type: 'lowpass', freq: 500, a: 0.02, peak: 0.25 - i * 0.06, d: 0.07, dest: out }); // wings flail
+  thump(v, t + 0.65, 150, 60, 0.35, 0.1, out);
+}
+
+/** The harpy's attack: a gust of wind thrown with a shriek. */
+function sHarpyShot(v: Voice, t: number, out: GainNode): void {
+  harpy(v, t, out, 0.18, 0.12);
+  noiseBurst(v, t + 0.05, { type: 'bandpass', freq: 600, freqTo: 2400, sweep: 0.3, Q: 1.2, a: 0.08, peak: 0.35, d: 0.25, dest: out });
+}
+
+/** A naga siren's hiss. */
+function sNagaHiss(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.3);
+  const p = rand(0.94, 1.06);
+  noiseBurst(v, t, { type: 'highpass', freq: 3800, a: 0.08, peak: 0.3, d: 0.55, dest: out });
+  cry(v, t + 0.05, { f0: [260 * p, 300 * p, 240 * p], vowels: 'eii', dur: 0.55, size: 1.15, breath: 0.7, peak: 0.16, vib: 30 }, out);
+}
+
+function sDieNaga(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.35);
+  const p = rand(0.94, 1.06);
+  cry(v, t, { f0: [300 * p, 390 * p, 190 * p], vowels: 'aao', dur: 0.8, size: 1.15, breath: 0.55, peak: 0.32, vib: 35 }, out);
+  noiseBurst(v, t, { type: 'highpass', freq: 4000, a: 0.05, peak: 0.15, d: 0.6, dest: out });
+  strike(v, t + 0.75, 'water', 0.9, out); // she slumps into the water
+}
+
+/** A troll shaman's chant: two drum beats and a low "hey-ya". */
+function sShamanChant(v: Voice, t: number, out: GainNode): void {
+  const p = rand(0.94, 1.06);
+  for (const dt of [0, 0.22]) thump(v, t + dt, 140, 80, 0.45, 0.15, out); // a hand drum
+  cry(v, t + 0.42, { f0: [140 * p, 165 * p, 150 * p], vowels: 'eaa', dur: 0.3, rough: 0.15, peak: 0.24, vib: 50, vibRate: 7 }, out);
+  cry(v, t + 0.75, { f0: [165 * p, 130 * p], vowels: 'ao', dur: 0.35, rough: 0.15, peak: 0.22, vib: 50, vibRate: 7 }, out);
+}
+
+/** A troll shaman's bolt: a hollow voodoo pop and a rising wail. */
+function sShamanBolt(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.25);
+  thump(v, t, 200, 110, 0.35, 0.08, out);
+  const g = gainNode(v, 0, out);
+  perc(g.gain, t, 0.03, 0.14, 0.35);
+  const o = oscNode(v, 'triangle', 330, t, t + 0.4, g);
+  sweep(o.frequency, t, 330, 880, 0.3);
+  oscNode(v, 'sine', 9, t, t + 0.4, gainNode(v, 80, o.detune));
+  noiseBurst(v, t, { type: 'bandpass', freq: 1500, freqTo: 3500, Q: 2, a: 0.05, peak: 0.12, d: 0.25, dest: out });
+}
+
+/** A brigand mutters (idle) or shouts (a camp wakes). */
+function sBrigandMutter(v: Voice, t: number, out: GainNode): void {
+  const p = rand(0.92, 1.08);
+  cry(v, t, { f0: [110 * p, 120 * p, 100 * p], vowels: 'uoo', dur: 0.35, size: 0.92, rough: 0.35, breath: 0.2, peak: 0.24 }, out);
+  cry(v, t + 0.42, { f0: [105 * p, 95 * p], vowels: 'au', dur: 0.3, size: 0.92, rough: 0.35, breath: 0.2, peak: 0.2 }, out);
+}
+
+function sBrigandShout(v: Voice, t: number, out: GainNode): void {
+  const p = rand(0.92, 1.08);
+  cry(v, t, { f0: [150 * p, 200 * p, 170 * p], vowels: 'eaa', dur: 0.45, size: 0.92, rough: 0.4, breath: 0.2, drive: 1.8, peak: 0.32 }, out);
+}
+
+/** The hydra's spit (its basic attack): a gargle and a wet, hissing gob. */
+function sAcidSpit(v: Voice, t: number, out: GainNode): void {
+  cry(v, t, { f0: [120, 95], vowels: 'ou', dur: 0.25, size: 0.7, rough: 0.6, growl: 0.7, growlRate: 20, breath: 0.4, peak: 0.16 }, out);
+  noiseBurst(v, t + 0.15, { type: 'bandpass', freq: 2500, freqTo: 1200, Q: 1.2, a: 0.02, peak: 0.35, d: 0.25, dest: out });
+  noiseBurst(v, t + 0.15, { type: 'lowpass', freq: 700, a: 0.002, peak: 0.25, d: 0.06, dest: out });
+}
+
+/** Acid lands: a splat and a fizzing sizzle. */
+function sImpAcid(v: Voice, t: number, out: GainNode): void {
+  noiseBurst(v, t, { type: 'lowpass', freq: 900, a: 0.002, peak: 0.45, d: 0.08, dest: out });
+  noiseBurst(v, t + 0.02, { type: 'bandpass', freq: 4000, Q: 0.8, a: 0.03, peak: 0.25, d: 0.45, dest: out });
+  crackle(v, t + 0.03, 0.5, 14, 0.25, 4500, out);
+}
+
+function sDragonGrowl(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.3);
+  const p = rand(0.94, 1.06);
+  cry(v, t, { f0: [62 * p, 72 * p, 58 * p], vowels: 'ooo', dur: 1.0, size: 0.55, rough: 0.8, growl: 0.6, growlRate: 22, drive: 2, peak: 0.26, breath: 0.4 }, out);
+  noiseBurst(v, t + 0.8, { type: 'bandpass', freq: 500, freqTo: 1200, Q: 0.8, a: 0.05, peak: 0.2, d: 0.3, dest: out }); // a snort of smoke
+}
+
+function sDieDragon(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.45);
+  const end = cry(v, t, { f0: [110, 135, 70, 40], vowels: 'aaou', dur: 2.0, size: 0.55, rough: 0.8, growl: 0.5, growlRate: 24, drive: 2.5, peak: 0.38, breath: 0.45 }, out);
+  thump(v, end - 0.3, 45, 16, 1.0, 0.9, out); // the great body crashes down
+  noiseBurst(v, end - 0.3, { type: 'lowpass', freq: 350, a: 0.01, peak: 0.6, d: 1.0, dest: out });
+  debris(v, end - 0.25, 0.8, 10, 'stone', 0.3, out);
+}
+
+function sDieHydra(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.4);
+  for (const [dt, f] of [[0, 1], [0.25, 1.2], [0.5, 0.85]] as const) {
+    cry(v, t + dt, { f0: [180 * f, 220 * f, 90 * f], vowels: 'aou', dur: 0.8, size: 0.75, rough: 0.6, growl: 0.6, growlRate: 18, breath: 0.5, drive: 1.5, peak: 0.26 }, out); // each head in turn
+  }
+  noiseBurst(v, t + 0.2, { type: 'highpass', freq: 3500, a: 0.1, peak: 0.15, d: 0.8, dest: out });
+  thump(v, t + 1.2, 55, 20, 1.0, 0.7, out);
+  strike(v, t + 1.2, 'water', 1.3, out);
+}
+
+// --- clicks on the map's new places ------------------------------------------------------
+
+function sSelTavern(v: Voice, t: number, out: GainNode): void {
+  metal(v, t, 1500, [1, 2.3, 3.6], [0.08, 0.05, 0.03], [0.3, 0.18, 0.1], out); // mugs clink
+  metal(v, t + 0.04, 1700, [1, 2.3, 3.6], [0.07, 0.04, 0.03], [0.3, 0.18, 0.1], out);
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t + 0.1, 0.1, 0.1, 0.5, 0.3);
+  const am = gainNode(v, 0.5, g);
+  noiseNode(v, t + 0.1, t + 1.05, biquad(v, 'bandpass', 600, 2, am)); // chatter
+  oscNode(v, 'sine', 7, t + 0.1, t + 1.05, gainNode(v, 0.5, am.gain));
+  for (let i = 0; i < 3; i++) cry(v, t + 0.5 + i * 0.12, { f0: [140, 125], vowels: 'aa', dur: 0.09, rough: 0.3, breath: 0.3, peak: 0.12 }, out); // a laugh
+}
+
+function sSelGoblinLab(v: Voice, t: number, out: GainNode): void {
+  bubbles(v, t, 0.5, 8, 0.14, out);
+  noiseBurst(v, t + 0.45, { type: 'highpass', freq: 3000, a: 0.002, peak: 0.25, d: 0.1, dest: out }); // a spark
+  crackle(v, t + 0.45, 0.2, 8, 0.2, 5000, out);
+  for (let i = 0; i < 3; i++) cry(v, t + 0.6 + i * 0.09, { f0: [420, 380], vowels: 'ee', dur: 0.06, size: 1.35, breath: 0.4, peak: 0.14 }, out); // a goblin's "hee hee"
+}
+
+function sSelWaygate(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.5);
+  const g = gainNode(v, 0, out);
+  swell(g.gain, t, 0.2, 0.2, 0.4, 0.35);
+  for (const f of [110, 111.6, 220]) oscNode(v, 'sine', f, t, t + 1.0, g);
+  oscNode(v, 'sine', 6, t, t + 1.0, gainNode(v, 0.08, g.gain));
+  for (let i = 0; i < 3; i++) ping(v, t + 0.2 + i * 0.1, mtof(pick([88, 91, 95])), 0.05, 0.4, out);
+}
+
+function sSelShrine(v: Voice, t: number, out: GainNode): void {
+  wet(v, 0.55);
+  chime(v, t, mtof(79), 0.12, 1.0, out);
+  chime(v, t + 0.12, mtof(86), 0.1, 1.0, out);
+}
+
+function sSelCage(v: Voice, t: number, out: GainNode): void {
+  for (let i = 0; i < 2; i++) metal(v, t + i * 0.12, rand(600, 700), [1, 1.47, 2.09], [0.09, 0.07, 0.05], [0.25, 0.18, 0.12], out); // bars rattle
+  cry(v, t + 0.3, { f0: [170, 150], vowels: 'eo', dur: 0.4, breath: 0.4, peak: 0.12 }, out); // "help..."
+}
+
 /**
  * Registry. prio: higher = more important (may steal lower voices when the
  * voice pool is full). max / gap override the per-name throttle. gain scales
@@ -3015,6 +3404,48 @@ Object.assign(SFX, {
   selFountain: asSelect(sSelFountain, 2.4),
   selWagon: asSelect(sSelWagon, 3.5),
   selBuilding: asSelect(sSelBuilding),
+  // The map's places, quests, bosses, spells and gadgets (the game names these).
+  waygate: { fn: sWaygate, prio: 2, max: 2, gap: 0.3, gain: 0.65 },
+  shrine: { fn: sShrine, prio: 3, max: 1, gap: 1, gain: 2.5 },
+  recruit: { fn: sRecruit, prio: 3, max: 1, gap: 0.5, gain: 1.3 },
+  questNew: { fn: sQuestNew, prio: 4, max: 1, gap: 1, duck: 1.4, gain: 1.1 },
+  questDone: { fn: sQuestDone, prio: 4, max: 1, gap: 1, duck: 1.6, gain: 0.9 },
+  questFail: { fn: sQuestFail, prio: 4, max: 1, gap: 1, duck: 1.8, gain: 2 },
+  dragonRoar: asRoar(sDragonRoar, 1.5),
+  hydraHiss: asRoar(sHydraHiss, 2.2),
+  spiderScreech: asRoar(sSpiderScreech, 2.8),
+  banditLaugh: asRoar(sBanditLaugh, 3.5),
+  frostNova: { fn: sFrostNova, prio: 1, max: 2, gap: 0.2, gain: 0.85 },
+  acidSpray: { fn: sAcidSpray, prio: 1, max: 2, gap: 0.2, gain: 1.7 },
+  dragonFire: { fn: sDragonFire, prio: 2, max: 1, gap: 0.5, gain: 1.4 },
+  goblinBomb: { fn: sGoblinBomb, prio: 1, max: 2, gap: 0.2, gain: 0.55 },
+  flare: { fn: sFlare, prio: 1, max: 2, gap: 0.2, gain: 1.1 },
+  cageOpen: { fn: sCageOpen, prio: 2, max: 1, gap: 0.5, gain: 1.1 },
+  dig: { fn: sDig, prio: 2, max: 1, gap: 0.5, gain: 1.8 },
+  // The map's creeps.
+  murlocGurgle: asCreature(sMurlocGurgle, 3.2),
+  harpyCall: asCreature(sHarpyCall, 4.5),
+  nagaHiss: asCreature(sNagaHiss, 1.2),
+  shamanChant: asCreature(sShamanChant, 1.4),
+  brigandMutter: asCreature(sBrigandMutter, 3.8),
+  dragonGrowl: asCreature(sDragonGrowl, 3.5),
+  murlocYell: asRoar(sMurlocYell, 3.2),
+  harpyScreech: asRoar(sHarpyScreech, 5.5),
+  brigandShout: asRoar(sBrigandShout, 3.8),
+  harpyShot: asShot(sHarpyShot, 4.5),
+  shamanBolt: asShot(sShamanBolt, 2.8),
+  acidSpit: asShot(sAcidSpit, 3.2),
+  impAcid: asImpact(sImpAcid, 2),
+  dieMurloc: asDeath(sDieMurloc, 2.4, 3),
+  dieHarpy: asDeath(sDieHarpy, 2.4, 3),
+  dieNaga: asDeath(sDieNaga, 2.1, 3),
+  dieDragon: { fn: sDieDragon, prio: 3, max: 1, gap: 2, variants: 1, gain: 1 },
+  dieHydra: { fn: sDieHydra, prio: 3, max: 1, gap: 2, variants: 1, gain: 0.7 },
+  selTavern: asSelect(sSelTavern, 3),
+  selGoblinLab: asSelect(sSelGoblinLab, 1.2),
+  selWaygate: asSelect(sSelWaygate, 0.65),
+  selShrine: asSelect(sSelShrine, 3),
+  selCage: asSelect(sSelCage, 2.8),
 } satisfies Record<string, SfxDef>);
 // Every weapon on every material, and every missile on every material ("melee.sword.metal",
 // "impact.arrow.flesh"): built lazily, so only the pairs a game actually hears get rendered.
@@ -3635,6 +4066,24 @@ const PHRASES: Record<string, Record<BarkKind, string[]>> = {
     attack: ['DAI!', 'for-the-MAS-ter!', 'NO-MER-si!'],
     ready: ['RAIZD-a-GEN.'],
   },
+  brigand: {
+    select: ['WHAT-yu-WANT?', 'YEAH?', 'SPIT-it-OUT.'],
+    move: ['a-RAIT-a-RAIT.', 'GO-ing.', 'KEEP-yer-HAIR-on.'],
+    attack: ['GET-im!', 'CUT-im-DOUN!', 'yer-MO-ni-or-yer-LAIF!'],
+    ready: ['for-a-PRAIS.', 'HU-NEEDS-KIL-ling?'],
+  },
+  shaman: {
+    select: ['da-SPI-rits-SPIK.', 'WHAT-yu-NEED-mon?', 'HMM?'],
+    move: ['da-LO-a-GAID-mi.', 'YA-mon.', 'I-be-GO-in.'],
+    attack: ['VOO-DOO!', 'JU-JU-STRAIK!', 'HEX-yu!'],
+    ready: ['da-SPI-rits-be-RE-di.'],
+  },
+  naga: {
+    select: ['YESSS?', 'the-SEA-SPIKS.', 'SPIK-SOFT-li.'],
+    move: ['as-the-TAID-wills.', 'I-SLAID.', 'SO-be-IT.'],
+    attack: ['DROWN!', 'FEEL-the-DEEPS!', 'SINK!'],
+    ready: ['the-TAID-a-RAI-ses.'],
+  },
   tyrant: {
     select: ['HU-DARS?', 'KNEEL.', 'SPIK-mor-tal.'],
     move: ['MAI-WIL.', 'the-LAND-iz-MAIN.'],
@@ -3661,11 +4110,13 @@ interface Speaker {
   words: string;
   /** A radio, a robot's ring modulator, a ghostly echo, a helmet speaker or the void's shimmer. */
   fx?: 'radio' | 'robot' | 'ghost' | 'helmet' | 'void';
-  /** A sound after the words: a horse snorts, wood creaks, servos whir. */
-  extra?: 'horse' | 'creak' | 'servo';
+  /** A sound after the words: a horse snorts, wood creaks, servos whir, a drum beats, a serpent hisses. */
+  extra?: 'horse' | 'creak' | 'servo' | 'drum' | 'hiss';
 }
 /** Units that answer without words: engines, droids, beasts and bones. */
-type BarkType = 'engine' | 'droid' | 'trumpet' | 'bubbles' | 'steam' | 'hover' | 'wolf' | 'spider' | 'golem' | 'drake' | 'skeleton' | 'wagon';
+type BarkType =
+  | 'engine' | 'droid' | 'trumpet' | 'bubbles' | 'steam' | 'hover' | 'wolf' | 'spider' | 'golem' | 'drake' | 'skeleton' | 'wagon'
+  | 'murloc' | 'harpy' | 'hydra' | 'dragon' | 'banditlord';
 type VoiceDef = Speaker | { type: BarkType };
 
 const VOICES: Record<string, VoiceDef> = {
@@ -3697,6 +4148,9 @@ const VOICES: Record<string, VoiceDef> = {
   ogre: { f0: 72, size: 0.8, rough: 0.45, tempo: 0.8, words: 'ogre' },
   deathguard: { f0: 88, size: 0.88, rough: 0.3, tempo: 0.85, breath: 0.15, wet: 0.4, level: 0.9, words: 'undead', fx: 'ghost' },
   kalenden: { f0: 62, size: 0.78, rough: 0.55, tempo: 0.8, breath: 0.1, wet: 0.45, words: 'tyrant', fx: 'ghost' },
+  brigand: { f0: 100, size: 0.92, rough: 0.38, tempo: 1.05, breath: 0.08, words: 'brigand' },
+  shaman: { f0: 118, size: 0.96, rough: 0.15, tempo: 0.9, vib: 0.6, wet: 0.2, words: 'shaman', extra: 'drum' },
+  naga: { f0: 225, size: 1.15, rough: 0, tempo: 0.85, breath: 0.35, wet: 0.3, vib: 0.4, level: 0.75, words: 'naga', extra: 'hiss' },
   engine: { type: 'engine' },
   droid: { type: 'droid' },
   trumpet: { type: 'trumpet' },
@@ -3709,6 +4163,11 @@ const VOICES: Record<string, VoiceDef> = {
   drake: { type: 'drake' },
   skeleton: { type: 'skeleton' },
   wagon: { type: 'wagon' },
+  murloc: { type: 'murloc' },
+  harpy: { type: 'harpy' },
+  hydra: { type: 'hydra' },
+  dragon: { type: 'dragon' },
+  banditlord: { type: 'banditlord' },
 };
 
 /** Voices of particular unit types (the rest follow their age and kind; see barkVoice). */
@@ -3719,6 +4178,8 @@ const VOICE_OF: Record<string, string> = {
   skeleton: 'skeleton', skeleton_archer: 'skeleton', dark_knight: 'deathguard', kalenden: 'kalenden',
   cargo_wagon: 'wagon', steam_tank: 'steam', combat_drone: 'droid', mech_walker: 'mech', titan: 'mech',
   hover_tank: 'hover', starfighter: 'hover', stealth_tank: 'hover', graviton: 'hover',
+  murloc: 'murloc', brigand: 'brigand', harpy: 'harpy', troll_shaman: 'shaman', naga_siren: 'naga', dragon: 'dragon',
+  hydra: 'hydra', bandit_lord: 'banditlord', broodmother: 'spider', merchant_wagon: 'wagon',
 };
 
 /**
@@ -4161,6 +4622,24 @@ function creatureBark(v: Voice, t: number, type: BarkType, kind: BarkKind, out: 
     case 'wagon':
       sSelWagon(v, t, out);
       break;
+    case 'murloc':
+      murloc(v, t, out, kind === 'select' ? 0.3 : 0.45, kind === 'attack' || kind === 'ready');
+      break;
+    case 'harpy':
+      harpy(v, t, out, kind === 'attack' ? 0.55 : 0.3, kind === 'attack' ? 0.3 : 0.2);
+      break;
+    case 'hydra':
+      if (kind === 'attack' || kind === 'ready') sHydraHiss(v, t, out);
+      else sAcidSpit(v, t, soft);
+      break;
+    case 'dragon':
+      if (kind === 'attack' || kind === 'ready') sDragonRoar(v, t, out);
+      else sDragonGrowl(v, t, out);
+      break;
+    case 'banditlord':
+      if (kind === 'move') sBrigandMutter(v, t, out);
+      else sBanditLaugh(v, t, out);
+      break;
     default:
       break;
   }
@@ -4176,6 +4655,10 @@ function voiceExtra(v: Voice, t: number, extra: Speaker['extra'], kind: BarkKind
     }
   } else if (extra === 'creak') {
     creak(v, t, 0.35, 70, 0.18, out, 20);
+  } else if (extra === 'drum') {
+    for (const dt of [0, 0.16]) thump(v, t + dt, 150, 85, 0.3, 0.12, out); // the shaman's hand drum
+  } else if (extra === 'hiss') {
+    noiseBurst(v, t, { type: 'highpass', freq: 4000, a: 0.04, peak: 0.12, d: 0.35, dest: out });
   } else if (extra === 'servo') {
     const g = gainNode(v, 0, out);
     swell(g.gain, t, 0.04, 0.08, 0.15, 0.08);

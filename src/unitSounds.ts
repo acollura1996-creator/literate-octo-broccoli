@@ -45,6 +45,8 @@ const WEAPON_OF: Record<string, Weapon> = {
   dragoon: 'saber', exo_trooper: 'energy', paladin: 'hammer', blademaster: 'katana', mountainking: 'hammer',
   kobold: 'club', gnoll: 'club', wolf: 'bite', spider: 'fang', ogre: 'maul', ogre_lord: 'maul', rock_golem: 'fist',
   kalenden: 'blade', dark_knight: 'blade', skeleton: 'sword', cargo_wagon: 'club',
+  // The map's creeps and lair bosses.
+  murloc: 'spear', brigand: 'sword', bandit_lord: 'axe', broodmother: 'fang',
 };
 
 /** A melee unit's weapon. */
@@ -89,10 +91,15 @@ const DEATH_OF: Record<string, string> = {
   gnoll_archer: 'dieGnoll', forest_troll: 'dieTroll', skeleton: 'dieSkeleton', skeleton_archer: 'dieSkeleton',
   dark_knight: 'dieUndead', kalenden: 'dieBoss', combat_drone: 'dieDrone', mech_walker: 'dieMech', titan: 'dieMech',
   ranger: 'dieWoman', sorceress: 'dieWoman', caveman: 'dieBrute', cargo_wagon: 'dieSiege', paladin: 'dieKnight',
-  mountainking: 'dieKnight',
+  mountainking: 'dieKnight', murloc: 'dieMurloc', brigand: 'dieBrute', harpy: 'dieHarpy', troll_shaman: 'dieTroll',
+  naga_siren: 'dieNaga', dragon: 'dieDragon', hydra: 'dieHydra', bandit_lord: 'dieKnight', broodmother: 'dieSpider',
+  merchant_wagon: 'dieSiege',
 };
 /** Voice pitch of a death cry (playback rate) where it isn't 1. */
-const PITCH_OF: Record<string, number> = { peasant: 1.06, mountainking: 0.84, archmage: 0.92, rock_thrower: 0.95, ogre_lord: 0.85, javelineer: 1.04 };
+const PITCH_OF: Record<string, number> = {
+  peasant: 1.06, mountainking: 0.84, archmage: 0.92, rock_thrower: 0.95, ogre_lord: 0.85, javelineer: 1.04, bandit_lord: 0.8,
+  broodmother: 0.62, troll_shaman: 1.08,
+};
 
 /** A unit's death. */
 export function deathOf(def: UnitDef): string {
@@ -125,7 +132,10 @@ const CALLS_OF: Record<string, [string, string]> = {
   ogre_lord: ['ogreGrumble', 'ogreRoar'], kobold: ['koboldChatter', 'koboldYell'], gnoll: ['gnollCackle', 'gnollYell'],
   gnoll_archer: ['gnollCackle', 'gnollYell'], forest_troll: ['trollMutter', 'trollYell'], rock_golem: ['golemGrind', 'golemRumble'],
   drake: ['drakeGrowl', 'drakeRoar'], skeleton: ['undeadMoan', 'undeadMoan'], skeleton_archer: ['undeadMoan', 'undeadMoan'],
-  dark_knight: ['undeadMoan', 'undeadMoan'],
+  dark_knight: ['undeadMoan', 'undeadMoan'], murloc: ['murlocGurgle', 'murlocYell'], brigand: ['brigandMutter', 'brigandShout'],
+  harpy: ['harpyCall', 'harpyScreech'], troll_shaman: ['shamanChant', 'trollYell'], naga_siren: ['nagaHiss', 'nagaHiss'],
+  dragon: ['dragonGrowl', 'dragonRoar'], hydra: ['hydraHiss', 'hydraHiss'], bandit_lord: ['brigandMutter', 'banditLaugh'],
+  broodmother: ['spiderChitter', 'spiderScreech'],
 };
 
 function callsOf(def: UnitDef): [string, string] | null {
@@ -162,7 +172,8 @@ const SHOT_OF: Record<string, string> = {
   laser_trooper: 'laserShot', hover_tank: 'plasmaShot', mech_walker: 'plasmaHeavy', void_trooper: 'plasmaShot',
   starfighter: 'laserTwin', titan: 'plasmaHeavy', graviton: 'gravitonShot', priest: 'holyBolt', sorceress: 'arcaneBolt',
   battlemage: 'fireballCast', archmage: 'frostBolt', water_elemental: 'waterBolt', forest_troll: 'axeThrow',
-  drake: 'drakeBreath', altar: 'holyBolt', dark_tower: 'felBolt',
+  drake: 'drakeBreath', altar: 'holyBolt', dark_tower: 'felBolt', harpy: 'harpyShot', troll_shaman: 'shamanBolt',
+  naga_siren: 'frostBolt', dragon: 'drakeBreath', hydra: 'acidSpit',
 };
 const SHOT_OF_KIND: Record<string, string> = {
   stone: 'slingShot', arrow: 'bowShot', javelin: 'javelinThrow', bolt: 'arcaneBolt', fireball: 'fireballCast', rock: 'catapultLaunch',
@@ -187,7 +198,10 @@ export function shotOf(u: Unit): string | null {
 /** Bolts: each caster's magic lands differently. */
 const BOLT_IMPACT: Record<string, string> = {
   priest: 'impHoly', altar: 'impHoly', sorceress: 'impArcane', archmage: 'impFrost', water_elemental: 'impWater', dark_tower: 'impFel',
+  harpy: 'impArcane', troll_shaman: 'impFel', naga_siren: 'impFrost', hydra: 'impAcid',
 };
+/** Splash by attacker, where its missile's kind isn't enough. */
+const SPLASH_OF: Record<string, string> = { graviton: 'boomGraviton', hydra: 'impAcid', dragon: 'boomFire' };
 const MISSILE_OF_KIND: Record<string, Missile> = { arrow: 'arrow', axe: 'arrow', javelin: 'arrow', stone: 'blunt', bullet: 'bullet', laser: 'beam', plasma: 'beam', rail: 'rail' };
 const SPLASH_OF_KIND: Record<string, string> = {
   rock: 'boomRock', grenade: 'boomGrenade', cannonball: 'boomCannon', shell: 'boomShell', rocket: 'boomRocket', plasma: 'boomPlasma',
@@ -222,7 +236,14 @@ export function buildingSound(u: Unit): string {
     case 'shop': return 'selShop';
     case 'vault': return 'selVault';
     case 'mercenary_camp': return 'selMercs';
-    case 'fountain': return 'selFountain';
+    case 'fountain':
+    case 'fountain_mana':
+      return 'selFountain';
+    case 'tavern': return 'selTavern';
+    case 'goblin_lab': return 'selGoblinLab';
+    case 'waygate': return 'selWaygate';
+    case 'shrine': return 'selShrine';
+    case 'cage': return 'selCage';
     default:
       if (u.def.shop) return 'selShop';
       if (u.def.mercenaries) return 'selMercs';
@@ -391,7 +412,7 @@ export class UnitSounds {
       return;
     }
     const voice = barkVoice(u.def);
-    if (voice && (u.def.creep || u.def.legion || u.def.caravan)) this.out.bark(voice, 'select', 0.6);
+    if (voice && (u.def.creep || u.def.legion || u.def.caravan || voice === 'wagon')) this.out.bark(voice, 'select', 0.6);
   }
 
   // ------------------------------------------------------------------------------------------
@@ -522,7 +543,7 @@ export class UnitSounds {
     const z = p.dest.z;
     if (!g.fog.isVisible(x, z)) return;
     if (from.def.splash) {
-      const s = from.type === 'graviton' ? 'boomGraviton' : (SPLASH_OF_KIND[p.kind] ?? 'boomCannon');
+      const s = SPLASH_OF[from.type] ?? SPLASH_OF_KIND[p.kind] ?? 'boomCannon';
       this.out.sfx(s, VOL.boom, x, z);
       return;
     }
