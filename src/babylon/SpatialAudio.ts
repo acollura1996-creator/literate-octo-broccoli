@@ -11,7 +11,7 @@
 // by night and the drone of Kalenden's citadel).
 //
 // M14: the game's own effects are rendered up front; the many unit sounds (every weapon on every
-// material, every death, creature and building) are rendered on first use, one at a time in the
+// material, every death, creature and building) are rendered on first use, a few at a time in the
 // background. Movement loops (tracks, hover engines, walkers, hooves, wheels) play from the centre of
 // the moving units near the camera. Shared group limits (synth.SFX_GROUPS) keep a big battle to a
 // handful of each kind of sound, and a full voice pool drops its quietest sound first.
