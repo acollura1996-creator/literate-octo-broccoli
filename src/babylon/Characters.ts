@@ -42,6 +42,7 @@ import '@babylonjs/core/Meshes/instancedMesh';
 import binUrl from '../assets/kaykit/kaykit.bin?url';
 import { MergedModelPlugin } from './MergedModel';
 import { CHARACTER_RECIPES, TEAM_CELLS, type CharacterRecipe } from './CharacterRecipes';
+import { PROCEDURAL_PROPS } from './CharacterProps';
 import type { GhostMode, ModelInstance } from './ModelLibrary';
 
 const TEXTURE_URLS = import.meta.glob('../assets/kaykit/*.png', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
@@ -169,12 +170,12 @@ class CharacterPlugin extends MaterialPluginBase {
           attribute vec4 kkJ;
           attribute vec4 kkW;
           attribute vec2 kkUV;
-          attribute vec2 kkMeta;
+          attribute vec3 kkMeta;
           attribute vec4 kkFrame;
           attribute vec4 kkTeam;
           uniform highp sampler2D kkVat;
           varying vec2 vKkUV;
-          varying vec2 vKkMeta;
+          varying vec3 vKkMeta;
           varying vec3 vKkTeam;
 
           // Add weight × the skinning matrix of joint j at an integer frame to the three rows.
@@ -224,7 +225,7 @@ class CharacterPlugin extends MaterialPluginBase {
         CUSTOM_FRAGMENT_DEFINITIONS: `#ifdef KAYKIT
           uniform highp sampler2DArray kkAtlas;
           varying vec2 vKkUV;
-          varying vec2 vKkMeta;
+          varying vec3 vKkMeta;
           varying vec3 vKkTeam;
         #endif`,
         CUSTOM_FRAGMENT_UPDATE_DIFFUSE: `#ifdef KAYKIT
@@ -248,6 +249,8 @@ class CharacterPlugin extends MaterialPluginBase {
             // A rim light in the sky's colour picks out silhouettes (as on the baked models).
             float rimK = pow(1.0 - max(dot(normalW, viewDirectionW), 0.0), 3.0);
             color.rgb += kkRim * rimK * (0.6 + 0.4 * baseColor.rgb);
+            // Glowing parts (sci-fi weapons) shine on their own.
+            color.rgb += baseColor.rgb * vKkMeta.z * 1.1;
           }
         #endif`,
       };
@@ -416,19 +419,33 @@ export class CharacterLibrary {
 
   private readonly dataStart: number;
 
-  static async load(scene: Scene): Promise<CharacterLibrary> {
-    const binP = fetch(binUrl).then((r) => r.arrayBuffer());
-    const images = new Map<string, ImageBitmap | HTMLImageElement>();
-    await Promise.all(
-      Object.entries(TEXTURE_URLS).map(async ([path, url]) => {
-        const img = new Image();
-        img.src = url;
-        await img.decode();
-        images.set(path.split('/').pop()!, img);
-      }),
-    );
-    return new CharacterLibrary(scene, await binP, images);
+  /** The file and atlases, fetched once and shared by every scene (the game's and the HUD's). */
+  private static files: Promise<[ArrayBuffer, Map<string, HTMLImageElement>]> | null = null;
+
+  /** Load the characters for a scene. `fog: false` for scenes without the fog of war (HUD pictures). */
+  static async load(scene: Scene, opts: { fog?: boolean } = {}): Promise<CharacterLibrary> {
+    CharacterLibrary.files ??= Promise.all([
+      fetch(binUrl).then((r) => r.arrayBuffer()),
+      (async () => {
+        const images = new Map<string, HTMLImageElement>();
+        await Promise.all(
+          Object.entries(TEXTURE_URLS).map(async ([path, url]) => {
+            const img = new Image();
+            img.src = url;
+            await img.decode();
+            images.set(path.split('/').pop()!, img);
+          }),
+        );
+        return images;
+      })(),
+    ]);
+    const [bin, images] = await CharacterLibrary.files;
+    const lib = new CharacterLibrary(scene, bin, images);
+    lib.fog = opts.fog ?? true;
+    return lib;
   }
+
+  private fog = true;
 
   /** The animation texture: every rig's frames, stacked in blocks of VAT_BLOCK rows. */
   private buildVat(dataStart: number): void {
@@ -508,6 +525,10 @@ export class CharacterLibrary {
     m.specularColor = Color3.Black();
     m.backFaceCulling = false; // the packs' capes and hats are single-sided
     const plugin = new CharacterPlugin(m, this.vat, this.atlas, this.vatWidth);
+    if (!this.fog) {
+      const fog = m.pluginManager?.getPlugin('FogOfWar') as { fogEnabled: boolean } | null;
+      if (fog) fog.fogEnabled = false;
+    }
     if (ghost) {
       m.alpha = ghost === 'illusion' ? 0.75 : 0.4;
       m.transparencyMode = Material.MATERIAL_ALPHABLEND;
@@ -580,7 +601,7 @@ export class CharacterLibrary {
         // The team mask: is the vertex on one of the team's swatches (8 × 4 grid, v down)?
         const col = Math.min(7, Math.floor(u * 8));
         const row = Math.min(3, Math.floor(v * 4));
-        meta.push(teamCells.some(([c, r]) => c === col && r === row) ? 1 : 0, layer);
+        meta.push(teamCells.some(([c, r]) => c === col && r === row) ? 1 : 0, layer, 0);
       }
       const I = p.index32 ? new Uint32Array(this.bin, this.dataStart + p.index, p.indices) : new Uint16Array(this.bin, this.dataStart + p.index, p.indices);
       // glTF winds counter-clockwise; this right-handed scene draws counter-clockwise front faces.
@@ -589,6 +610,33 @@ export class CharacterLibrary {
     add(body, recipe.bodyTeam ?? TEAM_CELLS[body.texture] ?? []);
     for (const spec of recipe.props) {
       const name = typeof spec === 'string' ? spec : spec.p;
+      if (name.startsWith('@')) {
+        // A prop made in code (CharacterProps.ts), in its joint's space like the packs' props.
+        const make = PROCEDURAL_PROPS[name.slice(1)];
+        if (!make) throw new Error(`kaykit: no procedural prop ${name}`);
+        const g = make();
+        const joint = rig.joints.indexOf(g.joint);
+        const m = rig.bindWorld[joint]!;
+        const base = pos.length / 3;
+        const layer = this.layer.get(g.texture) ?? 0;
+        const cells = typeof spec === 'string' ? TEAM_CELLS[g.texture] ?? [] : spec.team;
+        for (let i = 0; i < g.positions.length / 3; i++) {
+          const x = g.positions[i * 3]!, y = g.positions[i * 3 + 1]!, z = g.positions[i * 3 + 2]!;
+          const nx = g.normals[i * 3]!, ny = g.normals[i * 3 + 1]!, nz = g.normals[i * 3 + 2]!;
+          pos.push(m[0]! * x + m[4]! * y + m[8]! * z + m[12]!, m[1]! * x + m[5]! * y + m[9]! * z + m[13]!, m[2]! * x + m[6]! * y + m[10]! * z + m[14]!);
+          nrm.push(m[0]! * nx + m[4]! * ny + m[8]! * nz, m[1]! * nx + m[5]! * ny + m[9]! * nz, m[2]! * nx + m[6]! * ny + m[10]! * nz);
+          jnt.push(joint, 0, 0, 0);
+          wgt.push(1, 0, 0, 0);
+          const u = g.uvs[i * 2]!;
+          const v = g.uvs[i * 2 + 1]!;
+          uv.push(u, v);
+          const col = Math.min(7, Math.floor(u * 8));
+          const row = Math.min(3, Math.floor(v * 4));
+          meta.push(cells.some(([c, r]) => c === col && r === row) ? 1 : 0, layer, g.glow[i]!);
+        }
+        for (const i of g.indices) idx.push(base + i);
+        continue;
+      }
       const p = this.pieces.get(name);
       if (!p) throw new Error(`kaykit: no piece ${name}`);
       add(p, typeof spec === 'string' ? TEAM_CELLS[p.texture] ?? [] : spec.team);
@@ -602,7 +650,7 @@ export class CharacterLibrary {
     mesh.setVerticesData('kkJ', jnt, false, 4);
     mesh.setVerticesData('kkW', wgt, false, 4);
     mesh.setVerticesData('kkUV', uv, false, 2);
-    mesh.setVerticesData('kkMeta', meta, false, 2);
+    mesh.setVerticesData('kkMeta', meta, false, 3);
     // (Not Babylon's instance `color`: its define is only set once an instance buffer exists.)
     mesh.registerInstancedBuffer('kkTeam', 4);
     mesh.instancedBuffers.kkTeam = new Color4(0.58, 0.59, 0.59, 0);
@@ -661,6 +709,14 @@ export class CharacterLibrary {
       },
       dispose: () => root.dispose(false, false),
     };
+  }
+
+  /** Build (and compile) one character's mesh and material ahead of time. */
+  async warmUp(modelId = 'footman'): Promise<void> {
+    const recipe = CHARACTER_RECIPES[modelId];
+    if (!recipe) return;
+    const mesh = this.recipeMesh(modelId, recipe, null);
+    await mesh.material!.forceCompilationAsync(mesh, { useInstances: true }).catch(() => undefined);
   }
 
   /** Scale from the recipe's body (model units → world). */

@@ -46,6 +46,8 @@ export interface CharacterRecipe {
   spawn?: string;
   /** Whirlwind (Bladestorm). */
   spin?: string;
+  /** Rapid fire: the attack clip loops while the unit keeps shooting. */
+  rapid?: boolean;
 }
 
 /** The Knight's shields show the team colour on their metal face. */
@@ -69,6 +71,10 @@ function shooter(body: string, props: PropSpec[], height: number, attack: string
 /** A spellcaster. */
 function caster(body: string, props: PropSpec[], height: number, extra: Partial<CharacterRecipe> = {}): CharacterRecipe {
   return { body, props, height, idle: ['Idle'], walk: 'Walking_C', run: 'Running_A', runAbove: 3.6, attack: ['Spellcast_Shoot'], cast: 'Spellcast_Raise', death: DEATHS, ...extra };
+}
+/** A soldier with a firearm (gunpowder to galactic ages): aims between shots. */
+function gunner(body: string, props: PropSpec[], height: number, extra: Partial<CharacterRecipe> = {}): CharacterRecipe {
+  return { body, props, height, idle: ['Idle'], combatIdle: '2H_Ranged_Aiming', walk: 'Walking_B', run: 'Running_B', runAbove: 3.6, attack: ['2H_Ranged_Shoot'], cast: 'Spellcast_Raise', death: DEATHS, ...extra };
 }
 /** One of Kalenden's undead. */
 function undead(body: string, props: PropSpec[], height: number, attack: string[], extra: Partial<CharacterRecipe> = {}): CharacterRecipe {
@@ -95,6 +101,19 @@ export const CHARACTER_RECIPES: Record<string, CharacterRecipe> = {
   champion: heavy('Knight', ['Knight/Knight_Helmet', 'Knight/Knight_Cape', 'Knight/2H_Sword'], 1.6),
   sorceress: caster('Mage', ['Mage/Mage_Hat', 'Mage/2H_Staff'], 1.42),
   battlemage: caster('Mage', ['Mage/Mage_Hat', 'Mage/Mage_Cape', 'Mage/2H_Staff'], 1.5, { attack: ['Spellcast_Shoot', 'Spellcast_Long'] }),
+  // Gunpowder to Galactic infantry, with firearms made in the packs' style (CharacterProps.ts).
+  musketeer: gunner('Rogue', ['Rogue/Rogue_Cape', '@musket'], 1.42),
+  grenadier: shooter('Rogue_Hooded', ['Rogue_Hooded/Rogue_Cape', 'Rogue/Throwable'], 1.42, 'Throw'),
+  rifleman: gunner('Rogue', ['@rifle'], 1.42),
+  machine_gunner: gunner('Barbarian', ['@mg'], 1.5, { attack: ['2H_Ranged_Shooting'], rapid: true }),
+  flamethrower: gunner('Barbarian', ['@flamer', '@flamerTanks'], 1.5, { attack: ['2H_Ranged_Shooting'], rapid: true }),
+  sniper: gunner('Rogue_Hooded', ['Rogue_Hooded/Rogue_Cape', '@sniper'], 1.42),
+  infantry: gunner('Knight', ['Knight/Knight_Helmet', '@assault'], 1.45, { attack: ['2H_Ranged_Shooting'], rapid: true }),
+  bazooka: gunner('Knight', ['Knight/Knight_Helmet', '@bazooka'], 1.45),
+  railgunner: gunner('Knight', ['Knight/Knight_Helmet', 'Knight/Knight_Cape', '@railgun'], 1.5),
+  laser_trooper: gunner('Knight', ['Knight/Knight_Helmet', '@laser'], 1.5),
+  exo_trooper: heavy('Knight', ['Knight/Knight_Helmet', 'Knight/Knight_Cape', '@energyBlade'], 1.85),
+  void_trooper: gunner('Knight', ['Knight/Knight_Helmet', 'Knight/Knight_Cape', '@plasma'], 1.55),
   // Heroes: bigger, as in Warcraft III.
   paladin: soldier('Knight', ['Knight/Knight_Helmet', 'Knight/Knight_Cape', { p: 'Knight/Badge_Shield', team: SHIELD }, 'Knight/1H_Sword'], 1.9),
   archmage: caster('Mage', ['Mage/Mage_Hat', 'Mage/Mage_Cape', 'Mage/2H_Staff'], 1.9, { cast: 'Spellcast_Long' }),

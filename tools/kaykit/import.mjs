@@ -44,7 +44,7 @@ const COMMON_ANIMS = [
   '1H_Melee_Attack_Chop', '1H_Melee_Attack_Slice_Diagonal', '1H_Melee_Attack_Slice_Horizontal', '1H_Melee_Attack_Stab',
   '2H_Melee_Attack_Chop', '2H_Melee_Attack_Slice', '2H_Melee_Attack_Stab', '2H_Melee_Attack_Spinning',
   'Dualwield_Melee_Attack_Chop', 'Dualwield_Melee_Attack_Slice', 'Dualwield_Melee_Attack_Stab',
-  '1H_Ranged_Shoot', '2H_Ranged_Shoot', 'Throw',
+  '1H_Ranged_Shoot', '2H_Ranged_Shoot', '2H_Ranged_Shooting', '2H_Ranged_Aiming', '2H_Ranged_Reload', 'Throw',
   'Unarmed_Melee_Attack_Punch_A', 'Unarmed_Melee_Attack_Kick',
   'Spellcast_Shoot', 'Spellcast_Raise', 'Spellcast_Long', 'Spellcasting',
   'Death_A', 'Death_B', 'Hit_A', 'Cheer', 'Interact', 'PickUp', 'Block',
@@ -78,7 +78,8 @@ const PROPS = [
   { name: 'Skeleton_Blade', repo: 'skel', file: 'Assets/gltf/Skeleton_Blade.gltf', texture: 'skeleton_texture.png', ...RIGHT_HAND },
   { name: 'Skeleton_Axe', repo: 'skel', file: 'Assets/gltf/Skeleton_Axe.gltf', texture: 'skeleton_texture.png', ...RIGHT_HAND },
   { name: 'Skeleton_Staff', repo: 'skel', file: 'Assets/gltf/Skeleton_Staff.gltf', texture: 'skeleton_texture.png', ...RIGHT_HAND },
-  { name: 'Skeleton_Crossbow', repo: 'skel', file: 'Assets/gltf/Skeleton_Crossbow.gltf', texture: 'skeleton_texture.png', ...RIGHT_HAND },
+  // (Turned a quarter: crossbows lie along the hand slot's X, as the packs' own do.)
+  { name: 'Skeleton_Crossbow', repo: 'skel', file: 'Assets/gltf/Skeleton_Crossbow.gltf', texture: 'skeleton_texture.png', ...RIGHT_HAND, r: [0, Math.SQRT1_2, 0, Math.SQRT1_2] },
   { name: 'Skeleton_Shield_Small_A', repo: 'skel', file: 'Assets/gltf/Skeleton_Shield_Small_A.gltf', texture: 'skeleton_texture.png', ...LEFT_HAND },
   { name: 'Skeleton_Shield_Large_A', repo: 'skel', file: 'Assets/gltf/Skeleton_Shield_Large_A.gltf', texture: 'skeleton_texture.png', ...LEFT_HAND },
   { name: 'Skeleton_Shield_Large_B', repo: 'skel', file: 'Assets/gltf/Skeleton_Shield_Large_B.gltf', texture: 'skeleton_texture.png', ...LEFT_HAND },

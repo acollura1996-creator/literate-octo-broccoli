@@ -20,6 +20,7 @@ import type { Engine } from '@babylonjs/core/Engines/engine';
 import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import '@babylonjs/core/Engines/Extensions/engine.readTexture';
 import { ModelLibrary, type ModelInstance, type ModelParts } from './ModelLibrary';
+import { CharacterLibrary, type CharacterInstance } from './Characters';
 import type { FogOfWarPlugin } from './FogOfWar';
 import { quatFromEulerXYZ, eulerXYZFromQuat } from './UnitView';
 import type { Unit } from '../game/unit.ts';
@@ -35,12 +36,18 @@ function frame(cam: TargetCamera, m: ModelInstance, isBuilding: boolean, portrai
   m.root.computeWorldMatrix(true);
   let min = new Vector3(Infinity, Infinity, Infinity);
   let max = new Vector3(-Infinity, -Infinity, -Infinity);
-  for (const mesh of m.meshes) {
-    mesh.computeWorldMatrix(true);
-    const bb = mesh.getBoundingInfo().boundingBox;
-    min = Vector3.Minimize(min, bb.minimumWorld);
-    max = Vector3.Maximize(max, bb.maximumWorld);
-  }
+  if ('recipe' in m) {
+    // Characters: their bounding boxes allow for any pose; frame the standing figure.
+    const r = m.height * 0.3;
+    min = new Vector3(-r, 0, -r);
+    max = new Vector3(r, m.height, r);
+  } else
+    for (const mesh of m.meshes) {
+      mesh.computeWorldMatrix(true);
+      const bb = mesh.getBoundingInfo().boundingBox;
+      min = Vector3.Minimize(min, bb.minimumWorld);
+      max = Vector3.Maximize(max, bb.maximumWorld);
+    }
   if (!m.meshes.length) {
     min = new Vector3(-0.5, 0, -0.5);
     max = new Vector3(0.5, 1, 0.5);
@@ -118,6 +125,7 @@ export class UiRenderer {
     readonly engine: Engine,
     readonly scene: Scene,
     readonly models: ModelLibrary,
+    readonly characters: CharacterLibrary,
   ) {
     this.lights = new LightRig(scene);
     this.iconCam = new TargetCamera('icon-cam', Vector3.Zero(), scene);
@@ -141,13 +149,14 @@ export class UiRenderer {
     scene.autoClear = false;
     scene.autoClearDepthAndStencil = false;
     scene.detachControl();
-    const models = await ModelLibrary.load(scene);
+    const [models, characters] = await Promise.all([ModelLibrary.load(scene), CharacterLibrary.load(scene, { fog: false })]);
     // No fog of war on HUD pictures.
     for (const m of scene.materials) {
       const fog = m.pluginManager?.getPlugin('FogOfWar') as FogOfWarPlugin | null;
       if (fog) fog.fogEnabled = false;
     }
-    const ui = new UiRenderer(engine, scene, models);
+    const ui = new UiRenderer(engine, scene, models, characters);
+    await characters.warmUp();
     // Compile every model shader now (Babylon compiles asynchronously), so icons can be drawn and
     // read back synchronously, as the HUD expects.
     await Promise.all(
@@ -158,12 +167,23 @@ export class UiRenderer {
     return ui;
   }
 
+  /** A model or, for units with a recipe, a rigged character (posed in its idle). */
+  instantiate(modelId: string, color: number, name: string): ModelInstance {
+    const c = this.characters.instantiate(modelId, color, name);
+    if (c) {
+      c.animator.update(0.35);
+      c.syncFrames();
+      return c;
+    }
+    return this.models.instantiate(modelId, color, name);
+  }
+
   /** Data URL icon for a model id rendered with a team colour (cached). */
   icon(modelId: string, color: number, isBuilding: boolean): string {
     const key = `${modelId}|${color}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
-    const m = this.models.instantiate(modelId, color, `icon-${modelId}`);
+    const m = this.instantiate(modelId, color, `icon-${modelId}`);
     this.lights.icon();
     frame(this.iconCam, m, isBuilding);
     this.iconCam.getViewMatrix(true);
@@ -208,6 +228,7 @@ export class Portrait {
   private canvas: HTMLCanvasElement | null = null;
   private readonly cam: TargetCamera;
   private current: string | null = null;
+  private lastTime = 0;
   private model: ModelInstance | null = null;
   private unit: UnitLike | null = null;
   private rest = new Map<TransformNode, [number, number, number]>();
@@ -245,7 +266,7 @@ export class Portrait {
       }
       return;
     }
-    const m = this.ui.models.instantiate(unit.modelId, unit.def.modelColor ?? unit.owner.color, 'portrait');
+    const m = this.ui.instantiate(unit.modelId, unit.def.modelColor ?? unit.owner.color, 'portrait');
     m.root.rotationQuaternion = quatFromEulerXYZ(0, 0.35, 0);
     this.model = m;
     frame(this.cam, m, unit.isBuilding, true);
@@ -274,7 +295,13 @@ export class Portrait {
       canvas.width = pw;
       canvas.height = ph;
     }
-    this.animate(m.parts, time);
+    if ('recipe' in m) {
+      // Characters breathe through their idle (Warcraft III's portraits fidget the same way).
+      const c = m as CharacterInstance;
+      c.animator.update(Math.min(0.1, Math.max(0, time - this.lastTime)));
+      c.syncFrames();
+    } else this.animate(m.parts, time);
+    this.lastTime = time;
     if (this.unit?.isBuilding) m.root.rotationQuaternion = quatFromEulerXYZ(0, 0.35 + Math.sin(time * 0.3) * 0.15, 0);
 
     // The main canvas under the portrait box (hidden by it), in canvas pixels.

@@ -417,7 +417,11 @@ export class UnitView {
       return;
     }
     const attackStart = u.anim === 'attack' ? time - u.animTime : -1;
-    if (u.anim === 'attack' && Math.abs(attackStart - st.attackStart) > 0.05) {
+    if (r.rapid && (u.anim === 'attack' || time - (u.lastShotAt ?? -9) < 0.6)) {
+      // Rapid fire: the firing clip loops for as long as the shooting lasts.
+      st.lastFight = time;
+      a.play(r.attack[0]!, { loop: true, rate: 1, fade: 0.1 });
+    } else if (u.anim === 'attack' && Math.abs(attackStart - st.attackStart) > 0.05) {
       // A new swing or shot: the clip's impact lands at the end of the simulation's wind-up.
       st.attackStart = attackStart;
       st.lastFight = time;
