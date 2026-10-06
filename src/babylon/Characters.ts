@@ -576,10 +576,10 @@ export class CharacterLibrary {
     const add = (p: PieceInfo, teamCells: ReadonlyArray<readonly [number, number]>): void => {
       const base = pos.length / 3;
       const P = this.f32(p.position, p.vertices * 3);
-      const N = this.f32(p.normal, p.vertices * 3);
-      const UV = this.f32(p.uv, p.vertices * 2);
+      const N8 = new Int8Array(this.bin, this.dataStart + p.normal, p.vertices * 3);
+      const UV16 = new Uint16Array(this.bin, this.dataStart + p.uv, p.vertices * 2);
       const J = this.u8(p.joints, p.vertices * 4);
-      const Wt = this.f32(p.weights, p.vertices * 4);
+      const W8 = this.u8(p.weights, p.vertices * 4);
       const layer = this.layer.get(p.texture) ?? 0;
       // Props are stored in the space of the joint they hang on: into this rig's bind space.
       let m: number[] | null = null;
@@ -591,7 +591,7 @@ export class CharacterLibrary {
       }
       for (let i = 0; i < p.vertices; i++) {
         const x = P[i * 3]!, y = P[i * 3 + 1]!, z = P[i * 3 + 2]!;
-        const nx = N[i * 3]!, ny = N[i * 3 + 1]!, nz = N[i * 3 + 2]!;
+        const nx = N8[i * 3]! / 127, ny = N8[i * 3 + 1]! / 127, nz = N8[i * 3 + 2]! / 127;
         if (m) {
           pos.push(m[0]! * x + m[4]! * y + m[8]! * z + m[12]!, m[1]! * x + m[5]! * y + m[9]! * z + m[13]!, m[2]! * x + m[6]! * y + m[10]! * z + m[14]!);
           nrm.push(m[0]! * nx + m[4]! * ny + m[8]! * nz, m[1]! * nx + m[5]! * ny + m[9]! * nz, m[2]! * nx + m[6]! * ny + m[10]! * nz);
@@ -601,10 +601,10 @@ export class CharacterLibrary {
           pos.push(x, y, z);
           nrm.push(nx, ny, nz);
           jnt.push(J[i * 4]!, J[i * 4 + 1]!, J[i * 4 + 2]!, J[i * 4 + 3]!);
-          wgt.push(Wt[i * 4]!, Wt[i * 4 + 1]!, Wt[i * 4 + 2]!, Wt[i * 4 + 3]!);
+          wgt.push(W8[i * 4]! / 255, W8[i * 4 + 1]! / 255, W8[i * 4 + 2]! / 255, W8[i * 4 + 3]! / 255);
         }
-        const u = UV[i * 2]!;
-        const v = UV[i * 2 + 1]!;
+        const u = UV16[i * 2]! / 65535;
+        const v = UV16[i * 2 + 1]! / 65535;
         uv.push(u, v);
         // The team mask: is the vertex on one of the team's swatches (8 × 4 grid, v down)?
         const col = Math.min(7, Math.floor(u * 8));

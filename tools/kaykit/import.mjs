@@ -16,7 +16,7 @@
 //   - Pieces: a character's body (its skinned parts merged into one mesh, in bind space) and its
 //     props (helmets, capes, weapons, shields: rigid meshes in the space of the joint they hang on,
 //     so any prop fits any body of any rig).
-//   - Per vertex: position, normal, uv, four joints and weights. (Which atlas swatches take the team
+//   - Per vertex: position (float), normal (int8), uv (uint16), four joints and weights (uint8). (Which atlas swatches take the team
 //     colour is decided by the game, per character and prop: see CharacterRecipes.ts.)
 //   - Per animation: frame range, duration, and for walks and runs the ground speed of the feet, for
 //     attacks the moment of impact (the weapon hand's fastest point), so the game can match them to
@@ -39,17 +39,15 @@ const REPOS = {
 // ------------------------------------------------------------------ selection
 /** Animations every rig exports (names as in the packs). */
 const COMMON_ANIMS = [
-  'Idle', '2H_Melee_Idle', 'Unarmed_Idle',
+  'Idle', '2H_Melee_Idle',
   'Walking_A', 'Walking_B', 'Walking_C', 'Running_A', 'Running_B',
   '1H_Melee_Attack_Chop', '1H_Melee_Attack_Slice_Diagonal', '1H_Melee_Attack_Slice_Horizontal', '1H_Melee_Attack_Stab',
   '2H_Melee_Attack_Chop', '2H_Melee_Attack_Slice', '2H_Melee_Attack_Stab', '2H_Melee_Attack_Spinning',
-  'Dualwield_Melee_Attack_Chop', 'Dualwield_Melee_Attack_Slice', 'Dualwield_Melee_Attack_Stab',
-  '1H_Ranged_Shoot', '2H_Ranged_Shoot', '2H_Ranged_Shooting', '2H_Ranged_Aiming', '2H_Ranged_Reload', 'Throw',
-  'Unarmed_Melee_Attack_Punch_A', 'Unarmed_Melee_Attack_Kick',
-  'Spellcast_Shoot', 'Spellcast_Raise', 'Spellcast_Long', 'Spellcasting',
-  'Death_A', 'Death_B', 'Hit_A', 'Cheer', 'Interact', 'PickUp', 'Block',
+  '1H_Ranged_Shoot', '2H_Ranged_Shoot', '2H_Ranged_Shooting', '2H_Ranged_Aiming', 'Throw',
+  'Spellcast_Shoot', 'Spellcast_Raise', 'Spellcast_Long',
+  'Death_A', 'Death_B', 'Cheer', 'Interact',
 ];
-const SKELETON_ANIMS = ['Idle_B', 'Idle_Combat', 'Walking_D_Skeletons', 'Running_C', 'Death_C_Skeletons', 'Skeletons_Awaken_Floor', 'Skeletons_Awaken_Standing', 'Taunt'];
+const SKELETON_ANIMS = ['Idle_B', 'Idle_Combat', 'Walking_D_Skeletons', 'Running_C', 'Death_C_Skeletons', 'Skeletons_Awaken_Floor', 'Taunt'];
 
 /** Rigs: where their skeleton and animations come from. */
 const RIGS = {
@@ -376,6 +374,17 @@ for (const [rigName, rig] of Object.entries(RIGS)) {
   console.log(`[kaykit] rig ${rigName}: ${jointNames.length} joints, ${Object.keys(anims).length} animations, ${rows.length} frames, ${(data.byteLength / 1024).toFixed(0)} KB`);
 }
 
+/** Weights as bytes, four per vertex, still summing to exactly 255. */
+function quantizeWeights(w) {
+  const out = new Uint8Array(w.length);
+  for (let i = 0; i < w.length; i += 4) {
+    let sum = 0;
+    for (let k = 1; k < 4; k++) sum += out[i + k] = Math.round(w[i + k] * 255);
+    out[i] = 255 - sum;
+  }
+  return out;
+}
+
 /** A mesh piece: merged primitives with skin data remapped to the rig's joints. */
 function writePiece(name, rigName, texture, parts, extra) {
   const rig = out.rigs[rigName];
@@ -427,10 +436,10 @@ function writePiece(name, rigName, texture, parts, extra) {
     indices: idx.length,
     bounds: { minY: +minY.toFixed(3), maxY: +maxY.toFixed(3), radius: +maxR.toFixed(3) },
     position: put(new Float32Array(pos)),
-    normal: put(new Float32Array(nrm)),
-    uv: put(new Float32Array(uv)),
+    normal: put(Int8Array.from(nrm, (v) => Math.round(Math.max(-1, Math.min(1, v)) * 127))),
+    uv: put(Uint16Array.from(uv, (v) => Math.round(Math.max(0, Math.min(1, v)) * 65535))),
     joints: put(new Uint8Array(jnt)),
-    weights: put(new Float32Array(wgt)),
+    weights: put(quantizeWeights(wgt)),
     index: put(vcount > 65535 ? new Uint32Array(idx) : new Uint16Array(idx)),
     index32: vcount > 65535,
     ...extra,

@@ -218,7 +218,7 @@ export class UnitView {
   /** The rigged character, when the unit has one (M14). */
   private character: CharacterInstance | null = null;
   /** Animation bookkeeping for characters. */
-  private anim = { attackStart: -1, attackIndex: 0, lastFight: -99, idleUntil: 0, deathClip: '', spawned: false };
+  private anim = { attackStart: -1, attackIndex: 0, lastFight: -99, idleUntil: 0, deathClip: '', spawned: false, level: 0, cheerUntil: 0 };
   /** Game time the view was made (units made after the start are new: raised, trained, summoned). */
   private readonly bornAt: number;
 
@@ -417,6 +417,15 @@ export class UnitView {
       }
     }
     if (time < st.idleUntil && a.current === r.spawn && !u.moving) {
+      c.syncFrames();
+      return;
+    }
+    // Heroes raise their arms when they gain a level (if not busy fighting or walking).
+    const level = u.level ?? 0;
+    if (st.level && level > st.level && a.has('Cheer')) st.cheerUntil = time + 1.6;
+    st.level = level;
+    if (time < st.cheerUntil && u.anim === 'stand' && !u.moving) {
+      a.play('Cheer', { loop: false, fade: 0.15 });
       c.syncFrames();
       return;
     }
