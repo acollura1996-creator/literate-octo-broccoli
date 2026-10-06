@@ -132,7 +132,8 @@ export class Roads {
         changed = this.game.generals[this.owner[i]!];
         this.counts[this.owner[i]!]!--;
         this.owner[i] = -1;
-        this.game.grid.road[i] = 0;
+        // The map's own dirt roads stay fast.
+        this.game.grid.road[i] = this.game.terrain?.highway[i] ?? 0;
         this.count--;
       }
     }

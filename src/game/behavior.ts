@@ -284,7 +284,9 @@ function deliverAttack(game: Game, u: Unit, t: Unit | null): void {
 }
 
 // ------------------------------------------------------------------ orders
-export function finishOrder(_game: Game, u: Unit): void {
+export function finishOrder(game: Game, u: Unit): void {
+  const o = u.order;
+  if (o.type === 'move' || o.type === 'attackMove') u.lastGoal = { x: o.point.x, z: o.point.z, time: game.time };
   if (u.orderQueue.length) {
     u.order = u.orderQueue.shift()!;
   } else {

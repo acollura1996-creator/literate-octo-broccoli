@@ -2,7 +2,7 @@
 // land of Kalenden: a bountiful harvest, a plague, a bandit raid, a merchant caravan laden
 // with gold, or a golden age for a happy empire.
 import { CENTER, rotate } from '../world/layout.ts';
-import { DROP_TABLES } from '../data/items.ts';
+import { randomDrop } from '../data/items.ts';
 import { moodOf } from './empire.ts';
 import type { Game } from './game.ts';
 import type { Unit } from './unit.ts';
@@ -122,8 +122,11 @@ export class GameEvents {
     const g = this.game;
     const k = Math.floor(Math.random() * 4);
     const dir = Math.random() < 0.5 ? 1 : 3;
-    const start = rotate([CENTER, 8], k);
-    const route = [rotate([CENTER, 40], k), rotate([CENTER, 40], (k + dir) % 4), rotate([CENTER, 8], (k + dir) % 4)];
+    const k2 = (k + dir) % 4;
+    // From one outpost to the next, across the quadrant between them (off the bases' doorsteps).
+    const quadrant = dir === 1 ? k2 : k;
+    const start = rotate([CENTER, 54], k);
+    const route = [rotate([120, 120], quadrant), rotate([CENTER, 54], k2), rotate([CENTER, 10], k2)];
     const pos = g.grid.nearestWalkable(start[0], start[1], 8);
     if (!pos) return;
     const w = g.spawnUnit('cargo_wagon', g.creeps, pos.x, pos.z);
@@ -133,7 +136,7 @@ export class GameEvents {
       g.issueOrder(w, { type: 'move', point: p }, i > 0);
     });
     w.onDeath = (killer) => {
-      if (killer?.owner?.general) g.dropItem(w.x, w.z, pick(DROP_TABLES[3]!));
+      if (killer?.owner?.general) g.dropItem(w.x, w.z, randomDrop(3));
     };
     this.caravans.push(w);
     g.ping(pos.x, pos.z, '#ffd700');

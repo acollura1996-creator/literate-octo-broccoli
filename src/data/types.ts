@@ -103,6 +103,12 @@ export interface UnitDef {
   shop?: string;
   modelColor?: number;
   mercenaries?: string[];
+  /** Neutral buildings: a fountain restoring health or mana. */
+  fountain?: 'health' | 'mana';
+  tavern?: boolean;
+  shrine?: boolean;
+  /** The footprint doesn't block movement (waygates). */
+  walkable?: boolean;
 }
 
 export interface HeroDef {
@@ -117,7 +123,9 @@ export interface HeroDef {
 }
 
 export type ItemStat = 'speed' | 'damage' | 'armor' | 'str' | 'agi' | 'int' | 'hp' | 'hpRegen' | 'manaRegen' | 'lifesteal';
-export type ItemUse = 'heal' | 'mana' | 'townPortal' | 'xp' | 'str' | 'agi' | 'int' | 'areaHeal' | 'gold';
+export type ItemUse =
+  | 'heal' | 'mana' | 'townPortal' | 'xp' | 'str' | 'agi' | 'int' | 'allStats' | 'areaHeal' | 'areaMana' | 'gold'
+  | 'haste' | 'bomb' | 'reveal';
 
 export interface ItemDef {
   name: string;
@@ -129,9 +137,15 @@ export interface ItemDef {
   stats?: Partial<Record<ItemStat, number>>;
   use?: ItemUse;
   amount?: number;
+  /** Seconds an effect lasts (haste, flares). */
+  duration?: number;
+  /** Area of an effect around the Hero. */
+  radius?: number;
   charges?: number;
   dropOnly?: boolean;
   autoUse?: boolean;
+  /** 1 common ... 5 the finest artifacts, 6 a boss's own treasure. */
+  tier: number;
 }
 
 export interface AgeDef {

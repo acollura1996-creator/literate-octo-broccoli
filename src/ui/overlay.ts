@@ -90,12 +90,13 @@ export class Overlay {
         ctx.fillText(`${u.def.name}${u.isIllusion ? '' : ` (${u.level})`}`, p.x, Math.round(p.y) - 5);
       }
       if (u.def.boss) {
+        const name = u.def.name.toUpperCase();
         ctx.font = 'bold 13px Georgia, serif';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#000';
-        ctx.fillText('KALENDEN', p.x + 1, Math.round(p.y) - 5);
-        ctx.fillStyle = '#ff6a5a';
-        ctx.fillText('KALENDEN', p.x, Math.round(p.y) - 6);
+        ctx.fillText(name, p.x + 1, Math.round(p.y) - 5);
+        ctx.fillStyle = u.owner === g.legion ? '#ff6a5a' : '#ffb04a';
+        ctx.fillText(name, p.x, Math.round(p.y) - 6);
       }
     }
 

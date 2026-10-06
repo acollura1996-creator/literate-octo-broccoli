@@ -21,6 +21,8 @@ export class Fog {
   revealAll: boolean;
   /** Cell offsets [dx, dz, dx, dz, ...] of a vision circle, by twice its radius. */
   circles: Map<number, number[]>;
+  /** Goblin flares lighting up the land for the human's side. */
+  flares: { x: number; z: number; r: number; until: number }[] = [];
 
   constructor(game: Game) {
     this.game = game;
@@ -64,6 +66,17 @@ export class Fog {
       vis.fill(0);
       if (this.revealAll) vis.fill(1);
       else {
+        if (this.flares.length) this.flares = this.flares.filter((f) => f.until > g.time);
+        for (const f of this.flares) {
+          const c = this.circle(f.r);
+          const cx = Math.floor(f.x);
+          const cz = Math.floor(f.z);
+          for (let i = 0; i < c.length; i += 2) {
+            const x = cx + c[i]!;
+            const z = cz + c[i + 1]!;
+            if (x >= 0 && z >= 0 && x < S && z < S) vis[z * S + x] = 1;
+          }
+        }
         for (const u of g.units) {
           if (u.dead || u.removed || !this.hasVision(u.owner)) continue;
           const cx = Math.floor(u.x);

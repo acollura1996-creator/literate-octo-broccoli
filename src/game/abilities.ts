@@ -22,6 +22,11 @@ export interface AbilitySpec {
   autocast?: boolean;
   /** How computer generals use it. */
   ai?: string;
+  /**
+   * How creeps and bosses use it: 'aoeSelf' with enemies close by (the default), 'heal' on a
+   * wounded friend, 'target' on the enemy being fought, 'summon' once a fight starts.
+   */
+  creepAi?: 'aoeSelf' | 'heal' | 'target' | 'summon';
   range?: number;
   /** Area of effect radius (point targets). */
   aoe?: number;
@@ -395,7 +400,110 @@ const DEFS = {
       game.sound('roar', c.x, c.z);
     },
   }),
+
+  // ------------------------------------------------- Creep and boss spells
+  creep_heal: ab({
+    name: 'Healing Wave', icon: '💚', color: '#6ad88a', hotkey: 'Q', levels: 1, target: 'unit', filter: 'ally', range: 6,
+    mana: [60], cooldown: [6], creepAi: 'heal',
+    tooltip: () => 'Heals a wounded ally for 80 hit points.',
+    cast(game, c, lvl, target: Unit) {
+      game.heal(target, 80, c);
+      game.fx.burst(target.x, 0.8, target.z, 0x8affa0, 10);
+      game.sound('heal', target.x, target.z, 0.5);
+    },
+  }),
+  frost_nova: ab({
+    name: 'Frost Nova', icon: '❄️', color: '#8ae8ff', hotkey: 'Q', levels: 1, target: 'none', mana: [0], cooldown: [10],
+    radius: 3.5, creepAi: 'aoeSelf',
+    tooltip: () => 'Blasts nearby enemies with frost: 90 damage, and they move and attack 40% slower for 5 seconds.',
+    cast(game, c) {
+      for (const u of game.enemiesInRadius(c.owner, c.x, c.z, this.radius)) {
+        game.dealDamage(c, u, 90, 'spell', { spell: true });
+        if (!u.isBuilding && !u.spellImmune) u.addBuff('frost_slow', 5, { speedMul: 0.6, attackSpeed: 0.6, visual: 'slow', replace: true });
+      }
+      game.fx.ring(c.x, c.z, 0x9ae8ff, this.radius, 0.6);
+      game.fx.burst(c.x, 0.5, c.z, 0xc8f4ff, 18);
+      game.sound('magicHit', c.x, c.z);
+    },
+  }),
+  dragon_breath: ab({
+    name: 'Dragonfire', icon: '🔥', color: '#ff6a1a', hotkey: 'Q', levels: 1, target: 'unit', filter: 'enemy', range: 7,
+    mana: [0], cooldown: [9], aoe: 3.2, creepAi: 'target',
+    tooltip: () => 'Breathes fire on an area, burning everything there for 220 damage over a few seconds.',
+    cast(game, c, lvl, target: Unit) {
+      const x = target.x;
+      const z = target.z;
+      const r = this.aoe;
+      game.fx.explosion(x, z, 1.6);
+      game.fx.burst(x, 0.6, z, 0xff7a20, 28, 3, 0.12, 0.8);
+      game.sound('fire', x, z);
+      for (let i = 0; i < 4; i++) {
+        game.later(i * 0.5, () => {
+          if (c.dead) return;
+          for (const u of game.enemiesInRadius(c.owner, x, z, r)) game.dealDamage(c, u, 55, 'spell', { spell: true, quiet: true });
+          game.fx.burst(x, 0.3, z, 0xff4a10, 8, 2, 0.1, 0.5);
+        });
+      }
+      game.shake(0.3);
+    },
+  }),
+  acid_spray: ab({
+    name: 'Acid Spray', icon: '🧪', color: '#9aff3a', hotkey: 'Q', levels: 1, target: 'none', mana: [0], cooldown: [8],
+    radius: 4, creepAi: 'aoeSelf',
+    tooltip: () => 'Sprays acid on nearby enemies: 120 damage and -4 armor for 10 seconds.',
+    cast(game, c) {
+      for (const u of game.enemiesInRadius(c.owner, c.x, c.z, this.radius)) {
+        game.dealDamage(c, u, 120, 'spell', { spell: true });
+        if (!u.isBuilding && !u.spellImmune) u.addBuff('acid', 10, { armor: -4, visual: 'slow', replace: true });
+      }
+      game.fx.ring(c.x, c.z, 0x9aff3a, this.radius, 0.6);
+      game.fx.burst(c.x, 0.8, c.z, 0x9aff3a, 22);
+      game.sound('magicHit', c.x, c.z);
+    },
+  }),
+  bandit_call: ab({
+    name: 'Call to Arms', icon: '📯', color: '#c8a04a', hotkey: 'W', levels: 1, target: 'none', mana: [0], cooldown: [25],
+    creepAi: 'summon',
+    tooltip: () => 'Calls two brigands to fight at his side for 40 seconds.',
+    cast(game, c) {
+      summonGuards(game, c, 'brigand', 2, 40);
+      game.sound('horn', c.x, c.z, 0.6);
+    },
+  }),
+  brood_spawn: ab({
+    name: 'Spawn Brood', icon: '🥚', color: '#8a5aaa', hotkey: 'Q', levels: 1, target: 'none', mana: [0], cooldown: [18],
+    creepAi: 'summon',
+    tooltip: () => 'Hatches three giant spiders that fight for 30 seconds.',
+    cast(game, c) {
+      summonGuards(game, c, 'spider', 3, 30);
+      game.sound('roar', c.x, c.z, 0.5);
+    },
+  }),
+  web: ab({
+    name: 'Web', icon: '🕸️', color: '#ddd', hotkey: 'W', levels: 1, target: 'unit', filter: 'enemy', range: 7, mana: [0],
+    cooldown: [12], creepAi: 'target',
+    tooltip: () => 'Pins an enemy to the ground for 3 seconds.',
+    cast(game, c, lvl, target: Unit) {
+      if (target.isBuilding || target.spellImmune) return;
+      target.addBuff('web', 3, { root: true, visual: 'roots', replace: true });
+      game.fx.burst(target.x, 0.5, target.z, 0xf0f0f0, 12);
+      game.sound('magicHit', target.x, target.z);
+    },
+  }),
 };
+
+/** Summoned guards around a creep or boss (they return to its lair when they lose their prey). */
+function summonGuards(game: Game, c: Unit, type: string, n: number, lifetime: number): void {
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + Math.random();
+    const p = game.grid.nearestWalkable(c.x + Math.cos(a) * 2.2, c.z + Math.sin(a) * 2.2, 5);
+    if (!p) continue;
+    const u = game.spawnUnit(type, c.owner, p.x, p.z, { lifetime, summoned: true, facing: c.facing });
+    u.guardPos = { x: c.guardPos?.x ?? c.x, z: c.guardPos?.z ?? c.z, leash: 16 };
+    if (c.order.type === 'attack' && c.order.target) u.order = { type: 'attack', target: c.order.target, auto: true, anchor: u.guardPos, leash: 16 };
+    game.fx.burst(p.x, 0.4, p.z, 0xc8b080, 8);
+  }
+}
 
 /** Every ability by id. */
 export const ABILITIES: Record<string, AbilityDef> = DEFS as unknown as Record<string, AbilityDef>;

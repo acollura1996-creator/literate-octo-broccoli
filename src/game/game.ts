@@ -2,13 +2,15 @@
 import { Unit } from './unit.ts';
 import { UNITS, ATTACK_TABLE, UPGRADES, RESEARCH_IDS, researchCost, researchTime, researchCap, XP_BY_LEVEL, HERO_XP, MAX_HERO_LEVEL, AGE_NAMES, AGES } from '../data/units.ts';
 import { HERO_IDS, AI_GENERAL_NAMES } from '../data/heroes.ts';
-import { ITEMS } from '../data/items.ts';
+import { ITEMS, itemPrice } from '../data/items.ts';
 import { ABILITIES } from './abilities.ts';
 import { updateUnit, stopMoving, finishOrder } from './behavior.ts';
 import { PathGrid, BLOCK_BUILDING, BLOCK_GATE } from '../world/pathgrid.ts';
 import { Roads } from './roads.ts';
 import { Empires } from './empire.ts';
 import { GameEvents } from './events.ts';
+import { Neutrals } from './neutrals.ts';
+import { QuestManager } from './quests.ts';
 import { Terrain } from '../world/terrain.ts';
 import { buildLayout, MAP_SIZE, CENTER, CITADEL, PLAYER_SLOTS, CITY_RADIUS } from '../world/layout.ts';
 import { Fog } from './fog.ts';
@@ -68,6 +70,9 @@ type PlayerInit = Pick<Player, 'index' | 'name' | 'colorName' | 'color' | 'mode'
 const NO_FX: EffectsApi = new Proxy({} as EffectsApi, { get: () => () => {} });
 
 const DIFFICULTY: Record<string, number> = { easy: 0, normal: 1, hard: 2 };
+
+/** Price of a Hero recruited at a Tavern. */
+export const TAVERN_COST = { gold: 425, lumber: 100 };
 
 const GENERAL_COLORS: [string, number][] = [
   ['Red', TEAM_COLORS.red],
@@ -131,6 +136,8 @@ export class Game {
   citadelWalls!: CitadelWall[];
   legionMgr!: LegionManager;
   creepMgr!: CreepManager;
+  neutrals!: Neutrals;
+  quests!: QuestManager;
 
   /**
    * opts: { mode: 'hero'|'empire', heroId, difficulty: 'easy'|'normal'|'hard',
@@ -187,7 +194,7 @@ export class Game {
     t.classify();
     this.blockCitadelWalls();
 
-    // Keep these areas free of trees.
+    // Keep these areas free of trees (rasterized once: the map has many of them).
     const clear: { x: number; z: number; r: number }[] = [];
     for (const b of this.layout.bases) {
       clear.push({ x: b.hall[0], z: b.hall[1], r: CITY_RADIUS });
@@ -197,8 +204,26 @@ export class Game {
       clear.push({ x: (b.hall[0] + b.mine[0]) / 2, z: (b.hall[1] + b.mine[1]) / 2, r: 6 });
     }
     for (const n of this.layout.neutrals) clear.push({ x: n.at[0], z: n.at[1], r: 5 });
-    for (const c of this.layout.camps) clear.push({ x: c.at[0], z: c.at[1], r: 5 });
-    t.plantTrees((x, z) => clear.some((c) => (x - c.x) ** 2 + (z - c.z) ** 2 < c.r * c.r));
+    for (const c of this.layout.camps) clear.push({ x: c.at[0], z: c.at[1], r: c.boss ? 7 : 5 });
+    const clearMask = new Uint8Array(MAP_SIZE * MAP_SIZE);
+    for (const c of clear) {
+      for (let cz = Math.max(0, Math.floor(c.z - c.r)); cz <= Math.min(MAP_SIZE - 1, c.z + c.r); cz++) {
+        for (let cx = Math.max(0, Math.floor(c.x - c.r)); cx <= Math.min(MAP_SIZE - 1, c.x + c.r); cx++) {
+          if ((cx + 0.5 - c.x) ** 2 + (cz + 0.5 - c.z) ** 2 < c.r * c.r) clearMask[cz * MAP_SIZE + cx] = 1;
+        }
+      }
+    }
+    t.plantTrees((x, z) => clearMask[Math.floor(z) * MAP_SIZE + Math.floor(x)] === 1);
+    // Every camp, building and secret spot can be walked to (forests sometimes close one in).
+    const L = this.layout;
+    t.connect(L.bases[0]!.hall, [
+      ...L.bases.flatMap((b) => [b.hall, b.mine, b.shop]),
+      ...L.camps.map((c) => c.at),
+      ...L.neutrals.map((n) => n.at),
+      ...L.spots.map((s) => s.at),
+    ]);
+    // The map's dirt roads speed movement like a general's roads.
+    this.grid.road.set(t.highway);
     t.paintTexture(); // the painted ground map, used by the renderers and the minimap
     t.scatterDoodads();
     this.buildCitadelWalls();
@@ -207,13 +232,14 @@ export class Game {
     for (const n of this.layout.neutrals) {
       const u = this.spawnUnit(n.type, this.passive, n.at[0], n.at[1], {
         facing: Math.atan2(CENTER - n.at[0], CENTER - n.at[1]),
-        gold: n.startMine ? 16000 : 22000,
+        gold: n.gold ?? 22000,
       });
-      if (n.type === 'mercenary_camp') {
+      if (u.def.mercenaries) {
         u.stock = {};
-        for (const m of u.def.mercenaries!) u.stock[m] = 2;
+        for (const m of u.def.mercenaries) u.stock[m] = 2;
         u.stockTimer = 0;
       }
+      if (n.link) u.link = n.link;
     }
 
     // Kalenden's citadel.
@@ -223,6 +249,11 @@ export class Game {
     // Creep camps.
     this.creepMgr = new CreepManager(this);
     this.creepMgr.setup();
+
+    // Waygates, shrines, runes, markets, lair treasure and captives; then the side quests.
+    this.neutrals = new Neutrals(this);
+    this.neutrals.setup();
+    this.quests = new QuestManager(this);
 
     // Generals.
     for (const p of this.generals) this.setupGeneral(p);
@@ -458,7 +489,7 @@ export class Game {
         for (let zz = u.cell.z; zz < u.cell.z + fp; zz++) {
           for (let xx = u.cell.x; xx < u.cell.x + fp; xx++) if (this.grid.inBounds(xx, zz)) this.grid.gateTeam[zz * MAP_SIZE + xx] = owner.team ?? -1;
         }
-      } else this.grid.setRect(u.cell.x, u.cell.z, fp, fp, BLOCK_BUILDING, true);
+      } else if (!def.walkable) this.grid.setRect(u.cell.x, u.cell.z, fp, fp, BLOCK_BUILDING, true);
       if (!def.gate) this.roads?.clear(u.cell.x, u.cell.z, fp, fp); // gates keep the road running through them
       owner.buildings.push(u);
       if (opts.construction) {
@@ -475,6 +506,18 @@ export class Game {
     this.hooks.onUnitAdded?.(u);
     this.updateTier(owner);
     return u;
+  }
+
+  /** Take a unit off the map at once, without a death (an opened cage, a merchant who leaves). */
+  removeQuietly(u: Unit): void {
+    if (u.dead) return;
+    u.dead = true;
+    u.hp = 0;
+    u.deathTime = this.time - 10;
+    u.selected = false;
+    if (u.isBuilding && !u.def.walkable) this.grid.setRect(u.cell.x, u.cell.z, u.def.footprint!, u.def.footprint!, BLOCK_BUILDING, false);
+    this.hooks.fx?.burst(u.x, 0.8, u.z, 0xd8c8a0, 10);
+    this.removeUnit(u);
   }
 
   removeUnit(u: Unit): void {
@@ -501,6 +544,11 @@ export class Game {
     u.castTimer = 0;
     u.castOrder = null;
     if (order.type === 'patrol') order.origin = { x: u.x, z: u.z };
+    // Sent onto a waygate: walk right into it (it takes the unit across).
+    if (order.type === 'move' && !order.gate && u.owner.general && this.neutrals) {
+      const gate = this.neutrals.gateAt(order.point);
+      if (gate) order = { ...order, point: { x: gate.x, z: gate.z }, range: 0.3, gate };
+    }
     u.order = order;
     stopMoving(u);
   }
@@ -739,12 +787,12 @@ export class Game {
       this.corpses.push({ type: u.type, owner, x: u.x, z: u.z, facing: u.facing, time: this.time });
       if (this.corpses.length > 200) this.corpses.shift();
     }
-    if (u.camp) this.creepMgr.onCreepDied(u);
+    if (u.camp) this.creepMgr.onCreepDied(u, killer);
     u.onDeath?.(killer);
     if (u.isHero && owner.general && !u.isIllusion) {
       u.reviveAt = this.time + 12 + 4 * u.level!;
       if (owner.isHuman) {
-        const altar = owner.buildings.find((b) => b.def.revivesHeroes && !b.dead);
+        const altar = this.reviveSite(owner);
         this.message(
           altar ? `Your Hero has fallen! It will return at the Altar in ${Math.round(u.reviveAt - this.time)} seconds.` : 'Your Hero has fallen!',
           '#ff6b6b',
@@ -983,6 +1031,10 @@ export class Game {
     if (def.needsRoad && p && !this.roads.touchesRoad(cx, cz, fp, p)) {
       this.placeReason = 'Must be built next to one of your roads';
       return false;
+    }
+    // Nothing on a waygate.
+    for (const w of this.neutrals?.gates ?? []) {
+      if (Math.abs(w.x - (cx + fp / 2)) < (w.def.footprint! + fp) / 2 + 0.5 && Math.abs(w.z - (cz + fp / 2)) < (w.def.footprint! + fp) / 2 + 0.5) return false;
     }
     // Keep town halls a little away from gold mines, everything off the mine itself.
     for (const m of this.units) {
@@ -1282,6 +1334,9 @@ export class Game {
 
   buyItem(p: Player, shop: Unit, itemId: string): boolean {
     const item = ITEMS[itemId]!;
+    const ware = shop.wares?.find((w) => w.id === itemId && w.stock > 0);
+    if (shop.wares && !ware) return false;
+    const price = itemPrice(itemId);
     const h = this.shopCustomer(p, shop);
     if (!h) {
       if (p.isHuman) {
@@ -1289,6 +1344,14 @@ export class Game {
         this.sound('error');
       }
       return false;
+    }
+    // Tomes and runes take effect at once.
+    if (item.autoUse) {
+      if (!this.spend(p, { gold: price })) return false;
+      if (ware) ware.stock--;
+      this.applyItemEffect(h, item);
+      if (p.isHuman) this.sound('buy', shop.x, shop.z);
+      return true;
     }
     // Stack consumables of the same kind.
     const inv = h.inventory!;
@@ -1301,7 +1364,8 @@ export class Game {
       }
       return false;
     }
-    if (!this.spend(p, { gold: item.cost })) return false;
+    if (!this.spend(p, { gold: price })) return false;
+    if (ware) ware.stock--;
     const stack = inv[slot];
     if (stack) stack.charges += item.charges!;
     else inv[slot] = { id: itemId, charges: item.charges ?? 0 };
@@ -1319,7 +1383,7 @@ export class Game {
       return;
     }
     const def = ITEMS[it.id]!;
-    const value = Math.round(((def.cost ?? 100) * 0.5 * (def.use ? Math.max(1, it.charges) / (def.charges || 1) : 1)));
+    const value = Math.round((itemPrice(it.id) * 0.5 * (def.use ? Math.max(1, it.charges) / (def.charges || 1) : 1)));
     h.owner.gold += value;
     h.inventory![slot] = null;
     h.hp = Math.min(h.hp, h.maxHp);
@@ -1358,6 +1422,50 @@ export class Game {
     if (p.hero && !p.hero.dead) this.issueOrder(u, { type: 'follow', target: p.hero });
     if (p.isHuman) this.sound('unitReady', camp.x, camp.z);
     return u;
+  }
+
+  /** A general's unit near a Tavern (or Mercenary Camp), if any. */
+  patronAt(p: Player, b: Unit): Unit | null {
+    return p.units.find((u) => !u.dead && !u.isIllusion && u.distTo(b) <= b.radius + 7) ?? null;
+  }
+
+  /** Hero types no general has in play (the Tavern's recruits). */
+  tavernHeroes(): string[] {
+    const taken = new Set(this.generals.map((p) => p.hero?.type).filter(Boolean));
+    return HERO_IDS.filter((id) => !taken.has(id));
+  }
+
+  /** Level a Hero recruited now starts at (Tavern Heroes have trained while the war went on). */
+  recruitLevel(): number {
+    return Math.min(4, 1 + Math.floor(this.time / 420));
+  }
+
+  /** Recruit a Hero at a Tavern: a general without a Hero gets one (it revives at their town center or altar). */
+  recruitHero(p: Player, tavern: Unit, type: string): Unit | null {
+    const fail = (text: string): null => {
+      if (p.isHuman) {
+        this.message(text, '#ff8080');
+        this.sound('error');
+      }
+      return null;
+    };
+    if (p.hero) return fail('You already lead a Hero.');
+    const near = this.patronAt(p, tavern);
+    if (!near) return fail('You need a unit near the Tavern to recruit a Hero.');
+    if (!this.tavernHeroes().includes(type)) return fail('That Hero is not available.');
+    if (!this.spend(p, TAVERN_COST)) return null;
+    const sp = this.spawnPointNear(tavern, near);
+    const h = this.spawnUnit(type, p, sp.x, sp.z, { facing: Math.atan2(near.x - sp.x, near.z - sp.z) });
+    p.hero = h;
+    const xp = HERO_XP[this.recruitLevel()] ?? 0;
+    if (xp) this.addXp(h, xp);
+    this.hooks.fx?.holyLight(h);
+    if (p.isHuman) {
+      this.message(`${h.def.name} joins your cause at level ${h.level}! Your town center revives your Hero if it falls.`, '#9fe89f');
+      this.sound('levelUp', h.x, h.z);
+    } else this.notify(p, `${p.name} has recruited a ${h.def.name} at a Tavern.`);
+    p.ai?.onHeroRevived?.(h);
+    return h;
   }
 
   dropItem(x: number, z: number, itemId: string): GroundItem {
@@ -1440,10 +1548,44 @@ export class Game {
         if (h.owner.isHuman) this.message(`${def.name}: +${def.amount} ${def.use.toUpperCase()}.`, '#ffd700');
         break;
       }
+      case 'allStats': {
+        const hpRatio = h.hp / h.maxHp;
+        for (const a of ['str', 'agi', 'int'] as const) h.tomes![a] += def.amount!;
+        h.hp = h.maxHp * hpRatio;
+        this.hooks.fx?.burst(h.x, 0.8, h.z, 0xffd700, 16);
+        if (h.owner.isHuman) this.message(`${def.name}: +${def.amount} to all attributes.`, '#ffd700');
+        break;
+      }
       case 'areaHeal':
         for (const u of this.unitsNear(h.x, h.z, 6)) if (u.owner === h.owner && !u.isBuilding) this.heal(u, def.amount!, h);
         this.hooks.fx?.ring(h.x, h.z, 0x7cfc00, 6, 0.7);
         this.sound('heal', h.x, h.z);
+        break;
+      case 'areaMana':
+        for (const u of this.unitsNear(h.x, h.z, 6)) if (u.owner === h.owner && u.maxMana) u.mana = Math.min(u.maxMana, u.mana + def.amount!);
+        this.hooks.fx?.ring(h.x, h.z, 0x6fa8ff, 6, 0.7);
+        this.sound('magicCast', h.x, h.z, 0.6);
+        break;
+      case 'haste':
+        for (const u of this.unitsNear(h.x, h.z, def.radius ?? 6)) {
+          if (u.owner !== h.owner || u.isBuilding) continue;
+          u.addBuff('haste', def.duration ?? 15, { speedMul: def.amount ?? 1.5, replace: true });
+          this.hooks.fx?.burst(u.x, 0.6, u.z, 0xf0f0a0, 5);
+        }
+        this.sound('magicCast', h.x, h.z, 0.6);
+        break;
+      case 'bomb':
+        for (const u of this.enemiesInRadius(h.owner, h.x, h.z, def.radius ?? 3.5)) {
+          this.dealDamage(h, u, def.amount!, 'siege', { spell: true, siege: true });
+        }
+        this.hooks.fx?.explosion(h.x, h.z, 1.4);
+        this.shake(0.4);
+        this.sound('explosion', h.x, h.z);
+        break;
+      case 'reveal':
+        if (this.isAlliedToHuman(h.owner)) this.fog.flares.push({ x: h.x, z: h.z, r: def.radius ?? 24, until: this.time + (def.duration ?? 20) });
+        this.hooks.fx?.beam(h.x, h.z, 0xff6a3a, 12, 0.5, 1.5);
+        this.sound('magicCast', h.x, h.z, 0.5);
         break;
       case 'gold':
         h.owner.gold += def.amount!;
@@ -1488,9 +1630,14 @@ export class Game {
     });
   }
 
+  /** Where a general's fallen Hero returns: the Altar, or an empire's town center. */
+  reviveSite(p: Player): Unit | null {
+    return p.buildings.find((b) => !b.dead && !b.underConstruction && (b.def.revivesHeroes || (p.mode === 'empire' && b.def.tier))) ?? null;
+  }
+
   reviveHero(p: Player): void {
     const h = p.hero;
-    const altar = p.buildings.find((b) => b.def.revivesHeroes && !b.dead && !b.underConstruction);
+    const altar = this.reviveSite(p);
     if (!h || !h.dead || !altar) return;
     const sp = this.spawnPointNear(altar, null);
     h.dead = false;
@@ -1683,6 +1830,8 @@ export class Game {
     this.legionMgr.update(dt);
     this.empires.update(dt);
     this.events.update(dt);
+    this.neutrals.update(dt);
+    this.quests.update(dt);
     for (const p of this.generals) if (p.ai && !p.defeated) p.ai.update(dt);
     this.fog.update();
 
@@ -1755,11 +1904,14 @@ export class Game {
 
   fountains(): void {
     for (const f of this.passive.buildings) {
-      if (f.type !== 'fountain') continue;
+      const kind = f.def.fountain;
+      if (!kind) continue;
       for (const u of this.unitsNear(f.x, f.z, 5)) {
         if (u.isBuilding || u.dead || !u.owner.general) continue;
-        u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.02 * 0.5 + 1);
-        if (u.maxMana) u.mana = Math.min(u.maxMana, u.mana + 1.5);
+        if (kind === 'health') {
+          u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.02 * 0.5 + 1);
+          if (u.maxMana) u.mana = Math.min(u.maxMana, u.mana + 1.5);
+        } else if (u.maxMana) u.mana = Math.min(u.maxMana, u.mana + u.maxMana * 0.02 * 0.5 + 2.5);
       }
     }
     // Altars of Heroes are sanctuaries for their owner's units.

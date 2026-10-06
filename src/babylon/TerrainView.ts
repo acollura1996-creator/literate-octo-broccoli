@@ -29,6 +29,8 @@ import type { Terrain, Tree } from '../world/terrain.ts';
 
 /** Trees and grass are batched per CHUNK × CHUNK cells (one draw call each), culled per batch. */
 const CHUNK = 32;
+/** The ground mesh is cut into GROUND_CHUNK × GROUND_CHUNK-cell pieces, culled separately. */
+const GROUND_CHUNK = 64;
 
 /** Canvas → texture (Babylon samples canvases with row 0 at v = 1, like three.js). */
 function canvasTexture(name: string, canvas: HTMLCanvasElement, scene: Scene, repeat: boolean): DynamicTexture {
@@ -257,62 +259,74 @@ export class TerrainView {
     return d;
   }
 
+  /**
+   * The heightfield, cut into GROUND_CHUNK × GROUND_CHUNK-cell meshes that share one material, so
+   * only the ground on screen is drawn (one draw call per visible chunk).
+   */
   private buildGround(): void {
     const t = this.terrain;
     const S = t.size;
     const n = S + 1;
     const h = t.heights;
     const at = (x: number, z: number): number => h[Math.min(S, Math.max(0, z)) * n + Math.min(S, Math.max(0, x))]!;
-    const positions = new Float32Array(n * n * 3);
-    const normals = new Float32Array(n * n * 3);
-    const uvs = new Float32Array(n * n * 2);
-    for (let z = 0; z <= S; z++) {
-      for (let x = 0; x <= S; x++) {
-        const i = z * n + x;
-        positions[i * 3] = x;
-        positions[i * 3 + 1] = at(x, z);
-        positions[i * 3 + 2] = z;
-        const nx = at(x - 1, z) - at(x + 1, z);
-        const nz = at(x, z - 1) - at(x, z + 1);
-        const len = Math.hypot(nx, 2, nz);
-        normals[i * 3] = nx / len;
-        normals[i * 3 + 1] = 2 / len;
-        normals[i * 3 + 2] = nz / len;
-        // Canvas row 0 is world z = 0, as in the three.js ground.
-        uvs[i * 2] = x / S;
-        uvs[i * 2 + 1] = 1 - z / S;
-      }
-    }
-    const indices = new Uint32Array(S * S * 6);
-    let k = 0;
-    for (let z = 0; z < S; z++) {
-      for (let x = 0; x < S; x++) {
-        const a = z * n + x;
-        const b = a + 1;
-        const c = a + n;
-        const d = c + 1;
-        // Babylon's front-face winding, which it keeps in right-handed scenes too (the opposite
-        // of three.js; the same order as MeshBuilder.CreateGround).
-        indices.set([a, b, c, b, d, c], k);
-        k += 6;
-      }
-    }
-    const data = new VertexData();
-    data.positions = positions;
-    data.normals = normals;
-    data.uvs = uvs;
-    data.indices = indices;
-    const mesh = this.keep(new Mesh('ground', this.scene));
-    data.applyToMesh(mesh, false);
-    mesh.isPickable = false;
-    mesh.freezeWorldMatrix();
-    this.receivers.push(mesh);
-
     const material = this.keep(mat(this.scene, 'ground', Color3.White()));
     // The flat colour map is still painted: the minimap draws it.
     if (!t.textureCanvas) t.paintTexture();
     new GroundSplatPlugin(material, t);
-    mesh.material = material;
+    for (let z0 = 0; z0 < S; z0 += GROUND_CHUNK) {
+      for (let x0 = 0; x0 < S; x0 += GROUND_CHUNK) {
+        const w = Math.min(GROUND_CHUNK, S - x0);
+        const d = Math.min(GROUND_CHUNK, S - z0);
+        const vw = w + 1;
+        const positions = new Float32Array(vw * (d + 1) * 3);
+        const normals = new Float32Array(vw * (d + 1) * 3);
+        const uvs = new Float32Array(vw * (d + 1) * 2);
+        for (let z = 0; z <= d; z++) {
+          for (let x = 0; x <= w; x++) {
+            const i = z * vw + x;
+            const gx = x0 + x;
+            const gz = z0 + z;
+            positions[i * 3] = gx;
+            positions[i * 3 + 1] = at(gx, gz);
+            positions[i * 3 + 2] = gz;
+            const nx = at(gx - 1, gz) - at(gx + 1, gz);
+            const nz = at(gx, gz - 1) - at(gx, gz + 1);
+            const len = Math.hypot(nx, 2, nz);
+            normals[i * 3] = nx / len;
+            normals[i * 3 + 1] = 2 / len;
+            normals[i * 3 + 2] = nz / len;
+            // Canvas row 0 is world z = 0, as in the three.js ground.
+            uvs[i * 2] = gx / S;
+            uvs[i * 2 + 1] = 1 - gz / S;
+          }
+        }
+        const indices = new Uint32Array(w * d * 6);
+        let k = 0;
+        for (let z = 0; z < d; z++) {
+          for (let x = 0; x < w; x++) {
+            const a = z * vw + x;
+            const b = a + 1;
+            const c = a + vw;
+            const e = c + 1;
+            // Babylon's front-face winding, which it keeps in right-handed scenes too (the opposite
+            // of three.js; the same order as MeshBuilder.CreateGround).
+            indices.set([a, b, c, b, e, c], k);
+            k += 6;
+          }
+        }
+        const data = new VertexData();
+        data.positions = positions;
+        data.normals = normals;
+        data.uvs = uvs;
+        data.indices = indices;
+        const mesh = this.keep(new Mesh(`ground-${x0}-${z0}`, this.scene));
+        data.applyToMesh(mesh, false);
+        mesh.isPickable = false;
+        mesh.material = material;
+        mesh.freezeWorldMatrix();
+        this.receivers.push(mesh);
+      }
+    }
   }
 
   private buildWater(): void {
