@@ -21,10 +21,16 @@ The game is written in TypeScript and drawn with [Babylon.js](https://www.babylo
 Vite and packaged for Windows with Electron. Its look follows Warcraft III: hand-painted ground
 tiles (Lordaeron grass, dirt, flagstones, blight, cliff rock) with crisp, irregular borders, lush
 rounded trees, grass tufts and flowers, bright water with shore foam, and chunky models with
-painted brick, plank, thatch and tile detail under warm, saturated light. All of it is generated in
-code: the models are procedural meshes (baked to one glTF file at build time), the textures are
-painted with Canvas 2D at load, and sounds and music are synthesized with Web Audio, so there are no
-hand-made asset files. `tools/textures.html` previews the paintings.
+painted brick, plank, thatch and tile detail under warm, saturated light.
+
+Soldiers, spellcasters, heroes and Kalenden's undead are rigged, animated characters from Kay
+Lousberg's free [KayKit](https://kaylousberg.com) *Adventurers* and *Skeletons* packs (CC0): they
+swing, shoot, cast, cheer and fall with hand-made animations, timed to the game's attacks and
+paced to their speed, and wear team colours. Firearms from muskets to plasma rifles are made in
+code in the same style. Everything else is generated in code: buildings, cavalry, siege engines,
+vehicles and beasts are procedural meshes (baked to one glTF file at build time), the textures are
+painted with Canvas 2D at load, and sounds and music are synthesized with Web Audio.
+`tools/textures.html` previews the paintings and `tools/characters.html` the characters.
 
 ## Running
 
@@ -291,12 +297,17 @@ src/
   ai/                  creep camps, Kalenden's Legion, rival general AI (hero and empire)
   world/               map layout, terrain generation, A* path grid, noise
   babylon/             Babylon.js renderer: view, camera, painted terrain and water, foliage,
-                       models, effects, HUD icons and portrait, spatial audio
+                       models, rigged characters (Characters.ts: GPU skinning from a vertex
+                       animation texture; CharacterRecipes.ts: which unit wears what and plays
+                       which clips), effects, HUD icons and portrait, spatial audio
   ui/                  HUD console, command card, minimap, 2D overlay (health bars, floating text)
+  assets/kaykit/        the KayKit characters (kaykit.bin, palette atlases, licences), made by tools/kaykit/import.mjs
   generated/           models.glb, baked by tools/bake-models.mjs (not committed)
 tools/
   models/              the procedural model builders (three.js geometry, build time only)
   bake-models.mjs      runs the builders in Node and writes src/generated/models.glb
+  kaykit/import.mjs    fetches the KayKit packs from GitHub and writes src/assets/kaykit/kaykit.bin
+  characters.html      dev gallery of the rigged characters in any animation (/tools/characters.html)
   gallery-babylon.html dev gallery of the baked models in the game's renderer (/tools/gallery-babylon.html)
   textures.html        preview of the procedurally painted ground and foliage textures (/tools/textures.html)
   gallery.html         the builders' own three.js gallery, for editing models (/tools/gallery.html)
