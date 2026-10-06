@@ -1,5 +1,7 @@
-// The minimap: terrain, fog of war, unit dots, camera frustum and pings.
+// The minimap: terrain, fog of war, unit dots, icons for the neutral buildings, quest markers,
+// camera frustum and pings.
 import { MAP_SIZE } from '../world/layout.ts';
+import type { Unit } from '../game/unit.ts';
 import type { Game } from '../game/game.ts';
 import type { Input } from '../input.ts';
 import type { BabylonView } from '../babylon/BabylonView.ts';
@@ -83,6 +85,72 @@ export class Minimap {
     this.treeCount = this.game.terrain.trees.filter((t) => t.alive).length;
   }
 
+  /** A small icon for a neutral building: what it offers at a glance. */
+  drawIcon(u: Unit, x: number, z: number): void {
+    const ctx = this.ctx;
+    const d = u.def;
+    const dot = (fill: string, r = 3.2): void => {
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(x, z, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    };
+    const glyph = (t: string, color = '#000'): void => {
+      ctx.font = 'bold 7px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = color;
+      ctx.fillText(t, x, z + 0.5);
+      ctx.textBaseline = 'alphabetic';
+    };
+    if (d.walkable) {
+      // Waygate: a blue ring.
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, z, 3.2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#6ad8ff';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    } else if (d.fountain) {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(x - 3.5, z - 1.5, 7, 3);
+      ctx.fillRect(x - 1.5, z - 3.5, 3, 7);
+      ctx.fillStyle = d.fountain === 'health' ? '#5aff6a' : '#6a9aff';
+      ctx.fillRect(x - 2.5, z - 0.75, 5, 1.5);
+      ctx.fillRect(x - 0.75, z - 2.5, 1.5, 5);
+    } else if (d.shrine) {
+      ctx.fillStyle = (u.readyAt ?? 0) > this.game.time ? '#8a7a4a' : '#ffe680';
+      ctx.strokeStyle = '#000';
+      ctx.beginPath();
+      ctx.moveTo(x, z - 3.5);
+      ctx.lineTo(x + 2.5, z);
+      ctx.lineTo(x, z + 3.5);
+      ctx.lineTo(x - 2.5, z);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (d.tavern) {
+      dot('#ff9a3a');
+      glyph('T');
+    } else if (d.mercenaries) {
+      dot('#d8483a');
+      glyph('M', '#fff');
+    } else if (d.shop) {
+      dot(d.shop === 'vault' ? '#b48aff' : d.shop === 'lab' ? '#8aff6a' : d.shop === 'market' ? '#ffd08a' : '#ffe24a');
+      glyph('$');
+    } else {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(x - 2, z - 2, 4, 4);
+      ctx.fillStyle = '#c8c0b0';
+      ctx.fillRect(x - 1.5, z - 1.5, 3, 3);
+    }
+  }
+
   toWorld(e: MouseEvent): { x: number; z: number } {
     const r = this.canvas.getBoundingClientRect();
     const x = ((e.clientX - r.left) / r.width) * MAP_SIZE;
@@ -142,7 +210,9 @@ export class Minimap {
       else if (u.owner === g.passive) col = '#e0e0e0';
       else if (u.owner === g.legion) col = '#7a2a2a';
       else col = '#8a8a8a';
-      if (u.isBuilding) {
+      if (u.isBuilding && u.owner === g.passive && u.type !== 'goldmine') {
+        this.drawIcon(u, u.x * k, u.z * k);
+      } else if (u.isBuilding) {
         const s = Math.max(3, u.def.footprint! * k);
         ctx.fillStyle = '#000';
         ctx.fillRect(u.x * k - s / 2 - 1, u.z * k - s / 2 - 1, s + 2, s + 2);
@@ -163,6 +233,24 @@ export class Minimap {
     ctx.fillStyle = '#ffe680';
     for (const it of g.groundItems) if (!it.taken && g.fog.isVisible(it.x, it.z)) ctx.fillRect(it.x * k - 1.5, it.z * k - 1.5, 3, 3);
 
+    // Boss lairs the player has seen.
+    for (const c of g.creepMgr.camps) {
+      if (!c.boss || !g.fog.isExplored(c.at.x, c.at.z)) continue;
+      const x = c.at.x * k;
+      const z = c.at.z * k;
+      ctx.fillStyle = c.cleared ? 'rgba(90,60,60,0.9)' : '#c8281e';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, z - 4.5);
+      ctx.lineTo(x + 4.5, z);
+      ctx.lineTo(x, z + 4.5);
+      ctx.lineTo(x - 4.5, z);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
     // Fog of war overlay
     const fog = g.fog;
     if (!fog.revealAll) {
@@ -178,6 +266,31 @@ export class Minimap {
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(this.fogCanvas, 0, 0, S, S);
     }
+
+    // Quest markers (over the fog: the quest giver tells you where).
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const q of g.quests?.active ?? []) {
+      const exact = q.kind === 'treasure' && q.found && q.spot;
+      const at = exact ? q.spot! : q.at;
+      const x = at.x * k;
+      const z = at.z * k;
+      if (q.radius && !exact) {
+        ctx.setLineDash([3, 2]);
+        ctx.strokeStyle = 'rgba(255,215,0,0.9)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(x, z, q.radius * k, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.fillStyle = '#000';
+      ctx.fillText('!', x + 1, z + 1);
+      ctx.fillStyle = q.kind === 'bounty' ? '#ff7a5a' : '#ffd700';
+      ctx.fillText('!', x, z);
+    }
+    ctx.textBaseline = 'alphabetic';
 
     // Camera frustum
     const poly = this.view.viewPolygon();

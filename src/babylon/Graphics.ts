@@ -334,6 +334,19 @@ export class Graphics {
     };
   }
 
+  /**
+   * Exposure is only a uniform of the image-processing pass, but Babylon's setter re-flags every
+   * submesh of every material (materials × meshes: seconds per call on SwiftShader with the full map
+   * loaded), and it changes on every frame of dawn and dusk. When the post-process applies the
+   * grading, the value is written where its bind() reads it, without that notification.
+   */
+  private setExposure(value: number): void {
+    const cfg = this.pipeline!.imageProcessing.imageProcessingConfiguration;
+    if (cfg.exposure === value) return;
+    if (cfg.applyByPostProcess) (cfg as unknown as { _exposure: number })._exposure = value;
+    else cfg.exposure = value;
+  }
+
   /** Per frame: grading and haze follow the time of day; the haze range follows the zoom. */
   update(hour: number, cameraDistance: number): void {
     if (!this.pipeline) return;
@@ -348,7 +361,7 @@ export class Graphics {
     c.shadowsHue = g.shHue;
     c.shadowsDensity = g.shDen;
     c.shadowsSaturation = g.shSat;
-    this.pipeline.imageProcessing.exposure = g.exposure;
+    this.setExposure(g.exposure);
     const h = ((hour % 24) + 24) % 24;
     this.night = 0.85 * Math.max(1 - smooth(5, 6.6, h), smooth(17.6, 19, h));
     // Haze: none in the foreground, about a fifth at the top of the screen at any zoom.

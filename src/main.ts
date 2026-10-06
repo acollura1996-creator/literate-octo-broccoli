@@ -13,6 +13,9 @@ import { TEAM_COLORS } from './data/colors.ts';
 import { initAudio, playSfx, playBark, barkVoice, startMusic, stopMusic, setMuted, isMuted } from './audio.ts';
 import { GeneralAI } from './ai/general.ts';
 import { Roads } from './game/roads.ts';
+import { CENTER } from './world/layout.ts';
+import { ITEMS } from './data/items.ts';
+import { questIcon } from './game/quests.ts';
 import type { GameOptions, RivalSpec } from './game/game.ts';
 import type { SimHooks } from './game/hooks.ts';
 import type { Unit } from './game/unit.ts';
@@ -350,6 +353,18 @@ function showQuests(): void {
   ]
     .filter(Boolean)
     .join('<br>');
+  // Side quests: active first, then the finished ones (newest first).
+  const qs = [...g.quests.list].sort((a, b) => (a.state === 'active' ? 0 : 1) - (b.state === 'active' ? 0 : 1) || (b.ends ?? b.started) - (a.ends ?? a.started));
+  const reward = (r: (typeof qs)[number]['reward']): string =>
+    [r.gold ? `${r.gold} gold` : '', r.lumber ? `${r.lumber} lumber` : '', r.xp ? `${r.xp} experience` : '', r.item ? ITEMS[r.item]!.name : '', r.extra ?? ''].filter(Boolean).join(', ');
+  $('quest-side').innerHTML = qs.length
+    ? qs
+        .map((q) => {
+          const status = q.state === 'active' ? (q.progress ? ` — ${q.progress}` : '') : q.state === 'done' ? ` — completed by ${q.winner?.isHuman ? 'you' : q.winner?.name ?? '?'}` : ' — failed';
+          return `<p class="side-quest ${q.state}"><b>${questIcon(q.kind)} ${q.title}</b>${status}<br>${q.text}<br><span class="dim">Reward: ${reward(q.reward)}</span></p>`;
+        })
+        .join('')
+    : '<p class="dim">No side quests yet. Rumours of captives, bounties and buried treasure will reach you soon.</p>';
   openModal('modal-quests');
   setPaused(true);
 }
@@ -586,8 +601,8 @@ function benchmark(n: number): void {
   const foe = g.generals.find((p) => p !== g.human && g.isEnemy(g.human, p));
   if (!foe) return;
   const home = g.homeOf(g.human)!;
-  const dx = 128 - home.x;
-  const dz = 128 - home.z;
+  const dx = CENTER - home.x;
+  const dz = CENTER - home.z;
   const len = Math.hypot(dx, dz) || 1;
   const cx = home.x + (dx / len) * 26;
   const cz = home.z + (dz / len) * 26;

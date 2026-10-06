@@ -2,8 +2,8 @@
 // look with a blighted citadel), trees and decorative doodads. Engine-free: the meshes are built by
 // the renderers from this data.
 import { fbm, valueNoise, mulberry32, smoothstep, distToSegment } from './noise.ts';
-import { MAP_SIZE, CENTER, CITADEL, MOAT } from './layout.ts';
-import type { Layout } from './layout.ts';
+import { MAP_SIZE, CENTER, CITADEL, MOAT, CORNER_GROVE, ridgeDistance, ridgeLift } from './layout.ts';
+import type { Layout, Lake } from './layout.ts';
 import { BLOCK_TERRAIN, BLOCK_TREE } from './pathgrid.ts';
 import type { PathGrid } from './pathgrid.ts';
 
@@ -49,6 +49,8 @@ interface FlatSpot {
 
 export const WATER_LEVEL = -0.35;
 
+const N4: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
 // Ground types used for painting (exported for the renderer's ground textures).
 export const T_GRASS = 0;
 export const T_FOREST = 1;
@@ -89,6 +91,19 @@ function moatInfo(x: number, z: number) {
   return { r, inner, outer, inBand, bandDist, fordDist, isFord: fordDist < MOAT.fordHalfWidth };
 }
 
+/** Depth profile of a lake: 0 outside, 1 inside; the bed is shallow at the rim and deep inside. */
+function lakeInfo(l: Lake, x: number, z: number): { t: number; bed: number } | null {
+  const dx = x - l.at[0];
+  const dz = z - l.at[1];
+  const d = Math.hypot(dx, dz);
+  if (d > l.r + 5) return null;
+  const r = l.r + fbm(Math.cos(Math.atan2(dz, dx)) * 1.5 + l.at[0], Math.sin(Math.atan2(dz, dx)) * 1.5 + l.at[1], 23, 2) * 1.6;
+  const t = smoothstep(r + 3, r - 1.5, d);
+  // A walkable rim of shallows (about four cells) around a deep middle.
+  const bed = -0.55 - 1.35 * smoothstep(r - 2.5, r - 6.5, d);
+  return { t, bed };
+}
+
 export class Terrain {
   readonly size: number;
   readonly layout: Layout;
@@ -98,8 +113,10 @@ export class Terrain {
   heights: Float32Array;
   /** Ground type per cell (T_*). */
   types: Uint8Array;
-  /** Distance from each cell to the nearest map road. */
+  /** Distance from each cell to the nearest map road (exact up to ROAD_REACH, larger beyond). */
   roadDist = new Float32Array(MAP_SIZE * MAP_SIZE);
+  /** 1 on the map's dirt roads (units move faster there, as on a general's roads). */
+  highway = new Uint8Array(MAP_SIZE * MAP_SIZE);
   trees: Tree[];
   treeByCell = new Map<number, Tree>();
   flatSpots: FlatSpot[];
@@ -143,10 +160,54 @@ export class Terrain {
       const bed = -1.7 * (1 - fordT) + -0.5 * fordT;
       h = h * (1 - depthT) + bed * depthT;
     }
+    // Lakes.
+    for (const l of this.layout.lakes) {
+      const li = lakeInfo(l, x, z);
+      if (li) h = h * (1 - li.t) + li.bed * li.t;
+    }
+    // Rock walls around the boss lairs.
+    for (const rd of this.layout.ridges) {
+      if (Math.abs(x - rd.at[0]) > rd.r + 8 || Math.abs(z - rd.at[1]) > rd.r + 8) continue;
+      h += ridgeLift(rd, ridgeDistance(rd, x, z) + fbm(x * 0.3, z * 0.3, 41, 2) * 0.5);
+    }
     // Map border rises a little (hills behind the forests).
     const edge = Math.min(x, z, MAP_SIZE - x, MAP_SIZE - z);
     h += smoothstep(6, 0, edge) * 1.5;
     return h;
+  }
+
+  /** Is (x, z) inside a cliff wall (unwalkable rock)? */
+  inRidge(x: number, z: number): boolean {
+    for (const rd of this.layout.ridges) {
+      if (Math.abs(x - rd.at[0]) > rd.r + 6 || Math.abs(z - rd.at[1]) > rd.r + 6) continue;
+      if (ridgeDistance(rd, x, z) + fbm(x * 0.3, z * 0.3, 41, 2) * 0.5 < rd.w / 2 + 1.0) return true;
+    }
+    return false;
+  }
+
+  /** Distance from every cell to the nearest map road, filled segment by segment (cells farther than ROAD_REACH keep a large value). */
+  private computeRoadDistance(): void {
+    const S = MAP_SIZE;
+    const REACH = 6;
+    const rd = this.roadDist;
+    rd.fill(99);
+    for (const road of this.layout.roads) {
+      for (let k = 0; k < road.length - 1; k++) {
+        const a = road[k]!;
+        const b = road[k + 1]!;
+        const x0 = Math.max(0, Math.floor(Math.min(a[0], b[0]) - REACH));
+        const x1 = Math.min(S - 1, Math.ceil(Math.max(a[0], b[0]) + REACH));
+        const z0 = Math.max(0, Math.floor(Math.min(a[1], b[1]) - REACH));
+        const z1 = Math.min(S - 1, Math.ceil(Math.max(a[1], b[1]) + REACH));
+        for (let cz = z0; cz <= z1; cz++) {
+          for (let cx = x0; cx <= x1; cx++) {
+            const d = distToSegment(cx + 0.5, cz + 0.5, a[0], a[1], b[0], b[1]);
+            const i = cz * S + cx;
+            if (d < rd[i]!) rd[i] = d;
+          }
+        }
+      }
+    }
   }
 
   generateHeights(): void {
@@ -196,7 +257,7 @@ export class Terrain {
 
   /** Classify every cell and mark unwalkable water in the path grid. */
   classify(): void {
-    const { roads } = this.layout;
+    this.computeRoadDistance();
     for (let cz = 0; cz < MAP_SIZE; cz++) {
       for (let cx = 0; cx < MAP_SIZE; cx++) {
         const x = cx + 0.5;
@@ -207,27 +268,22 @@ export class Terrain {
         const r = Math.hypot(x - CENTER, z - CENTER);
         if (h < WATER_LEVEL - 0.05) t = T_SHORE;
         else if (h < WATER_LEVEL + 0.35) t = T_SHORE;
-        // Roads
-        let rd = Infinity;
-        for (const road of roads) {
-          for (let k = 0; k < road.length - 1; k++) {
-            const a = road[k]!;
-            const b = road[k + 1]!;
-            rd = Math.min(rd, distToSegment(x, z, a[0], a[1], b[0], b[1]));
-          }
-        }
-        this.roadDist[i] = rd;
+        // Roads (and the rock of the lair walls, painted as dirt and rock).
+        const rd = this.roadDist[i]!;
+        const ridge = this.inRidge(x, z);
         if (t === T_GRASS) {
-          if (rd < 1.4) t = T_ROAD;
+          if (ridge) t = T_DIRT;
+          else if (rd < 1.4) t = T_ROAD;
           else if (rd < 2.4 + valueNoise(x * 0.4, z * 0.4, 5) * 1.2) t = T_DIRT;
         }
+        if (t === T_ROAD) this.highway[i] = 1;
         // Citadel cobbles and blight.
         const half = CITADEL.half;
         if (Math.abs(x - CENTER) < half + 0.5 && Math.abs(z - CENTER) < half + 0.5) t = T_COBBLE;
         else if (r < 23 + fbm(x * 0.2, z * 0.2, 9, 2) * 2 && t !== T_ROAD && t !== T_SHORE) t = T_BLIGHT;
         this.types[i] = t;
-        // Deep water is unwalkable.
-        if (h < -0.75) this.grid.setFlag(cx, cz, BLOCK_TERRAIN, true);
+        // Deep water and cliffs are unwalkable.
+        if (h < -0.75 || ridge) this.grid.setFlag(cx, cz, BLOCK_TERRAIN, true);
         // Map border.
         if (cx < 1 || cz < 1 || cx >= MAP_SIZE - 1 || cz >= MAP_SIZE - 1) this.grid.setFlag(cx, cz, BLOCK_TERRAIN, true);
       }
@@ -237,6 +293,23 @@ export class Terrain {
   /** Scatter forests. `keepClear(x, z)` returns true where trees must not grow. */
   plantTrees(keepClear: (x: number, z: number) => boolean): void {
     const rand = mulberry32(this.seed + 99);
+    const L = this.layout;
+    // Secret paths: a narrow track through the forest, not painted as a road.
+    const secret = new Uint8Array(MAP_SIZE * MAP_SIZE);
+    for (const path of L.secretPaths) {
+      for (let k = 0; k < path.length - 1; k++) {
+        const a = path[k]!;
+        const b = path[k + 1]!;
+        for (let cz = Math.floor(Math.min(a[1], b[1]) - 2); cz <= Math.max(a[1], b[1]) + 2; cz++) {
+          for (let cx = Math.floor(Math.min(a[0], b[0]) - 2); cx <= Math.max(a[0], b[0]) + 2; cx++) {
+            if (cx < 0 || cz < 0 || cx >= MAP_SIZE || cz >= MAP_SIZE) continue;
+            if (distToSegment(cx + 0.5, cz + 0.5, a[0], a[1], b[0], b[1]) < 1.1) secret[cz * MAP_SIZE + cx] = 1;
+          }
+        }
+      }
+    }
+    const inCircle = (list: { at: [number, number]; r: number }[], x: number, z: number): boolean =>
+      list.some((c) => (x - c.at[0]) ** 2 + (z - c.at[1]) ** 2 < c.r * c.r);
     for (let cz = 1; cz < MAP_SIZE - 1; cz++) {
       for (let cx = 1; cx < MAP_SIZE - 1; cx++) {
         const x = cx + 0.5;
@@ -245,12 +318,16 @@ export class Terrain {
         if (this.grid.flags[i] !== 0) continue;
         const t = this.types[i];
         if (t === T_ROAD || t === T_COBBLE || t === T_SHORE) continue;
-        if (this.roadDist[i]! < 3.2) continue;
-        if (keepClear(x, z)) continue;
+        if (this.roadDist[i]! < 3.2 || secret[i]) continue;
+        if (keepClear(x, z) || inCircle(L.clearings, x, z)) continue;
         const edge = Math.min(x, z, MAP_SIZE - x, MAP_SIZE - z);
         const r = Math.hypot(x - CENTER, z - CENTER);
         if (r < MOAT.outer + 3.5) continue;
-        const n = fbm(x * 0.07, z * 0.07, this.seed + 21, 3);
+        // Forests follow the map's symmetry: the noise is folded into one eighth of the map (mirrored
+        // across the middle lines and the diagonals), so every general has the same woods.
+        const fx = Math.min(x, MAP_SIZE - x);
+        const fz = Math.min(z, MAP_SIZE - z);
+        const n = fbm(Math.min(fx, fz) * 0.07, Math.max(fx, fz) * 0.07, this.seed + 21, 3);
         let p = 0;
         if (edge < 7) p = 0.92;
         else if (edge < 10) p = 0.55;
@@ -258,7 +335,9 @@ export class Terrain {
         const cornerDist = Math.min(
           Math.hypot(x, z), Math.hypot(MAP_SIZE - x, z), Math.hypot(x, MAP_SIZE - z), Math.hypot(MAP_SIZE - x, MAP_SIZE - z),
         );
-        if (cornerDist < 34) p = Math.max(p, 0.9);
+        if (cornerDist < CORNER_GROVE) p = Math.max(p, 0.9);
+        // Dense lumber groves (and the forests hiding the secret glades).
+        if (inCircle(L.groves, x, z)) p = Math.max(p, 0.93);
         if (n > 0.24) p = Math.max(p, 0.75);
         else if (n > 0.15) p = Math.max(p, 0.2);
         if (rand() < p) {
@@ -291,6 +370,113 @@ export class Terrain {
     }
   }
 
+  /**
+   * Make sure every target can be walked to from `from`: random forests sometimes enclose a camp or
+   * a glade, so a track is cut through the fewest trees to the open land. Returns the trees cut.
+   */
+  connect(from: [number, number], targets: [number, number][]): number {
+    const S = MAP_SIZE;
+    const flags = this.grid.flags;
+    const reach = new Uint8Array(S * S);
+    const flood = (start: number): void => {
+      const q = [start];
+      reach[start] = 1;
+      while (q.length) {
+        const k = q.pop()!;
+        const x = k % S;
+        const z = (k - x) / S;
+        for (const [dx, dz] of N4) {
+          const nx = x + dx;
+          const nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= S || nz >= S) continue;
+          const nk = nz * S + nx;
+          if (!reach[nk] && flags[nk] === 0) {
+            reach[nk] = 1;
+            q.push(nk);
+          }
+        }
+      }
+    };
+    const cellOf = (p: [number, number]): number => Math.floor(p[1]) * S + Math.floor(p[0]);
+    const open = (k: number): number => {
+      // The nearest walkable cell to a target (it may stand on a building spot or a camp).
+      const x0 = k % S;
+      const z0 = (k - x0) / S;
+      for (let r = 0; r <= 4; r++) {
+        for (let dz = -r; dz <= r; dz++) {
+          for (let dx = -r; dx <= r; dx++) {
+            const x = x0 + dx;
+            const z = z0 + dz;
+            if (x >= 0 && z >= 0 && x < S && z < S && (flags[z * S + x]! & ~BLOCK_TREE) === 0) return z * S + x;
+          }
+        }
+      }
+      return -1;
+    };
+    const s0 = open(cellOf(from));
+    if (s0 < 0) return 0;
+    if (flags[s0] === 0) flood(s0);
+    let cut = 0;
+    const cost = new Float32Array(S * S);
+    const prev = new Int32Array(S * S);
+    for (const t of targets) {
+      const t0 = open(cellOf(t));
+      if (t0 < 0 || reach[t0]) continue;
+      // Dijkstra through the forest (trees cost more than open ground), to the reachable land.
+      cost.fill(Infinity);
+      const heap: number[] = [t0];
+      cost[t0] = 0;
+      prev[t0] = -1;
+      let end = -1;
+      while (heap.length) {
+        let bi = 0;
+        for (let i = 1; i < heap.length; i++) if (cost[heap[i]!]! < cost[heap[bi]!]!) bi = i;
+        const k = heap[bi]!;
+        heap[bi] = heap[heap.length - 1]!;
+        heap.pop();
+        if (reach[k]) {
+          end = k;
+          break;
+        }
+        if (cost[k]! > 400) break;
+        const x = k % S;
+        const z = (k - x) / S;
+        for (const [dx, dz] of N4) {
+          const nx = x + dx;
+          const nz = z + dz;
+          if (nx < 1 || nz < 1 || nx >= S - 1 || nz >= S - 1) continue;
+          const nk = nz * S + nx;
+          const f = flags[nk]!;
+          if (f & ~BLOCK_TREE) continue;
+          const c = cost[k]! + (f ? 6 : 1);
+          if (c < cost[nk]!) {
+            if (cost[nk] === Infinity) heap.push(nk);
+            cost[nk] = c;
+            prev[nk] = k;
+          }
+        }
+      }
+      if (end < 0) continue;
+      // Cut a two-cell-wide track along the way.
+      for (let k = end; k !== -1; k = prev[k]!) {
+        const x = k % S;
+        const z = (k - x) / S;
+        for (const [dx, dz] of [[0, 0], [1, 0], [0, 1]] as [number, number][]) {
+          const tr = this.treeByCell.get((z + dz) * S + x + dx);
+          if (!tr) continue;
+          this.treeByCell.delete((z + dz) * S + x + dx);
+          tr.alive = false;
+          this.grid.setFlag(tr.cx, tr.cz, BLOCK_TREE, false);
+          this.types[tr.cz * S + tr.cx] = T_GRASS;
+          cut++;
+        }
+      }
+      flood(t0);
+    }
+    if (cut) this.trees = this.trees.filter((tr) => tr.alive);
+    return cut;
+  }
+
   treeAtCell(cx: number, cz: number): Tree | null {
     const t = this.treeByCell.get(cz * MAP_SIZE + cx);
     return t && t.alive ? t : null;
@@ -301,7 +487,8 @@ export class Terrain {
   // rocks, bushes and flowers. The meshes are built by the renderer (src/babylon/TerrainView.ts).
 
   paintTexture(): HTMLCanvasElement {
-    const RES = 2048;
+    // Only the minimap draws this map (the renderer paints the ground itself), so a small one does.
+    const RES = 1024;
     const canvas = document.createElement('canvas');
     canvas.width = RES;
     canvas.height = RES;

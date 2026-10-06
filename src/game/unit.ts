@@ -8,7 +8,7 @@ import type { Game } from './game.ts';
 import type { UnitViewHandle } from './hooks.ts';
 import type {
   AdditiveMod, Buff, BuffData, CampState, Carry, Channel, GuardPos, HarvestState, InventoryItem, Mods, Order, OrderOf,
-  Player, Progress, Rally, Researching, TrainItem, Upgrading,
+  Player, Progress, Rally, Researching, TrainItem, Upgrading, Ware,
 } from './types.ts';
 
 let nextId = 1;
@@ -134,6 +134,17 @@ export class Unit {
   /** Mercenary camps: hires left per type, and the restock timer. */
   stock?: Record<string, number>;
   stockTimer?: number;
+  /** Waygates: the pair's key and the twin gate. */
+  link?: string;
+  twin?: Unit | null;
+  /** Marketplaces: what is for sale. */
+  wares?: Ware[];
+  /** Shrines: game time the shrine is charged again. */
+  readyAt?: number;
+  /** Game time until which a unit that stepped through a waygate won't take another. */
+  gateUntil?: number;
+  /** Where the unit's last move ended (a waygate takes units that were sent onto it). */
+  lastGoal?: { x: number; z: number; time: number } | null;
 
   // Workers
   carry: Carry | null;

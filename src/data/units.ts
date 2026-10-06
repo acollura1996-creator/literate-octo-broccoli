@@ -587,10 +587,37 @@ creep('gnoll', {
 creep('gnoll_archer', {
   name: 'Gnoll Poacher', hp: 240, armor: 0, damage: [10, 12], attackType: 'pierce', attackCooldown: 1.5,
   range: 5, projectile: { kind: 'arrow', speed: 16 }, speed: 2.8, radius: 0.4, level: 2, bounty: [12, 16],
+  food: 2, cost: { gold: 130, lumber: 0 }, hotkey: 'P', description: 'Gnoll archer for hire. Fragile but quick to shoot.',
 });
 creep('wolf', {
   name: 'Timber Wolf', hp: 340, armor: 1, damage: [14, 16], attackCooldown: 1.2, speed: 3.6, radius: 0.5,
-  level: 3, bounty: [14, 18],
+  level: 3, bounty: [14, 18], food: 2, cost: { gold: 140, lumber: 0 }, hotkey: 'W', description: 'A swift wolf of the deep woods.',
+});
+creep('murloc', {
+  name: 'Murloc Tiderunner', hp: 270, armor: 0, armorType: 'light', damage: [10, 12], attackCooldown: 1.3, speed: 3.0,
+  radius: 0.36, level: 2, bounty: [10, 14], food: 1, cost: { gold: 90, lumber: 0 }, hotkey: 'M',
+  description: 'Cheap, quick little fish-man from the lakeshore.',
+});
+creep('brigand', {
+  name: 'Brigand', hp: 360, armor: 2, damage: [12, 15], attackCooldown: 1.3, speed: 2.9, radius: 0.42,
+  level: 2, bounty: [13, 17], food: 2, cost: { gold: 130, lumber: 0 }, hotkey: 'B', description: 'A hooded cutthroat who fights for coin.',
+});
+creep('harpy', {
+  name: 'Harpy Windwitch', hp: 330, armor: 1, armorType: 'light', damage: [15, 18], attackType: 'pierce',
+  attackCooldown: 1.6, range: 4.5, projectile: { kind: 'bolt', color: 0xa8ff8a, speed: 14 }, speed: 3.3, radius: 0.45,
+  level: 3, bounty: [15, 20], food: 2, cost: { gold: 160, lumber: 0 }, hotkey: 'H', description: 'A shrieking harpy that strikes from range.',
+});
+creep('troll_shaman', {
+  name: 'Troll Shaman', hp: 320, armor: 0, mana: 300, manaRegen: 1, damage: [12, 15], attackType: 'magic',
+  attackCooldown: 1.8, range: 5.5, projectile: { kind: 'bolt', color: 0x7ad8ff, speed: 14 }, speed: 2.9, radius: 0.42,
+  level: 3, bounty: [15, 20], abilities: ['creep_heal'], food: 2, cost: { gold: 180, lumber: 0 }, hotkey: 'S',
+  description: 'Troll witch doctor who mends the wounds of his allies.',
+});
+creep('naga_siren', {
+  name: 'Naga Siren', hp: 560, armor: 2, armorType: 'light', mana: 400, manaRegen: 1, damage: [22, 27],
+  attackType: 'magic', attackCooldown: 1.7, range: 5.5, projectile: { kind: 'bolt', color: 0x6af0ff, speed: 14 },
+  speed: 2.8, radius: 0.5, level: 5, bounty: [24, 30], abilities: ['frost_nova'], food: 3, cost: { gold: 260, lumber: 0 },
+  hotkey: 'N', description: 'Sea witch whose frost nova chills and slows her foes.',
 });
 creep('forest_troll', {
   name: 'Forest Troll', hp: 350, armor: 1, damage: [15, 18], attackType: 'pierce', attackCooldown: 1.6,
@@ -619,6 +646,33 @@ creep('drake', {
   name: 'Black Drake', hp: 900, armor: 3, armorType: 'light', damage: [35, 42], attackType: 'magic',
   attackCooldown: 1.7, range: 4, projectile: { kind: 'fireball', speed: 12 }, speed: 3.2, radius: 0.7,
   level: 6, bounty: [30, 40],
+});
+
+// Bosses of the four lairs: named, immune to stuns, slow to respawn, and guarding a treasure.
+function boss(id: string, d: DefInit): UnitDef {
+  return creep(id, { boss: true, armorType: 'hero', sight: 10, hpRegen: 2, ...d });
+}
+boss('dragon', {
+  name: 'Vyrnax the Red', title: 'Elder Dragon of the North', hp: 4200, armor: 5, damage: [60, 72], attackType: 'chaos',
+  attackCooldown: 1.9, range: 4.5, projectile: { kind: 'fireball', speed: 12 }, splash: 1.6, speed: 3.0, radius: 1.1,
+  level: 12, bounty: [260, 320], abilities: ['dragon_breath'],
+  description: 'An ancient red dragon brooding on a hoard of gold.',
+});
+boss('hydra', {
+  name: 'The Ancient Hydra', title: 'Terror of the Eastern Pool', hp: 3800, armor: 4, hpRegen: 10, damage: [42, 52],
+  attackType: 'chaos', attackCooldown: 1.5, range: 4, projectile: { kind: 'bolt', color: 0x9aff3a, speed: 12 }, splash: 1.4,
+  speed: 2.4, radius: 1.0, level: 11, bounty: [240, 300], abilities: ['acid_spray'],
+  description: 'Three heads, each hungrier than the last. Its wounds close almost as fast as they open.',
+});
+boss('bandit_lord', {
+  name: 'Varrok the Bandit Lord', title: 'King of Thieves', hp: 3200, armor: 7, damage: [55, 66], attackType: 'hero',
+  attackCooldown: 1.4, cleave: 0.4, speed: 3.1, radius: 0.65, level: 10, bounty: [220, 280], abilities: ['bandit_call', 'creep_stomp'],
+  description: 'Lord of the southern brigands, who calls his cutthroats to his side.',
+});
+boss('broodmother', {
+  name: 'The Broodmother', title: 'Queen of the Webs', hp: 3600, armor: 5, damage: [50, 60], attackType: 'normal',
+  attackCooldown: 1.3, speed: 3.0, radius: 1.0, level: 10, bounty: [220, 280], abilities: ['brood_spawn', 'web'],
+  description: 'A monstrous spider queen whose brood swarms any intruder.',
 });
 
 // -------------------------------------------------------- Kalenden's Legion
@@ -661,6 +715,10 @@ def('cargo_wagon', {
   name: 'Merchant Caravan', hp: 1400, armor: 3, armorType: 'heavy', speed: 2.1, radius: 0.8, turnRate: 4, sight: 6,
   level: 5, bounty: [450, 550], caravan: true, description: 'A wagon loaded with gold. Whoever stops it keeps the treasure.',
 });
+def('merchant_wagon', {
+  name: 'Merchant’s Wagon', model: 'cargo_wagon', hp: 1200, armor: 3, armorType: 'heavy', speed: 2.2, radius: 0.8, turnRate: 4,
+  sight: 6, level: 4, description: 'A merchant bound for the next outpost. Keep it alive until it arrives.',
+});
 building('goldmine', {
   name: 'Gold Mine', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0,
   description: 'Peasants can harvest gold here.',
@@ -678,9 +736,58 @@ building('mercenary_camp', {
   mercenaries: ['gnoll', 'forest_troll', 'ogre', 'rock_golem'],
   description: 'Hire mercenaries when one of your units is nearby.',
 });
+// The themed camps of the four edges.
+building('merc_highland', {
+  name: 'Highland Camp', model: 'mercenary_camp', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0,
+  mercenaries: ['gnoll', 'harpy', 'ogre', 'rock_golem'],
+  description: 'Hill ogres, harpies and stone golems of the north. Hire them when one of your units is nearby.',
+});
+building('merc_lake', {
+  name: 'Lakeside Hut', model: 'mercenary_camp', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0,
+  mercenaries: ['murloc', 'troll_shaman', 'naga_siren', 'ogre'],
+  description: 'Murlocs, shamans and naga of the eastern waters. Hire them when one of your units is nearby.',
+});
+building('merc_bandit', {
+  name: 'Brigand Hideout', model: 'mercenary_camp', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0,
+  mercenaries: ['brigand', 'gnoll_archer', 'forest_troll', 'ogre'],
+  description: 'Cutthroats and poachers of the south, loyal to whoever pays. Hire them when one of your units is nearby.',
+});
+building('merc_forest', {
+  name: 'Troll Encampment', model: 'mercenary_camp', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0,
+  mercenaries: ['wolf', 'forest_troll', 'troll_shaman', 'rock_golem'],
+  description: 'Trolls and wolves of the western forests. Hire them when one of your units is nearby.',
+});
 building('fountain', {
   name: 'Fountain of Health', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0,
-  description: 'Heals nearby units.',
+  fountain: 'health', description: 'Heals nearby units.',
+});
+building('fountain_mana', {
+  name: 'Fountain of Mana', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0,
+  fountain: 'mana', description: 'Restores mana to nearby units.',
+});
+building('tavern', {
+  name: 'Tavern', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0, tavern: true,
+  description: 'Recruit a Hero to lead your armies, or hire a Hero general for a while. One of your units must be nearby.',
+});
+building('marketplace', {
+  name: 'Marketplace', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0, shop: 'market',
+  description: 'Traders sell a changing stock of treasures (one of each) to Heroes within range.',
+});
+building('goblin_lab', {
+  name: 'Goblin Laboratory', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0, shop: 'lab',
+  description: 'Goblin gadgets for Heroes within range: blasting charges, speed potions and flares.',
+});
+building('waygate', {
+  name: 'Waygate', hp: 99999, footprint: 3, invulnerable: true, neutral: true, armor: 0, sight: 0, walkable: true,
+  description: 'Units sent onto a Waygate step out of its twin across the land.',
+});
+building('shrine', {
+  name: 'Shrine of the Ancients', hp: 99999, footprint: 2, invulnerable: true, neutral: true, armor: 0, sight: 0, shrine: true,
+  description: 'Bring a Hero to the shrine: your nearby units are blessed with +4 armor, +12 damage and swift regeneration for 90 seconds. It recharges in four minutes.',
+});
+building('cage', {
+  name: 'Bandit Cage', hp: 99999, footprint: 2, invulnerable: true, neutral: true, armor: 0, sight: 0,
+  description: 'Captives of the brigands. Defeat their guards and bring a unit here to set them free.',
 });
 
 export const UNITS = U;

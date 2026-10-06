@@ -1,7 +1,9 @@
 // Builds the 4x3 command card for the current selection.
 import { UNITS, UPGRADES, BUILD_MENUS, ROAD, AGE_NAMES, AGES, ECONOMY, researchCost, researchTime, researchCap } from '../data/units.ts';
 import { moodOf } from '../game/empire.ts';
-import { ITEMS, SHOP_STOCK } from '../data/items.ts';
+import { ITEMS, SHOP_STOCK, itemPrice } from '../data/items.ts';
+import { HEROES } from '../data/heroes.ts';
+import { TAVERN_COST } from '../game/game.ts';
 import { ABILITIES, requiredHeroLevel } from '../game/abilities.ts';
 import { isEmpire } from '../game/types.ts';
 import type { Cost } from '../data/types.ts';
@@ -58,6 +60,30 @@ function costLine(cost?: Partial<Cost> | null, food?: number): string {
   return parts.join(' ');
 }
 
+/** The Hero generals a player can hire (at a town center or a Tavern), and a Cancel button. */
+function heroHireButtons(game: Game, input: Input, B: CommandButton[], close: () => void): void {
+  const p = game.human;
+  const list = game.empires.heroesForHire(p);
+  list.slice(0, 8).forEach((hg, i) => {
+    const h = hg.hero!;
+    const fee = game.empires.hireFee(hg);
+    B.push({
+      id: `hirehero:${hg.index}`, x: i % 4, y: Math.floor(i / 4), hotkey: GRID_KEYS[Math.floor(i / 4)]![i % 4]!,
+      model: h.def.model, name: `Hire ${hg.name}'s ${h.def.name} (level ${h.level})`,
+      tooltip: `The Hero fights on your side for ${ECONOMY.hireTime / 60} minutes: your enemies become theirs.${hg.team === p.team ? '' : '<br><span class="dim">Currently not your ally.</span>'}`,
+      cost: costLine({ gold: fee }),
+      disabled: p.gold < fee,
+      onClick: () => {
+        if (game.empires.hire(p, hg)) close();
+      },
+    });
+  });
+  if (!list.length) {
+    B.push({ id: 'nohire', x: 0, y: 0, icon: '🛡️', iconBg: '#444', name: 'No Heroes available', tooltip: 'Every Hero is already your ally, hired by someone else, fallen, or there are no Hero generals in this game.', disabled: true });
+  }
+  B.push({ id: 'cancel', x: 3, y: 2, hotkey: 'Escape', keyLabel: 'Esc', icon: '✖', name: 'Cancel', onClick: close });
+}
+
 export function getCommands(game: Game, input: Input): CommandButton[] {
   const sel = input.selection.filter((u) => !u.dead);
   const p = game.human;
@@ -69,25 +95,56 @@ export function getCommands(game: Game, input: Input): CommandButton[] {
 
   // Neutral shops & mercenaries can be "used" by selecting them.
   if (u.def.shop) {
-    const stock = SHOP_STOCK[u.def.shop]!;
+    // Marketplaces sell their own changing wares, one of each.
+    const wares = u.wares ?? SHOP_STOCK[u.def.shop]!.map((id) => ({ id, stock: -1 }));
     const customer = game.shopCustomer(p, u);
-    stock.forEach((id, i) => {
-      const it = ITEMS[id]!;
+    wares.forEach((w, i) => {
+      const it = ITEMS[w.id]!;
+      const price = itemPrice(w.id);
       const x = i % 4;
       const y = Math.floor(i / 4);
+      const soldOut = w.stock === 0;
       B.push({
-        id: `buy:${id}`,
+        id: `buy:${i}:${w.id}`,
         x,
         y,
         hotkey: GRID_KEYS[y]![x]!,
         icon: it.icon,
         iconBg: it.color,
         name: `Purchase ${it.name}`,
-        tooltip: `${it.description}`,
-        cost: costLine({ gold: it.cost }),
-        disabled: !customer || p.gold < it.cost!,
-        onClick: () => game.buyItem(p, u, id),
+        tooltip: `${it.description}${it.autoUse ? '<br><span class="dim">Used at once.</span>' : ''}${w.stock >= 0 ? `<br><span class="dim">${soldOut ? 'Sold out: new wares arrive every 70 seconds.' : 'One in stock.'}</span>` : ''}`,
+        cost: costLine({ gold: price }),
+        count: w.stock >= 0 ? w.stock : undefined,
+        disabled: !customer || p.gold < price || soldOut,
+        onClick: () => game.buyItem(p, u, w.id),
       });
+    });
+    return B;
+  }
+  if (u.def.tavern) {
+    const patron = game.patronAt(p, u);
+    const level = game.recruitLevel();
+    if (input.cardMenu === 'tavernhire') {
+      heroHireButtons(game, input, B, () => (input.cardMenu = null));
+      return B;
+    }
+    game.tavernHeroes().forEach((id, i) => {
+      const d = UNITS[id]!;
+      const h = HEROES[id]!;
+      B.push({
+        id: `recruit:${id}`, x: i % 4, y: Math.floor(i / 4), hotkey: GRID_KEYS[Math.floor(i / 4)]![i % 4]!,
+        model: d.model, name: `Recruit ${d.name}, ${d.title}`,
+        tooltip: `${h.blurb}<br><span class="dim">${h.abilities.map((a) => `${ABILITIES[a]!.icon} ${ABILITIES[a]!.name}`).join(' · ')}</span><br><span class="dim">Arrives at level ${level}. Only a general without a Hero can recruit one; an empire's town center revives it.</span>${p.hero ? '<br><span class="req">You already lead a Hero.</span>' : ''}${patron ? '' : '<br><span class="req">One of your units must be near the Tavern.</span>'}`,
+        cost: costLine(TAVERN_COST, d.food),
+        disabled: !!p.hero || !patron || !game.canAfford(p, TAVERN_COST),
+        onClick: () => game.recruitHero(p, u, id),
+      });
+    });
+    B.push({
+      id: 'tavernhire', x: 0, y: 2, hotkey: 'Z', icon: '🤝', iconBg: '#4a3a6a', name: 'Hire a Hero general',
+      tooltip: `Pay one of the Hero generals to fight on your side for ${ECONOMY.hireTime / 60} minutes. Their fee grows with their level.${patron ? '' : '<br><span class="req">One of your units must be near the Tavern.</span>'}`,
+      disabled: !patron,
+      onClick: () => (input.cardMenu = 'tavernhire'),
     });
     return B;
   }
@@ -151,25 +208,7 @@ export function getCommands(game: Game, input: Input): CommandButton[] {
     return B;
   }
   if (input.cardMenu === 'hire' && u.def.tier && u.owner === p) {
-    const list = game.empires.heroesForHire(p);
-    list.slice(0, 8).forEach((hg, i) => {
-      const h = hg.hero!;
-      const fee = game.empires.hireFee(hg);
-      B.push({
-        id: `hirehero:${hg.index}`, x: i % 4, y: Math.floor(i / 4), hotkey: GRID_KEYS[Math.floor(i / 4)]![i % 4]!,
-        model: h.def.model, name: `Hire ${hg.name}'s ${h.def.name} (level ${h.level})`,
-        tooltip: `The Hero fights on your side for ${ECONOMY.hireTime / 60} minutes: your enemies become theirs.${hg.isHuman ? '' : ''}${hg.team === p.team ? '' : '<br><span class="dim">Currently not your ally.</span>'}`,
-        cost: costLine({ gold: fee }),
-        disabled: p.gold < fee,
-        onClick: () => {
-          if (game.empires.hire(p, hg)) input.cardMenu = null;
-        },
-      });
-    });
-    if (!list.length) {
-      B.push({ id: 'nohire', x: 0, y: 0, icon: '🛡️', iconBg: '#444', name: 'No Heroes available', tooltip: 'Every Hero is already your ally, hired by someone else, fallen, or there are no Hero generals in this game.', disabled: true });
-    }
-    B.push({ id: 'cancel', x: 3, y: 2, hotkey: 'Escape', keyLabel: 'Esc', icon: '✖', name: 'Cancel', onClick: () => (input.cardMenu = null) });
+    heroHireButtons(game, input, B, () => (input.cardMenu = null));
     return B;
   }
   if (input.cardMenu === 'learn' && u.isHero) {

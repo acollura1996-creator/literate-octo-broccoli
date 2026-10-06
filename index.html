@@ -34,6 +34,10 @@
           </div>
         </div>
         <div id="herobar"></div>
+        <div id="questlog" class="hidden">
+          <button id="ql-toggle" class="ql-head" type="button">Quests <span id="ql-count"></span></button>
+          <div id="ql-body"></div>
+        </div>
         <div id="scoreboard">
           <button id="sb-toggle" class="sb-head" type="button">Generals <span>F11</span></button>
           <div id="sb-body">
@@ -161,13 +165,19 @@
             <p id="quest-rivals"></p>
           </div>
           <div class="quest">
+            <h3>Side Quests</h3>
+            <div id="quest-side"></div>
+          </div>
+          <div class="quest">
             <h3>Tips</h3>
             <ul>
               <li><b>Hero path:</b> slay creeps for experience and gold, buy items from Goblin Merchants and Arcane Vaults, hire mercenaries, and use Fountains of Health. Your Altar revives your Hero.</li>
               <li><b>Empire path:</b> your citizens pay the taxes. Lay roads from your town center and build Houses touching them; people move in while they are fed and content. Build Farms to feed their rations, and set taxes (Z/X) and rations (C/V) at the town center: a happy people pays more, a starving or hateful one pays nothing and riots. Taxes and rations have no limit (hold Shift for steps of 5). Advance through twelve ages, from the Stone Age to the Galactic Age, at the town center (U).</li>
               <li><b>Research Center:</b> twelve researches (damage, armor, health, speed, lumber and gold gathering, housing, farming, building, taxes, happiness, medicine), with two more levels unlocked in every age.</li>
               <li><b>Hire a Hero</b> from your town center (H) to fight for you for 3 minutes. In the Modern Age a Missile Silo can launch nuclear missiles.</li>
-              <li>Edge outposts hold an extra gold mine, a mercenary camp, an arcane vault and a fountain, guarded by drakes and golems.</li>
+              <li>Edge outposts hold an extra gold mine, a mercenary camp, an arcane vault, fountains of health and mana, a goblin laboratory and a waygate to the opposite outpost, guarded by drakes and golems.</li>
+              <li>Each edge road leads to a <b>boss lair</b> (a dragon, a hydra, a bandit lord and a broodmother guard great treasure) and a <b>village</b> on the ring road with a Tavern, a Marketplace and a waygate across the citadel.</li>
+              <li>Right-click a <b>Waygate</b> with your units to step through to its twin. Shrines, runes and tomes hide in the forests.</li>
             </ul>
           </div>
           <button data-act="close" class="big-btn">Close</button>

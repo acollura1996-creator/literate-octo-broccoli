@@ -1051,6 +1051,8 @@ export class Input {
       if (workers && h.owner === g.human && h.isBuilding && h.underConstruction) return 'Help build';
       if (workers && h.owner === g.human && h.def.dropOff && movers.some((u) => u.carry && (h.def.dropOff === true || h.def.dropOff === u.carry.kind))) return 'Return resources';
       if (h.def.shop && movers.some((u) => u.isHero)) return 'Go to the shop';
+      if (h.def.walkable && h.twin) return 'Step through the Waygate';
+      if (h.def.tavern || h.def.mercenaries) return `Go to the ${h.def.name}`;
       if (!h.isBuilding && h.owner.general && h !== movers[0]) return `Follow ${h.def.name}`;
       return null;
     }

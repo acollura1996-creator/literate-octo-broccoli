@@ -6,6 +6,8 @@ import { ITEMS } from '../data/items.ts';
 import { getCommands } from './commands.ts';
 import { Minimap } from './minimap.ts';
 import { isEmpire } from '../game/types.ts';
+import { CENTER, EDGE_NAMES, REGION_NAMES, regionAt } from '../world/layout.ts';
+import { questIcon } from '../game/quests.ts';
 import type { Game } from '../game/game.ts';
 import type { Unit } from '../game/unit.ts';
 import type { InventoryItem } from '../game/types.ts';
@@ -26,6 +28,16 @@ function fmtTime(s: number): string {
 }
 
 const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+
+/** Where on the map a point is, in words (the edge village or outpost, or a quadrant). */
+function regionLabel(x: number, z: number): string {
+  const dx = x - CENTER;
+  const dz = z - CENTER;
+  const r = Math.hypot(dx, dz);
+  const edge = EDGE_NAMES[Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : dz > 0 ? 2 : 0]!;
+  if (Math.min(Math.abs(dx), Math.abs(dz)) < 30) return r < 90 ? `the ${edge} village` : `the ${edge} outpost`;
+  return REGION_NAMES[regionAt(x, z)]!;
+}
 function esc(s: unknown): string {
   return String(s).replace(/[&<>"]/g, (c) => ESCAPES[c]!);
 }
@@ -45,6 +57,7 @@ export class Hud {
   private msgHtml = '';
   private sbHtml = '';
   private offerSig = '';
+  private questSig = '';
   private sbTimer = 0;
   private timer = 0;
   private tooltipBtn: string | null = null;
@@ -63,6 +76,10 @@ export class Hud {
     this.buildInventory();
     this.bindTopbar();
     $('sb-toggle').addEventListener('click', () => this.toggleScoreboard());
+    $('ql-toggle').addEventListener('click', () => {
+      $('questlog').classList.toggle('collapsed');
+      this.questSig = '';
+    });
     this.attach(game);
   }
 
@@ -85,6 +102,7 @@ export class Hud {
     this.sbTimer = 0;
     this.timer = 0;
     this.tooltipBtn = null;
+    this.questSig = '';
     this.el.classList.remove('hidden');
     $('r-mode').textContent = game.human.mode === 'hero' ? 'Hero Path' : 'Empire Path';
   }
@@ -158,6 +176,52 @@ export class Hud {
     this.updateMessages();
     this.updateTooltip();
     this.updateOffers();
+    this.updateQuestLog();
+  }
+
+  /** The quest log: active side quests (click one to look at it) and the ones just finished. */
+  updateQuestLog(): void {
+    const g = this.game;
+    const Q = g.quests;
+    const box = $('questlog');
+    const recent = Q.list.filter((q) => q.state === 'active' || g.time - (q.ends ?? 0) < 25);
+    box.classList.toggle('hidden', !recent.length);
+    if (!recent.length) return;
+    // Under the hero button, or in its place for an empire without a Hero.
+    const top = g.human.hero ? '136px' : '52px';
+    if (box.style.top !== top) box.style.top = top;
+    const active = recent.filter((q) => q.state === 'active');
+    const left = (q: (typeof recent)[number]): string => (q.state === 'active' && q.ends !== undefined ? ` (${Math.max(0, Math.ceil(q.ends - g.time))}s)` : '');
+    const sig = `${Q.version}|${recent.map((q) => `${q.id}:${q.state}:${q.progress ?? ''}:${q.found ? 1 : 0}${left(q)}`).join(',')}|${box.classList.contains('collapsed')}`;
+    if (sig === this.questSig) return;
+    this.questSig = sig;
+    $('ql-count').textContent = active.length ? `(${active.length})` : '';
+    if (box.classList.contains('collapsed')) {
+      $('ql-body').innerHTML = '';
+      return;
+    }
+    $('ql-body').innerHTML = recent
+      .slice(0, 7)
+      .map((q) => {
+        const who = q.winner ? (q.winner.isHuman ? 'you' : esc(q.winner.name)) : '';
+        const state = q.state === 'done' ? `<span class="ql-done">✔ ${who}</span>` : q.state === 'failed' ? '<span class="ql-failed">✖ failed</span>' : esc(q.progress ?? (q.kind === 'treasure' && q.found ? 'the spot glints!' : ''));
+        return `<div class="ql-row ${q.state}" data-id="${q.id}" title="${esc(q.text)}">
+          <span class="ql-ico">${questIcon(q.kind)}</span>
+          <div class="ql-main"><div class="ql-title">${esc(q.title)}${left(q)}</div>${state ? `<div class="ql-sub">${state}</div>` : ''}</div>
+        </div>`;
+      })
+      .join('');
+    $('ql-body').querySelectorAll<HTMLElement>('.ql-row').forEach((el) => {
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const q = Q.list.find((x) => x.id === Number(el.dataset['id']));
+        if (!q) return;
+        const at = q.kind === 'treasure' && q.found && q.spot ? q.spot : q.wagon && !q.wagon.dead ? q.wagon : q.at;
+        this.input.centerOn(at.x, at.z);
+        g.ping(at.x, at.z, '#ffd700');
+      });
+    });
   }
 
   /** Contract offers from empires that want to hire the player's Hero. */
@@ -498,7 +562,23 @@ export class Hud {
         stats.push(`<div class="stat ${cust ? 'ok' : 'dim'}">${cust ? `${cust.def.name} may trade here.` : 'Bring your Hero close to trade.'}</div>`);
       }
       if (u.def.mercenaries) stats.push('<div class="stat dim">Hire with a unit nearby.</div>');
-      if (u.type === 'fountain') stats.push('<div class="stat dim">Restores health and mana to nearby units.</div>');
+      if (u.def.fountain === 'health') stats.push('<div class="stat dim">Restores health and mana to nearby units.</div>');
+      if (u.def.fountain === 'mana') stats.push('<div class="stat dim">Restores mana to nearby units.</div>');
+      if (u.def.tavern) {
+        const patron = g.patronAt(g.human, u);
+        stats.push(`<div class="stat ${patron ? 'ok' : 'dim'}">${patron ? 'Your units are at the Tavern.' : 'Bring a unit close to recruit or hire.'}</div>`);
+      }
+      if (u.def.shop === 'market') stats.push('<div class="stat dim">New wares every 70 seconds.</div>');
+      if (u.def.walkable && u.twin) {
+        stats.push(`<div class="stat ok">Leads to its twin in ${regionLabel(u.twin.x, u.twin.z)}.</div><div class="stat dim">Right-click the Waygate with your units to step through.</div>`);
+      }
+      if (u.def.shrine) {
+        const left = (u.readyAt ?? 0) - g.time;
+        stats.push(left > 0.5 ? `<div class="stat dim">Recharging: ${Math.ceil(left)} s.</div>` : '<div class="stat ok">Charged. Bring a Hero to it.</div>');
+      }
+      if (u.type === 'cage') stats.push('<div class="stat dim">Defeat the brigands guarding the captives, then bring a unit here to free them.</div>');
+      if (u.type === 'merchant_wagon') stats.push('<div class="stat ok">Bound for the next outpost. Keep it alive!</div>');
+      if (u.def.boss && u.owner === g.creeps) stats.push(`<div class="stat dim">${esc(u.def.description ?? '')}</div>`);
       if (u.lifetime !== null && u.lifetime !== undefined) stats.push(`<div class="stat dim">Expires in ${Math.ceil(u.lifetime)}s</div>`);
       const buffs = [...u.buffs.values()].filter((b) => !b.aura || true).map((b) => b.id);
       if (buffs.length) {
@@ -506,6 +586,7 @@ export class Hud {
           stun: 'Stunned', slow: 'Slowed', thunder_slow: 'Thunder Clap', divine_shield: 'Divine Shield', wind_walk: 'Wind Walk',
           avatar: 'Avatar', entangle: 'Entangled', bladestorm: 'Bladestorm', aura_devotion_aura: 'Devotion Aura',
           aura_brilliance_aura: 'Brilliance Aura', aura_trueshot_aura: 'Trueshot Aura', elemental_power: '', tyrant_might: '', veteran: 'Veteran', dominion: "Kalenden's Dominion",
+          blessing: 'Blessing of the Ancients', haste: 'Haste', frost_slow: 'Frost', acid: 'Acid', web: 'Webbed',
         };
         const list = buffs.map((b) => names[b] ?? b).filter(Boolean);
         if (list.length) stats.push(`<div class="buffs">${list.map((n) => `<span>${n}</span>`).join('')}</div>`);

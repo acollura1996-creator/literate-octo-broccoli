@@ -110,7 +110,8 @@ interface OrderVariants {
   stop: object;
   hold: object;
   channel: object;
-  move: { point: Point; range?: number; then?: Order };
+  /** `gate`: the unit is on its way to step through this waygate (the order it carries out next is queued). */
+  move: { point: Point; range?: number; then?: Order; gate?: Unit };
   attack: { target: Unit; auto?: boolean; anchor?: Point; leash?: number; resume?: Order };
   attackMove: { point: Point };
   patrol: { point: Point; origin?: Point };
@@ -256,6 +257,11 @@ export interface GroundItem {
   taken: boolean;
   spawnTime: number;
 }
+/** An item for sale at a Marketplace (one of each). */
+export interface Ware {
+  id: string;
+  stock: number;
+}
 export interface Corpse {
   type: string;
   owner: Player;
@@ -272,8 +278,18 @@ export interface CampState {
   cleared: boolean;
   /** Seconds until it respawns once cleared. */
   respawn: number;
-  /** Sum of the creeps' levels. */
+  /** How dangerous the camp is for the computer generals (the creeps' levels; more for a boss). */
   power: number;
+  /** Sum of the creeps' levels (picks the tier of its treasure). */
+  level?: number;
+  /** Quadrant (0-3), or -1 on an edge midline. */
+  region: number;
+  /** Unit type of the boss, in a lair. */
+  boss?: string;
+  /** Captives are caged here. */
+  captives: boolean;
+  /** Times it has been wiped out. */
+  clears: number;
 }
 
 export interface GameMessage {
