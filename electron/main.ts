@@ -8,6 +8,7 @@ import { app, BrowserWindow, Menu, ipcMain, net, protocol, session, shell } from
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { registerWarcraftIpc } from './wc3/desktop';
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL; // set by scripts/dev-electron.mjs
 const log = (...a: unknown[]): void => {
@@ -122,6 +123,8 @@ app.whenReady().then(() => {
       },
     ]),
   );
+
+  registerWarcraftIpc();
 
   ipcMain.handle('window:toggle-fullscreen', (e) => {
     const w = BrowserWindow.fromWebContents(e.sender);

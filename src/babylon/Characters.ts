@@ -1,5 +1,8 @@
 // Rigged, animated characters (M14): Kay Lousberg's KayKit Adventurers and Skeletons (CC0),
-// imported by tools/kaykit/import.mjs into src/assets/kaykit/kaykit.bin.
+// imported by tools/kaykit/import.mjs into src/assets/kaykit/kaykit.bin; and (M15, desktop app) the
+// player's own Warcraft III models, converted on their computer by electron/wc3 into a pack of the
+// same format. Each pack is a CharacterPack; CharacterLibrary draws a unit from the Warcraft III pack
+// when it has the unit, else from KayKit's.
 //
 // Every character is drawn by one shared material and animated on the GPU:
 //
@@ -11,9 +14,14 @@
 //   x the frame of the current animation (fractional: the shader blends the two nearest frames),
 //   y the frame of the animation it is fading out of, z the weight of that one. So every unit of a
 //   type, in any pose and any team, shares one draw call.
-// - Atlases: the packs' palette textures (8 × 4 colour swatches with a light-to-dark gradient) in
-//   one texture array; a vertex's layer and its team mask (swatches that take the team colour) are
-//   vertex attributes.
+// - Atlases: the packs' textures in one texture array per pack (KayKit's palettes of 8 × 4 colour
+//   swatches; Warcraft III's painted skins); a vertex's layer and how it takes the team colour are
+//   vertex attributes (`kkMeta`: x the material mode, y the layer, z glow, w visibility):
+//   mode 0-1 KayKit (1 on team swatches), 2 the team colour under the texture (Warcraft III: it shows
+//   where the texture's alpha is low), 3 alpha-tested, 4 the team colour alone.
+// - Warcraft III models show and hide parts as they animate (a sword drawn, a corpse's weapon gone):
+//   per frame, each such part's visibility is a value in its rig's rows of the animation texture
+//   (kkMeta.w says which), and hidden parts collapse to a point.
 // - Shadows: the material's own vertex shader (with the skinning) renders the shadow maps, through
 //   a ShadowDepthWrapper, so shadows move with the animation.
 //
@@ -41,15 +49,15 @@ import type { Scene } from '@babylonjs/core/scene';
 import '@babylonjs/core/Meshes/instancedMesh';
 import binUrl from '../assets/kaykit/kaykit.bin?url';
 import { MergedModelPlugin } from './MergedModel';
-import { BUILDING_RECIPES, CHARACTER_RECIPES, TEAM_CELLS, type CharacterRecipe } from './CharacterRecipes';
+import { BUILDING_RECIPES, CHARACTER_RECIPES, TEAM_CELLS, wc3Recipe, type BuildingRecipe, type CharacterRecipe, type Wc3PackRecipe } from './CharacterRecipes';
 import { PROCEDURAL_PROPS } from './CharacterProps';
 import type { GhostMode, ModelInstance } from './ModelLibrary';
 
 const TEXTURE_URLS = import.meta.glob('../assets/kaykit/*.png', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 
-/** Rows of the animation texture per block (blocks sit side by side). */
+/** Rows of the animation texture per block (blocks sit side by side; more when the width runs out). */
 const VAT_BLOCK = 2048;
-/** Atlas size in the texture array (the packs ship 1024²; their swatches survive 512² fine). */
+/** KayKit's atlas size in the texture array (the packs ship 1024²; their swatches survive 512² fine). */
 const ATLAS_SIZE = 512;
 /** Seconds to crossfade from one clip to the next. */
 const FADE = 0.16;
@@ -67,6 +75,9 @@ interface RigInfo {
   bindWorld: number[][];
   vat: { offset: number; width: number; height: number };
   anims: Record<string, ClipInfo>;
+  /** Warcraft III: visibility slots after the joints in each row; attachment points by name. */
+  vis?: number;
+  attach?: Record<string, number>;
 }
 interface PieceInfo {
   name: string;
@@ -84,6 +95,9 @@ interface PieceInfo {
   weights: number;
   index: number;
   index32: boolean;
+  /** Warcraft III: float texture coordinates (they may wrap), and per-vertex material (4 × int16). */
+  uvFloat?: boolean;
+  meta?: number;
 }
 interface FileInfo {
   version: number;
@@ -91,6 +105,27 @@ interface FileInfo {
   rigs: Record<string, RigInfo>;
   pieces: PieceInfo[];
   textures: string[];
+  /** Warcraft III packs: atlas size, the textures (zlib-deflated RGBA), recipes by model id. */
+  kind?: 'wc3';
+  atlas?: number;
+  images?: Array<{ name: string; offset: number; length: number }>;
+  recipes?: Record<string, Wc3PackRecipe>;
+  /** Command card icons by model id (zlib-deflated RGBA, size²). */
+  icons?: Record<string, { offset: number; length: number; size: number }>;
+  created?: string;
+}
+
+/** A pack's file and textures (images, or RGBA at the atlas size). */
+interface PackData {
+  bin: ArrayBuffer;
+  images: Map<string, HTMLImageElement | Uint8Array>;
+  icons?: Map<string, PackIcon>;
+}
+
+/** A command card icon from a pack: RGBA, size × size. */
+export interface PackIcon {
+  size: number;
+  data: Uint8Array;
 }
 
 /** A clip as the animator plays it: its first row in the texture and its length. */
@@ -118,6 +153,8 @@ export class CharacterPlugin extends MaterialPluginBase {
     private readonly vatWidth: number,
     /** Buildings: no skinning. */
     private readonly isStatic = false,
+    /** Rows per block of the animation texture. */
+    private readonly vatBlock = VAT_BLOCK,
   ) {
     super(material, 'Character', 140, { KAYKIT: false, KAYKITFAST: false, KKSTATIC: false }, true, true);
   }
@@ -160,7 +197,7 @@ export class CharacterPlugin extends MaterialPluginBase {
   }
 
   override bindForSubMesh(uniformBuffer: UniformBuffer): void {
-    uniformBuffer.updateFloat2('kkVatInfo', VAT_BLOCK, this.vatWidth);
+    uniformBuffer.updateFloat2('kkVatInfo', this.vatBlock, this.vatWidth);
     uniformBuffer.updateFloat4('kkTint', this.tint[0], this.tint[1], this.tint[2], this.tint[3]);
     uniformBuffer.updateFloat3('kkFallback', this.fallback[0], this.fallback[1], this.fallback[2]);
     const r = MergedModelPlugin.rim;
@@ -176,12 +213,12 @@ export class CharacterPlugin extends MaterialPluginBase {
           attribute vec4 kkJ;
           attribute vec4 kkW;
           attribute vec2 kkUV;
-          attribute vec3 kkMeta;
+          attribute vec4 kkMeta;
           attribute vec4 kkFrame;
           attribute vec4 kkTeam;
           uniform highp sampler2D kkVat;
           varying vec2 vKkUV;
-          varying vec3 vKkMeta;
+          varying vec4 vKkMeta;
           varying vec3 vKkTeam;
 
           // Add weight × the skinning matrix of joint j at an integer frame to the three rows.
@@ -223,6 +260,17 @@ export class CharacterPlugin extends MaterialPluginBase {
             vec4 p = vec4(positionUpdated, 1.0);
             positionUpdated = vec3(dot(kkS0, p), dot(kkS1, p), dot(kkS2, p));
           }
+          if (kkMeta.w >= 0.0) {
+            // A part shown and hidden by the animation: its visibility this frame (column × 4 +
+            // channel in the rig's row); hidden, it collapses to a point and draws nothing.
+            int frame = int(floor(kkFrame.x + 0.5));
+            int block = frame / int(kkVatInfo.x);
+            int col = int(kkMeta.w) / 4;
+            int ch = int(kkMeta.w) - col * 4;
+            vec4 v = texelFetch(kkVat, ivec2(block * int(kkVatInfo.y) + col, frame - block * int(kkVatInfo.x)), 0);
+            float shown = ch == 0 ? v.x : ch == 1 ? v.y : ch == 2 ? v.z : v.w;
+            if (shown < 0.5) positionUpdated = vec3(0.0);
+          }
         #endif
           vKkUV = kkUV;
           vKkMeta = kkMeta;
@@ -238,21 +286,35 @@ export class CharacterPlugin extends MaterialPluginBase {
         CUSTOM_FRAGMENT_DEFINITIONS: `#ifdef KAYKIT
           uniform highp sampler2DArray kkAtlas;
           varying vec2 vKkUV;
-          varying vec3 vKkMeta;
+          varying vec4 vKkMeta;
           varying vec3 vKkTeam;
         #endif`,
         CUSTOM_FRAGMENT_UPDATE_DIFFUSE: `#ifdef KAYKIT
           {
-            vec3 tex = texture(kkAtlas, vec3(vKkUV, vKkMeta.y)).rgb;
+            vec4 tex4 = texture(kkAtlas, vec3(vKkUV, vKkMeta.y));
+            vec3 tex = tex4.rgb;
             // The instance's team colour (non-instanced draws have none: the fallback).
             vec3 team = vKkTeam.r < 0.0 ? kkFallback : vKkTeam;
-            // Team swatches: the team colour shaded by the swatch's own light-to-dark gradient.
-            float l = dot(tex, vec3(0.299, 0.587, 0.114));
-            vec3 teamShade = team * clamp(0.35 + l * 1.45, 0.0, 1.35);
-            vec3 c = mix(tex, teamShade, vKkMeta.x);
-            // A little more saturation than the packs' pastel palette, toward Warcraft III's.
-            float g = dot(c, vec3(0.299, 0.587, 0.114));
-            c = clamp(mix(vec3(g), c, 1.18), 0.0, 1.0);
+            float mode = vKkMeta.x;
+            vec3 c;
+            if (mode < 1.5) {
+              // KayKit. Team swatches: the team colour shaded by the swatch's own light-to-dark gradient.
+              float l = dot(tex, vec3(0.299, 0.587, 0.114));
+              vec3 teamShade = team * clamp(0.35 + l * 1.45, 0.0, 1.35);
+              c = mix(tex, teamShade, mode);
+              // A little more saturation than the packs' pastel palette, toward Warcraft III's.
+              float g = dot(c, vec3(0.299, 0.587, 0.114));
+              c = clamp(mix(vec3(g), c, 1.18), 0.0, 1.0);
+            } else if (mode < 2.5) {
+              // Warcraft III: the team colour under the skin, where its alpha is low.
+              c = mix(team, tex, tex4.a);
+            } else if (mode < 3.5) {
+              // Alpha-tested (capes, banners, wings, foliage).
+              if (tex4.a < 0.5) discard;
+              c = tex;
+            } else {
+              c = team;
+            }
             c = mix(c, pow(kkTint.rgb, vec3(1.0 / 2.2)), kkTint.a);
             baseColor.rgb = c;
           }
@@ -286,7 +348,7 @@ export class CharacterAnimator {
   private fade = 0;
 
   constructor(
-    private readonly library: CharacterLibrary,
+    private readonly library: CharacterPack,
     readonly rig: string,
     first: string,
   ) {
@@ -349,6 +411,12 @@ export class CharacterAnimator {
 
   private fadeLength = FADE;
 
+  /** Hold the current clip at `seconds` (a building's construction follows its progress). */
+  seek(seconds: number): void {
+    this.time = Math.max(0, seconds);
+    this.rate = 1;
+  }
+
   update(dt: number): void {
     dt = Math.max(0, dt);
     this.time += dt;
@@ -382,7 +450,7 @@ export class CharacterAnimator {
   }
 }
 
-// ------------------------------------------------------------------ library
+// ------------------------------------------------------------------ packs
 /** One unit's character: the instance, its node, and its animator. */
 export interface CharacterInstance extends ModelInstance {
   recipe: CharacterRecipe;
@@ -392,7 +460,10 @@ export interface CharacterInstance extends ModelInstance {
   syncFrames(): void;
 }
 
-export class CharacterLibrary {
+const teamColor4 = (team: number): Color4 => new Color4(((team >> 16) & 255) / 255, ((team >> 8) & 255) / 255, (team & 255) / 255, 1);
+
+/** One pack of characters (KayKit's, or the player's Warcraft III models): its meshes, animations and textures. */
+export class CharacterPack {
   private readonly info: FileInfo;
   private readonly bin: ArrayBuffer;
   private readonly rigRow: Record<string, number> = {};
@@ -404,43 +475,65 @@ export class CharacterLibrary {
   private vat!: RawTexture;
   private atlas!: RawTexture2DArray;
   private vatWidth = 0;
+  private vatBlock = VAT_BLOCK;
   /** Called for every new instance (the shadow generator's caster list). */
   onCaster: ((mesh: AbstractMesh) => void) | null = null;
   /** Called for every new source mesh (to receive shadows; instances follow their source). */
   onSource: ((mesh: Mesh) => void) | null = null;
   /** Source meshes, to have them receive shadows. */
   readonly sources: Mesh[] = [];
+  /** Units and (animated) buildings drawn by this pack, by model id. */
+  readonly recipes: Record<string, CharacterRecipe>;
+  /** Static buildings (KayKit's), by model id. */
+  readonly buildings: Record<string, BuildingRecipe>;
 
   private constructor(
     private readonly scene: Scene,
-    bin: ArrayBuffer,
-    images: Map<string, ImageBitmap | HTMLImageElement>,
+    data: PackData,
+    private readonly fog: boolean,
   ) {
+    const bin = data.bin;
     this.bin = bin;
     const dv = new DataView(bin);
     const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-    if (magic !== 'KKC1') throw new Error('kaykit.bin: bad header');
+    if (magic !== 'KKC1') throw new Error('character pack: bad header');
     const jsonLength = dv.getUint32(4, true);
     this.info = JSON.parse(new TextDecoder().decode(new Uint8Array(bin, 8, jsonLength))) as FileInfo;
-    const dataStart = 8 + jsonLength;
+    this.dataStart = 8 + jsonLength;
     for (const p of this.info.pieces) this.pieces.set(p.name, p);
     this.info.textures.forEach((t, i) => this.layer.set(t, i));
-    this.buildVat(dataStart);
-    this.buildAtlas(images);
-    this.dataStart = dataStart;
+    if (this.info.kind === 'wc3') {
+      this.recipes = {};
+      for (const [id, r] of Object.entries(this.info.recipes ?? {})) if (this.pieces.has(r.body)) this.recipes[id] = wc3Recipe(r);
+      this.buildings = {};
+    } else {
+      this.recipes = CHARACTER_RECIPES;
+      this.buildings = BUILDING_RECIPES;
+    }
+    this.buildVat();
+    this.buildAtlas(data.images);
+    this.icons = data.icons ?? new Map();
   }
+
+  /** Command card icons by model id (Warcraft III packs). */
+  readonly icons: Map<string, PackIcon>;
 
   private readonly dataStart: number;
 
-  /** The file and atlases, fetched once and shared by every scene (the game's and the HUD's). */
-  private static files: Promise<[ArrayBuffer, Map<string, HTMLImageElement>]> | null = null;
+  get isWarcraft(): boolean {
+    return this.info.kind === 'wc3';
+  }
 
-  /** Load the characters for a scene. `fog: false` for scenes without the fog of war (HUD pictures). */
-  static async load(scene: Scene, opts: { fog?: boolean } = {}): Promise<CharacterLibrary> {
-    CharacterLibrary.files ??= Promise.all([
+  /** The KayKit file and atlases, fetched once and shared by every scene (the game's and the HUD's). */
+  private static kaykitFiles: Promise<PackData> | null = null;
+  /** The Warcraft III pack (desktop app, when the player made one), fetched once. */
+  private static wc3Files: Promise<PackData | null> | null = null;
+
+  static async loadKayKit(scene: Scene, fog: boolean): Promise<CharacterPack> {
+    CharacterPack.kaykitFiles ??= Promise.all([
       fetch(binUrl).then((r) => r.arrayBuffer()),
       (async () => {
-        const images = new Map<string, HTMLImageElement>();
+        const images = new Map<string, HTMLImageElement | Uint8Array>();
         await Promise.all(
           Object.entries(TEXTURE_URLS).map(async ([path, url]) => {
             const img = new Image();
@@ -451,19 +544,49 @@ export class CharacterLibrary {
         );
         return images;
       })(),
-    ]);
-    const [bin, images] = await CharacterLibrary.files;
-    const lib = new CharacterLibrary(scene, bin, images);
-    lib.fog = opts.fog ?? true;
-    return lib;
+    ]).then(([bin, images]) => ({ bin, images }));
+    return new CharacterPack(scene, await CharacterPack.kaykitFiles, fog);
   }
 
-  private fog = true;
+  /** The player's Warcraft III pack, or null (browsers, none made, switched off, unreadable). */
+  static async loadWarcraft(scene: Scene, fog: boolean): Promise<CharacterPack | null> {
+    CharacterPack.wc3Files ??= (async () => {
+      const bytes = await window.desktop?.wc3?.pack().catch(() => null);
+      if (!bytes) return null;
+      const bin = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      const dv = new DataView(bin);
+      const info = JSON.parse(new TextDecoder().decode(new Uint8Array(bin, 8, dv.getUint32(4, true)))) as FileInfo;
+      const start = 8 + dv.getUint32(4, true);
+      const inflate = async (offset: number, length: number): Promise<Uint8Array> => {
+        const stream = new Blob([new Uint8Array(bin, start + offset, length)]).stream().pipeThrough(new DecompressionStream('deflate'));
+        return new Uint8Array(await new Response(stream).arrayBuffer());
+      };
+      // Textures and icons: zlib-deflated RGBA.
+      const images = new Map<string, HTMLImageElement | Uint8Array>();
+      const icons = new Map<string, PackIcon>();
+      await Promise.all([
+        ...(info.images ?? []).map(async (img) => images.set(img.name, await inflate(img.offset, img.length))),
+        ...Object.entries(info.icons ?? {}).map(async ([id, ic]) => icons.set(id, { size: ic.size, data: await inflate(ic.offset, ic.length) })),
+      ]);
+      return { bin, images, icons };
+    })().catch((e: unknown) => {
+      console.warn('Warcraft III pack unreadable:', e);
+      return null;
+    });
+    const data = await CharacterPack.wc3Files;
+    if (!data) return null;
+    try {
+      return new CharacterPack(scene, data, fog);
+    } catch (e) {
+      console.warn('Warcraft III pack unusable:', e);
+      return null;
+    }
+  }
 
-  /** The animation texture: every rig's frames, stacked in blocks of VAT_BLOCK rows. */
-  private buildVat(dataStart: number): void {
+  /** The animation texture: every rig's frames, stacked in blocks of rows side by side. */
+  private buildVat(): void {
     const rigs = Object.entries(this.info.rigs);
-    const width = Math.max(...rigs.map(([, r]) => r.vat.width));
+    const width = Math.max(1, ...rigs.map(([, r]) => r.vat.width));
     let rows = 0;
     for (const [name, r] of rigs) {
       this.rigRow[name] = rows;
@@ -479,42 +602,56 @@ export class CharacterLibrary {
         });
       }
     }
-    const blocks = Math.ceil(rows / VAT_BLOCK);
+    // Taller blocks when side by side they would be wider than the GPU allows.
+    const maxSize = this.scene.getEngine().getCaps().maxTextureSize || 4096;
+    let block = VAT_BLOCK;
+    while (Math.ceil(rows / block) * width > maxSize && block * 2 <= maxSize) block *= 2;
+    this.vatBlock = block;
+    const blocks = Math.max(1, Math.ceil(rows / block));
     const texW = width * blocks;
-    const data = new Uint16Array(texW * VAT_BLOCK * 4);
+    const data = new Uint16Array(texW * block * 4);
     for (const [name, r] of rigs) {
-      const src = new Uint16Array(this.bin, dataStart + r.vat.offset, r.vat.width * 4 * r.vat.height);
+      const src = new Uint16Array(this.bin, this.dataStart + r.vat.offset, r.vat.width * 4 * r.vat.height);
       for (let y = 0; y < r.vat.height; y++) {
         const row = this.rigRow[name]! + y;
-        const block = Math.floor(row / VAT_BLOCK);
-        const ty = row - block * VAT_BLOCK;
-        data.set(src.subarray(y * r.vat.width * 4, (y + 1) * r.vat.width * 4), (ty * texW + block * width) * 4);
+        const b = Math.floor(row / block);
+        const ty = row - b * block;
+        data.set(src.subarray(y * r.vat.width * 4, (y + 1) * r.vat.width * 4), (ty * texW + b * width) * 4);
       }
     }
     this.vatWidth = width;
-    this.vat = new RawTexture(data, texW, VAT_BLOCK, Constants.TEXTUREFORMAT_RGBA, this.scene, false, false, Texture.NEAREST_SAMPLINGMODE, Constants.TEXTURETYPE_HALF_FLOAT);
-    this.vat.name = 'kaykit-vat';
+    this.vat = new RawTexture(data, texW, block, Constants.TEXTUREFORMAT_RGBA, this.scene, false, false, Texture.NEAREST_SAMPLINGMODE, Constants.TEXTURETYPE_HALF_FLOAT);
+    this.vat.name = `${this.info.kind ?? 'kaykit'}-vat`;
   }
 
-  /** The palette atlases, scaled to ATLAS_SIZE, in one texture array. */
-  private buildAtlas(images: Map<string, ImageBitmap | HTMLImageElement>): void {
-    const n = this.info.textures.length;
-    const S = ATLAS_SIZE;
+  /** The textures, at the atlas size, in one texture array. */
+  private buildAtlas(images: Map<string, HTMLImageElement | Uint8Array>): void {
+    const n = Math.max(1, this.info.textures.length);
+    const S = this.info.atlas ?? ATLAS_SIZE;
     const pixels = new Uint8Array(S * S * 4 * n);
-    const canvas = document.createElement('canvas');
-    canvas.width = S;
-    canvas.height = S;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    let ctx: CanvasRenderingContext2D | null = null;
     this.info.textures.forEach((t, i) => {
       const img = images.get(t);
+      if (img instanceof Uint8Array) {
+        if (img.length === S * S * 4) pixels.set(img, i * S * S * 4);
+        return;
+      }
+      if (!ctx) {
+        const canvas = document.createElement('canvas');
+        canvas.width = S;
+        canvas.height = S;
+        ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      }
       ctx.clearRect(0, 0, S, S);
       if (img) ctx.drawImage(img, 0, 0, S, S);
       pixels.set(ctx.getImageData(0, 0, S, S).data, i * S * S * 4);
     });
     this.atlas = new RawTexture2DArray(pixels, S, S, n, Constants.TEXTUREFORMAT_RGBA, this.scene, true, false, Texture.TRILINEAR_SAMPLINGMODE, Constants.TEXTURETYPE_UNSIGNED_BYTE);
-    this.atlas.wrapU = Texture.CLAMP_ADDRESSMODE;
-    this.atlas.wrapV = Texture.CLAMP_ADDRESSMODE;
-    this.atlas.name = 'kaykit-atlas';
+    // KayKit's swatches stay inside their cells; Warcraft III's skins tile.
+    const wrap = this.isWarcraft ? Texture.WRAP_ADDRESSMODE : Texture.CLAMP_ADDRESSMODE;
+    this.atlas.wrapU = wrap;
+    this.atlas.wrapV = wrap;
+    this.atlas.name = `${this.info.kind ?? 'kaykit'}-atlas`;
   }
 
   get fps(): number {
@@ -526,18 +663,27 @@ export class CharacterLibrary {
   }
 
   has(modelId: string): boolean {
-    return !!CHARACTER_RECIPES[modelId];
+    const r = this.recipes[modelId];
+    return !!r && !r.building;
+  }
+
+  hasAnimatedBuilding(modelId: string): boolean {
+    return !!this.recipes[modelId]?.building;
+  }
+
+  hasBuilding(modelId: string): boolean {
+    return !!this.buildings[modelId];
   }
 
   private material(ghost: GhostMode | null, isStatic = false): StandardMaterial {
     const key = `${ghost ?? 'solid'}${isStatic ? '-static' : ''}`;
     let m = this.materials.get(key);
     if (m) return m;
-    m = new StandardMaterial(`kaykit-${key}`, this.scene);
+    m = new StandardMaterial(`${this.info.kind ?? 'kaykit'}-${key}`, this.scene);
     m.diffuseColor = Color3.White();
     m.specularColor = Color3.Black();
     m.backFaceCulling = isStatic; // the packs' capes and hats are single-sided; buildings are closed
-    const plugin = new CharacterPlugin(m, this.vat, this.atlas, this.vatWidth, isStatic);
+    const plugin = new CharacterPlugin(m, this.vat, this.atlas, this.vatWidth, isStatic, this.vatBlock);
     if (!this.fog) {
       const fog = m.pluginManager?.getPlugin('FogOfWar') as { fogEnabled: boolean } | null;
       if (fog) fog.fogEnabled = false;
@@ -562,6 +708,12 @@ export class CharacterLibrary {
   private u8(offset: number, count: number): Uint8Array {
     return new Uint8Array(this.bin, this.dataStart + offset, count);
   }
+  /** A piece's texture coordinates as floats. */
+  private uvs(p: PieceInfo): ArrayLike<number> {
+    if (p.uvFloat) return this.f32(p.uv, p.vertices * 2);
+    const U = new Uint16Array(this.bin, this.dataStart + p.uv, p.vertices * 2);
+    return Float32Array.from(U, (v) => v / 65535);
+  }
 
   /** The merged mesh of a recipe (built once, hidden: units draw instances of it). */
   private recipeMesh(id: string, recipe: CharacterRecipe, ghost: GhostMode | null): Mesh {
@@ -569,7 +721,7 @@ export class CharacterLibrary {
     let mesh = this.meshes.get(key);
     if (mesh) return mesh;
     const body = this.pieces.get(recipe.body);
-    if (!body) throw new Error(`kaykit: no piece ${recipe.body}`);
+    if (!body) throw new Error(`characters: no piece ${recipe.body}`);
     const rig = this.info.rigs[body.rig]!;
     const pos: number[] = [];
     const nrm: number[] = [];
@@ -582,16 +734,17 @@ export class CharacterLibrary {
       const base = pos.length / 3;
       const P = this.f32(p.position, p.vertices * 3);
       const N8 = new Int8Array(this.bin, this.dataStart + p.normal, p.vertices * 3);
-      const UV16 = new Uint16Array(this.bin, this.dataStart + p.uv, p.vertices * 2);
+      const UV = this.uvs(p);
       const J = this.u8(p.joints, p.vertices * 4);
       const W8 = this.u8(p.weights, p.vertices * 4);
+      const M = p.meta !== undefined ? new Int16Array(this.bin, this.dataStart + p.meta, p.vertices * 4) : null;
       const layer = this.layer.get(p.texture) ?? 0;
       // Props are stored in the space of the joint they hang on: into this rig's bind space.
       let m: number[] | null = null;
       let joint = 0;
       if (p.kind === 'prop') {
         joint = rig.joints.indexOf(p.joint!);
-        if (joint < 0) throw new Error(`kaykit: rig ${body.rig} has no joint ${p.joint}`);
+        if (joint < 0) throw new Error(`characters: rig ${body.rig} has no joint ${p.joint}`);
         m = rig.bindWorld[joint]!;
       }
       for (let i = 0; i < p.vertices; i++) {
@@ -608,13 +761,18 @@ export class CharacterLibrary {
           jnt.push(J[i * 4]!, J[i * 4 + 1]!, J[i * 4 + 2]!, J[i * 4 + 3]!);
           wgt.push(W8[i * 4]! / 255, W8[i * 4 + 1]! / 255, W8[i * 4 + 2]! / 255, W8[i * 4 + 3]! / 255);
         }
-        const u = UV16[i * 2]! / 65535;
-        const v = UV16[i * 2 + 1]! / 65535;
+        const u = UV[i * 2]!;
+        const v = UV[i * 2 + 1]!;
         uv.push(u, v);
-        // The team mask: is the vertex on one of the team's swatches (8 × 4 grid, v down)?
-        const col = Math.min(7, Math.floor(u * 8));
-        const row = Math.min(3, Math.floor(v * 4));
-        meta.push(teamCells.some(([c, r]) => c === col && r === row) ? 1 : 0, layer, 0);
+        if (M) {
+          // Warcraft III: the pack's material per vertex is (mode, layer, visibility, glow 0-255).
+          meta.push(M[i * 4]!, M[i * 4 + 1]!, M[i * 4 + 3]! / 255, M[i * 4 + 2]!);
+        } else {
+          // The team mask: is the vertex on one of the team's swatches (8 × 4 grid, v down)?
+          const col = Math.min(7, Math.floor(u * 8));
+          const row = Math.min(3, Math.floor(v * 4));
+          meta.push(teamCells.some(([c, r]) => c === col && r === row) ? 1 : 0, layer, 0, -1);
+        }
       }
       const I = p.index32 ? new Uint32Array(this.bin, this.dataStart + p.index, p.indices) : new Uint16Array(this.bin, this.dataStart + p.index, p.indices);
       for (let i = 0; i < I.length; i++) idx.push(base + I[i]!);
@@ -625,7 +783,7 @@ export class CharacterLibrary {
       if (name.startsWith('@')) {
         // A prop made in code (CharacterProps.ts), in its joint's space like the packs' props.
         const make = PROCEDURAL_PROPS[name.slice(1)];
-        if (!make) throw new Error(`kaykit: no procedural prop ${name}`);
+        if (!make) throw new Error(`characters: no procedural prop ${name}`);
         const g = make();
         const joint = rig.joints.indexOf(g.joint);
         const m = rig.bindWorld[joint]!;
@@ -644,17 +802,17 @@ export class CharacterLibrary {
           uv.push(u, v);
           const col = Math.min(7, Math.floor(u * 8));
           const row = Math.min(3, Math.floor(v * 4));
-          meta.push(cells.some(([c, r]) => c === col && r === row) ? 1 : 0, layer, g.glow[i]!);
+          meta.push(cells.some(([c, r]) => c === col && r === row) ? 1 : 0, layer, g.glow[i]!, -1);
         }
         for (const i of g.indices) idx.push(base + i);
         continue;
       }
       const p = this.pieces.get(name);
-      if (!p) throw new Error(`kaykit: no piece ${name}`);
+      if (!p) throw new Error(`characters: no piece ${name}`);
       add(p, typeof spec === 'string' ? TEAM_CELLS[p.texture] ?? [] : spec.team);
     }
-    mesh = new Mesh(`kaykit-${key}`, this.scene);
-    mesh.sideOrientation = Material.CounterClockWiseSideOrientation; // glTF winding
+    mesh = new Mesh(`${this.info.kind ?? 'kaykit'}-${key}`, this.scene);
+    mesh.sideOrientation = Material.CounterClockWiseSideOrientation; // glTF's winding (and the converted Warcraft III models')
     const vd = new VertexData();
     vd.positions = pos;
     vd.normals = nrm;
@@ -663,7 +821,7 @@ export class CharacterLibrary {
     mesh.setVerticesData('kkJ', jnt, false, 4);
     mesh.setVerticesData('kkW', wgt, false, 4);
     mesh.setVerticesData('kkUV', uv, false, 2);
-    mesh.setVerticesData('kkMeta', meta, false, 3);
+    mesh.setVerticesData('kkMeta', meta, false, 4);
     // (Not Babylon's instance `color`: its define is only set once an instance buffer exists.)
     mesh.registerInstancedBuffer('kkTeam', 4);
     mesh.instancedBuffers.kkTeam = new Color4(0.58, 0.59, 0.59, 0);
@@ -673,7 +831,8 @@ export class CharacterLibrary {
     mesh.material = this.material(ghost);
     // Animated poses reach past the bind pose (a fallen body, a raised staff): a generous box.
     const h = body.bounds.maxY;
-    mesh.setBoundingInfo(new BoundingInfo(new Vector3(-h * 0.7, -0.3, -h * 0.7), new Vector3(h * 0.7, h * 1.2, h * 0.7)));
+    const r = Math.max(h * 0.7, body.bounds.radius * 1.3);
+    mesh.setBoundingInfo(new BoundingInfo(new Vector3(-r, -0.3, -r), new Vector3(r, h * 1.2, r)));
     mesh.doNotSyncBoundingInfo = true;
     mesh.isVisible = false;
     mesh.isPickable = false;
@@ -686,13 +845,9 @@ export class CharacterLibrary {
     return mesh;
   }
 
-  hasBuilding(modelId: string): boolean {
-    return !!BUILDING_RECIPES[modelId];
-  }
-
   /** The mesh of a building recipe (built once, hidden), and its size once scaled. */
   private buildingMesh(modelId: string, ghost: GhostMode | null): { mesh: Mesh; scale: number; height: number; radius: number } {
-    const recipe = BUILDING_RECIPES[modelId]!;
+    const recipe = this.buildings[modelId]!;
     return this.staticMesh(recipe.piece, recipe.size, ghost);
   }
 
@@ -700,7 +855,7 @@ export class CharacterLibrary {
   private staticMesh(pieceName: string, size: number, ghost: GhostMode | null): { mesh: Mesh; scale: number; height: number; radius: number } {
     const key = `static:${pieceName}|${ghost ?? ''}`;
     const piece = this.pieces.get(pieceName);
-    if (!piece) throw new Error(`kaykit: no piece ${pieceName}`);
+    if (!piece) throw new Error(`characters: no piece ${pieceName}`);
     let mesh = this.meshes.get(key);
     if (!mesh) {
       mesh = this.pieceMesh(key, piece, TEAM_CELLS[piece.texture] ?? [], ghost);
@@ -720,24 +875,25 @@ export class CharacterLibrary {
   private pieceMesh(name: string, p: PieceInfo, teamCells: ReadonlyArray<readonly [number, number]>, ghost: GhostMode | null): Mesh {
     const P = this.f32(p.position, p.vertices * 3);
     const N8 = new Int8Array(this.bin, this.dataStart + p.normal, p.vertices * 3);
-    const UV16 = new Uint16Array(this.bin, this.dataStart + p.uv, p.vertices * 2);
+    const UV = this.uvs(p);
     const layer = this.layer.get(p.texture) ?? 0;
     const nrm = new Float32Array(p.vertices * 3);
     const uv = new Float32Array(p.vertices * 2);
-    const meta = new Float32Array(p.vertices * 3);
+    const meta = new Float32Array(p.vertices * 4);
     for (let i = 0; i < p.vertices; i++) {
       for (let k = 0; k < 3; k++) nrm[i * 3 + k] = N8[i * 3 + k]! / 127;
-      const u = UV16[i * 2]! / 65535;
-      const v = UV16[i * 2 + 1]! / 65535;
+      const u = UV[i * 2]!;
+      const v = UV[i * 2 + 1]!;
       uv[i * 2] = u;
       uv[i * 2 + 1] = v;
       const col = Math.min(7, Math.floor(u * 8));
       const row = Math.min(3, Math.floor(v * 4));
-      meta[i * 3] = teamCells.some(([c, r]) => c === col && r === row) ? 1 : 0;
-      meta[i * 3 + 1] = layer;
+      meta[i * 4] = teamCells.some(([c, r]) => c === col && r === row) ? 1 : 0;
+      meta[i * 4 + 1] = layer;
+      meta[i * 4 + 3] = -1;
     }
     const I = p.index32 ? new Uint32Array(this.bin, this.dataStart + p.index, p.indices) : new Uint16Array(this.bin, this.dataStart + p.index, p.indices);
-    const mesh = new Mesh(`kaykit-${name}`, this.scene);
+    const mesh = new Mesh(`${this.info.kind ?? 'kaykit'}-${name}`, this.scene);
     mesh.sideOrientation = Material.CounterClockWiseSideOrientation; // glTF winding
     const vd = new VertexData();
     vd.positions = Float32Array.from(P);
@@ -748,7 +904,7 @@ export class CharacterLibrary {
     mesh.setVerticesData('kkJ', zeros, false, 4);
     mesh.setVerticesData('kkW', zeros, false, 4);
     mesh.setVerticesData('kkUV', uv, false, 2);
-    mesh.setVerticesData('kkMeta', meta, false, 3);
+    mesh.setVerticesData('kkMeta', meta, false, 4);
     mesh.registerInstancedBuffer('kkTeam', 4);
     mesh.instancedBuffers.kkTeam = new Color4(0.58, 0.59, 0.59, 0);
     mesh.registerInstancedBuffer('kkFrame', 4);
@@ -759,16 +915,16 @@ export class CharacterLibrary {
     return mesh;
   }
 
-  /** A building drawn with the KayKit model (null when the model id has no building recipe). */
+  /** A static building (KayKit's; null when the model id has none). */
   instantiateBuilding(modelId: string, team: number, name: string, ghost: GhostMode | null = null): ModelInstance | null {
-    if (!BUILDING_RECIPES[modelId]) return null;
+    if (!this.buildings[modelId]) return null;
     const { mesh, scale, height, radius } = this.buildingMesh(modelId, ghost);
     const root = new TransformNode(name, this.scene);
     const inst = mesh.createInstance(`${name}-kk`);
     inst.parent = root;
     inst.scaling.setAll(scale);
     inst.isPickable = false;
-    inst.instancedBuffers.kkTeam = new Color4(((team >> 16) & 255) / 255, ((team >> 8) & 255) / 255, (team & 255) / 255, 1);
+    inst.instancedBuffers.kkTeam = teamColor4(team);
     inst.instancedBuffers.kkFrame = new Vector4(0, 0, 0, 0);
     if (!ghost) this.onCaster?.(inst);
     return { id: modelId, root, parts: {}, height, radius, meshes: [inst], dispose: () => root.dispose(false, false) };
@@ -782,16 +938,28 @@ export class CharacterLibrary {
     inst.parent = root;
     inst.scaling.setAll(scale);
     inst.isPickable = false;
-    inst.instancedBuffers.kkTeam = new Color4(((team >> 16) & 255) / 255, ((team >> 8) & 255) / 255, (team & 255) / 255, 1);
+    inst.instancedBuffers.kkTeam = teamColor4(team);
     inst.instancedBuffers.kkFrame = new Vector4(0, 0, 0, 0);
     this.onCaster?.(inst);
     return { id: pieceName, root, parts: {}, height, radius, meshes: [inst], dispose: () => root.dispose(false, false) };
   }
 
-  /** A building in one flat material (placement previews). */
-  instantiateBuildingFlat(modelId: string, material: Material, name: string): ModelInstance | null {
-    if (!BUILDING_RECIPES[modelId]) return null;
-    const { mesh, scale, height, radius } = this.buildingMesh(modelId, null);
+  /** A building in one flat material (placement previews): static or animated (in its rest pose). */
+  instantiateBuildingFlat(modelId: string, material: Material, name: string, size?: number): ModelInstance | null {
+    let mesh: Mesh;
+    let scale: number;
+    let height: number;
+    let radius: number;
+    const recipe = this.recipes[modelId];
+    if (recipe?.building) {
+      mesh = this.recipeMesh(modelId, recipe, null);
+      scale = this.buildingScale(modelId, recipe, size);
+      const b = this.pieces.get(recipe.body)!.bounds;
+      height = b.maxY * scale;
+      radius = b.radius * scale;
+    } else if (this.buildings[modelId]) {
+      ({ mesh, scale, height, radius } = this.buildingMesh(modelId, null));
+    } else return null;
     const root = new TransformNode(name, this.scene);
     const copy = new Mesh(`${name}-flat`, this.scene, root, mesh, true);
     copy.material = material;
@@ -801,21 +969,34 @@ export class CharacterLibrary {
     return { id: modelId, root, parts: {}, height, radius, meshes: [copy], dispose: () => root.dispose(false, false) };
   }
 
-  /** A character for a unit of the given model id (null when the model has no recipe). */
-  instantiate(modelId: string, team: number, name: string, ghost: GhostMode | null = null): CharacterInstance | null {
-    const recipe = CHARACTER_RECIPES[modelId];
+  /** World units per model unit for an animated building `size` wide (its footprint). */
+  private buildingScale(modelId: string, recipe: CharacterRecipe, size = 3): number {
+    const b = this.pieces.get(recipe.body)!.bounds;
+    // The rest pose's widest horizontal extent, about its centre: a little over the footprint.
+    const width = Math.max(0.1, b.radius * 1.5);
+    return ((size * 1.05) / width) * (recipe.buildingScale ?? 1);
+  }
+
+  /**
+   * A character for a unit of the given model id (null when this pack has no recipe for it); for
+   * animated buildings, `size` is the footprint it fills.
+   */
+  instantiate(modelId: string, team: number, name: string, ghost: GhostMode | null = null, size?: number): CharacterInstance | null {
+    const recipe = this.recipes[modelId];
     if (!recipe) return null;
     const source = this.recipeMesh(modelId, recipe, ghost);
     const body = this.pieces.get(recipe.body)!;
     const root = new TransformNode(name, this.scene);
     const scaleNode = new TransformNode(`${name}-scale`, this.scene);
     scaleNode.parent = root;
-    const k = recipe.height / (body.bounds.maxY - body.bounds.minY);
+    const k = recipe.building ? this.buildingScale(modelId, recipe, size) : recipe.height / Math.max(0.01, body.bounds.maxY - body.bounds.minY);
     scaleNode.scaling.setAll(k);
     const inst = source.createInstance(`${name}-kk`);
     inst.parent = scaleNode;
     inst.isPickable = false;
-    inst.instancedBuffers.kkTeam = new Color4(((team >> 16) & 255) / 255, ((team >> 8) & 255) / 255, (team & 255) / 255, 1);
+    // Fliers hover above the ground.
+    if (recipe.lift) inst.position.y = recipe.lift / k;
+    inst.instancedBuffers.kkTeam = teamColor4(team);
     const frame = new Vector4(0, 0, 0, 0);
     inst.instancedBuffers.kkFrame = frame;
     if (!ghost) this.onCaster?.(inst);
@@ -825,7 +1006,7 @@ export class CharacterLibrary {
       id: modelId,
       root,
       parts: {},
-      height: recipe.height,
+      height: recipe.building ? body.bounds.maxY * k : recipe.height + (recipe.lift ?? 0),
       radius: Math.max(0.3, body.bounds.radius * k),
       meshes: [inst],
       recipe,
@@ -840,17 +1021,115 @@ export class CharacterLibrary {
   }
 
   /** Build (and compile) one character's mesh and material ahead of time. */
-  async warmUp(modelId = 'footman'): Promise<void> {
-    const recipe = CHARACTER_RECIPES[modelId];
-    if (!recipe) return;
-    const mesh = this.recipeMesh(modelId, recipe, null);
+  async warmUp(modelId?: string): Promise<void> {
+    const id = modelId && this.recipes[modelId] ? modelId : Object.keys(this.recipes).find((k) => k === 'footman') ?? Object.keys(this.recipes)[0];
+    const recipe = id ? this.recipes[id] : undefined;
+    if (!id || !recipe) return;
+    const mesh = this.recipeMesh(id, recipe, null);
     await mesh.material!.forceCompilationAsync(mesh, { useInstances: true }).catch(() => undefined);
   }
 
   /** Scale from the recipe's body (model units → world). */
   scaleOf(modelId: string): number {
-    const r = CHARACTER_RECIPES[modelId];
+    const r = this.recipes[modelId];
     const b = r && this.pieces.get(r.body);
-    return r && b ? r.height / (b.bounds.maxY - b.bounds.minY) : 1;
+    return r && b ? r.height / Math.max(0.01, b.bounds.maxY - b.bounds.minY) : 1;
+  }
+}
+
+// ------------------------------------------------------------------ library
+/**
+ * The characters a scene draws: the player's Warcraft III models (desktop app, when imported and
+ * switched on) for the units they cover, KayKit's for the rest.
+ */
+export class CharacterLibrary {
+  private readonly packs: CharacterPack[];
+
+  private constructor(
+    private readonly kaykit: CharacterPack,
+    private readonly wc3: CharacterPack | null,
+  ) {
+    this.packs = wc3 ? [wc3, kaykit] : [kaykit];
+  }
+
+  /** Load the characters for a scene. `fog: false` for scenes without the fog of war (HUD pictures). */
+  static async load(scene: Scene, opts: { fog?: boolean } = {}): Promise<CharacterLibrary> {
+    const fog = opts.fog ?? true;
+    const [kaykit, wc3] = await Promise.all([CharacterPack.loadKayKit(scene, fog), CharacterPack.loadWarcraft(scene, fog)]);
+    return new CharacterLibrary(kaykit, wc3);
+  }
+
+  /** Whether Warcraft III models are in use, and how many unit types they cover. */
+  get warcraftUnits(): number {
+    return this.wc3 ? Object.keys(this.wc3.recipes).length : 0;
+  }
+
+  set onCaster(fn: ((mesh: AbstractMesh) => void) | null) {
+    for (const p of this.packs) p.onCaster = fn;
+  }
+  set onSource(fn: ((mesh: Mesh) => void) | null) {
+    for (const p of this.packs) p.onSource = fn;
+  }
+  get sources(): Mesh[] {
+    return this.packs.flatMap((p) => p.sources);
+  }
+
+  private packOf(modelId: string): CharacterPack | null {
+    return this.packs.find((p) => p.has(modelId)) ?? null;
+  }
+
+  has(modelId: string): boolean {
+    return !!this.packOf(modelId);
+  }
+
+  /** A character for a unit of the given model id (null when no pack has a recipe for it). */
+  instantiate(modelId: string, team: number, name: string, ghost: GhostMode | null = null): CharacterInstance | null {
+    return this.packOf(modelId)?.instantiate(modelId, team, name, ghost) ?? null;
+  }
+
+  hasBuilding(modelId: string): boolean {
+    return this.packs.some((p) => p.hasAnimatedBuilding(modelId) || p.hasBuilding(modelId));
+  }
+
+  /**
+   * A building: an animated one (Warcraft III's, a CharacterInstance that plays its construction,
+   * stand and death), else a static one (KayKit's); null when neither pack has it. `size` is the
+   * footprint (animated buildings are scaled to it).
+   */
+  instantiateBuilding(modelId: string, team: number, name: string, ghost: GhostMode | null = null, size?: number): ModelInstance | CharacterInstance | null {
+    for (const p of this.packs) {
+      if (p.hasAnimatedBuilding(modelId)) return p.instantiate(modelId, team, name, ghost, size);
+      if (p.hasBuilding(modelId)) return p.instantiateBuilding(modelId, team, name, ghost);
+    }
+    return null;
+  }
+
+  /** Any of KayKit's static pieces (construction stages, rubble), `size` wide, in a team colour. */
+  instantiateStatic(pieceName: string, team: number, name: string, size: number): ModelInstance {
+    return this.kaykit.instantiateStatic(pieceName, team, name, size);
+  }
+
+  /** A building in one flat material (placement previews). */
+  instantiateBuildingFlat(modelId: string, material: Material, name: string, size?: number): ModelInstance | null {
+    for (const p of this.packs) {
+      const m = p.instantiateBuildingFlat(modelId, material, name, size);
+      if (m) return m;
+    }
+    return null;
+  }
+
+  /** Build (and compile) the packs' shaders ahead of time. */
+  async warmUp(modelId?: string): Promise<void> {
+    await Promise.all(this.packs.map((p) => p.warmUp(modelId)));
+  }
+
+  /** Scale from the recipe's body (model units → world). */
+  scaleOf(modelId: string): number {
+    return this.packOf(modelId)?.scaleOf(modelId) ?? 1;
+  }
+
+  /** The Warcraft III command card icon of a model id, when the pack has one. */
+  icon(modelId: string): PackIcon | null {
+    return this.wc3?.icons.get(modelId) ?? null;
   }
 }

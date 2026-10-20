@@ -43,6 +43,10 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "npmRebuild": false,
     "win": {
       "target": [
         {
@@ -53,7 +57,14 @@
         }
       ],
       "signExecutable": false,
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "files": [
+        "!node_modules/@jamiephan/*/prebuilds/{darwin-*,linux-*,win32-arm64}/**",
+        "!node_modules/@jamiephan/*/src/**",
+        "!node_modules/@jamiephan/*/binding.gyp",
+        "!node_modules/war3-model/dist/{es,war3-model.browser.*}",
+        "!**/*.map"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -70,5 +81,10 @@
       }
     ],
     "publish": null
+  },
+  "dependencies": {
+    "@jamiephan/casclib": "0.3.0",
+    "@jamiephan/stormlib": "0.3.0",
+    "war3-model": "4.0.1"
   }
 }

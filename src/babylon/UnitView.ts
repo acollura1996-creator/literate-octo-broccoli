@@ -248,10 +248,13 @@ export class UnitView {
     this.model?.dispose();
     this.poses.clear();
     const chars = this.assets.characters;
-    this.character = !u.isBuilding && chars?.has(u.modelId) ? chars.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost) : null;
+    const color = u.def.modelColor ?? u.owner.color;
+    const building = u.isBuilding ? chars?.instantiateBuilding(u.modelId, color, `model-${u.id}`, ghost, u.def.footprint) : null;
+    // Warcraft III's buildings are animated characters too (construction, stand, death).
+    const animated = building && 'animator' in building ? (building as CharacterInstance) : null;
+    this.character = !u.isBuilding && chars?.has(u.modelId) ? chars.instantiate(u.modelId, color, `model-${u.id}`, ghost) : animated;
     if (this.character && this.anim.deathClip) this.character.animator.play(this.anim.deathClip, { loop: false, fade: 0, at: 99 });
-    const building = u.isBuilding ? chars?.instantiateBuilding(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost) : null;
-    this.kkBuilding = !!building;
+    this.kkBuilding = !!building && !animated;
     this.stage?.model.dispose();
     this.stage = null;
     this.model = this.character ?? building ?? this.assets.models.instantiate(u.modelId, u.def.modelColor ?? u.owner.color, `model-${u.id}`, ghost);
@@ -393,6 +396,8 @@ export class UnitView {
 
   private syncConstruction(u: Unit): void {
     const rootNode = this.model.root;
+    // (Animated buildings play their own construction: animateBuilding.)
+    if (this.character) return;
     if (this.kkBuilding) {
       // The pack's stages: foundations, walls going up, a roofless frame; then the building.
       const want = u.underConstruction ? (u.buildProgress < 0.34 ? 'hex/stage_A' : u.buildProgress < 0.67 ? 'hex/stage_B' : 'hex/stage_C') : null;
@@ -434,6 +439,10 @@ export class UnitView {
     const r = c.recipe;
     const a = c.animator;
     const st = this.anim;
+    if (r.building) {
+      this.animateBuilding(u, dt, time);
+      return;
+    }
     const scale = this.assets.characters!.scaleOf(u.modelId) * this.rootScale;
     st.deathClip = ''; // alive (again, for a revived hero)
     a.update(dt);
@@ -451,10 +460,11 @@ export class UnitView {
     }
     // Heroes raise their arms when they gain a level (if not busy fighting or walking).
     const level = u.level ?? 0;
-    if (st.level && level > st.level && a.has('Cheer')) st.cheerUntil = time + 1.6;
+    const cheer = r.cheer ?? 'Cheer';
+    if (st.level && level > st.level && a.has(cheer)) st.cheerUntil = time + Math.max(1.2, a.clipInfo(cheer)?.duration ?? 1.6);
     st.level = level;
     if (time < st.cheerUntil && u.anim === 'stand' && !u.moving) {
-      a.play('Cheer', { loop: false, fade: 0.15 });
+      a.play(cheer, { loop: false, fade: 0.15 });
       c.syncFrames();
       return;
     }
@@ -502,6 +512,31 @@ export class UnitView {
         }
         a.play(idle, { loop: true, rate: 1, fade: 0.25 });
       }
+    }
+    c.syncFrames();
+  }
+
+  /**
+   * An animated building (Warcraft III's): its construction ("Birth") follows the build progress;
+   * built, it stands, works while training or researching, and towers play their attack.
+   */
+  private animateBuilding(u: Unit, dt: number, time: number): void {
+    const c = this.character!;
+    const r = c.recipe;
+    const a = c.animator;
+    const st = this.anim;
+    st.deathClip = '';
+    a.update(dt);
+    const birth = r.spawn ? a.clipInfo(r.spawn) : null;
+    if (u.underConstruction && birth && r.spawn) {
+      a.play(r.spawn, { loop: false, fade: 0 });
+      a.seek(Math.max(0, Math.min(1, u.buildProgress)) * birth.duration);
+    } else if (u.anim === 'attack' && r.attack.length && Math.abs(time - u.animTime - st.attackStart) > 0.05) {
+      st.attackStart = time - u.animTime;
+      a.play(r.attack[st.attackIndex++ % r.attack.length]!, { loop: false, restart: true, fade: 0.08 });
+    } else if (a.finished || r.idle.includes(a.current) || a.current === r.spawn || a.current === r.work) {
+      const working = !!r.work && (u.trainQueue.length > 0 || !!u.researching);
+      a.play(working ? r.work! : r.idle[0]!, { loop: true, fade: a.current === r.spawn ? 0 : 0.3 });
     }
     c.syncFrames();
   }

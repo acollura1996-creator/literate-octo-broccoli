@@ -1,7 +1,7 @@
 // Which units are drawn as rigged KayKit characters (Characters.ts), and how: the body, the props
 // they wear and carry (any prop fits any body), their height in the world, and the clips they play
 // for each of the simulation's animation states. Units without a recipe keep their baked
-// procedural model.
+// procedural model. (The player's Warcraft III pack brings its own recipes: wc3Recipe below.)
 
 /** Atlas swatches (column, row of the packs' 8 × 4 palette grid) that take the team colour. */
 export type TeamCells = ReadonlyArray<readonly [number, number]>;
@@ -71,6 +71,65 @@ export interface CharacterRecipe {
   spin?: string;
   /** Rapid fire: the attack clip loops while the unit keeps shooting. */
   rapid?: boolean;
+  /** Raised arms for a hero's new level (default 'Cheer'). */
+  cheer?: string;
+  /** World units above the ground (fliers). */
+  lift?: number;
+  /** An animated building (Warcraft III's): `spawn` is its construction, scaled to its footprint. */
+  building?: boolean;
+  buildingScale?: number;
+}
+
+// ------------------------------------------------------------------ Warcraft III
+/** A recipe as the Warcraft III importer writes it (electron/wc3/importer.ts). */
+export interface Wc3PackRecipe {
+  body: string;
+  kind: 'unit' | 'building';
+  idle: string[];
+  combatIdle?: string;
+  walk: string;
+  run?: string;
+  attack: string[];
+  cast: string;
+  work?: string;
+  death: string[];
+  spawn?: string;
+  cheer?: string;
+  spin?: string;
+  /** Rest pose height in model units (Warcraft III units / 100), the model's own scale and the catalog's. */
+  restHeight: number;
+  modelScale: number;
+  scale: number;
+  lift?: number;
+  rapid?: boolean;
+}
+
+/** World units per model unit: Warcraft III's proportions at the game's scale (a Footman ~1.3 tall). */
+export const WC3_WORLD = 1.5;
+
+export function wc3Recipe(r: Wc3PackRecipe): CharacterRecipe {
+  const attack = r.attack.length ? r.attack : [r.cast];
+  return {
+    body: r.body,
+    props: [],
+    height: Math.max(0.3, r.restHeight * r.modelScale * r.scale * WC3_WORLD),
+    idle: r.idle,
+    combatIdle: r.combatIdle,
+    walk: r.walk,
+    run: r.run,
+    runAbove: 4.2,
+    attack,
+    cast: r.cast,
+    work: r.work,
+    death: r.death,
+    spawn: r.spawn,
+    spin: r.spin,
+    rapid: r.rapid,
+    cheer: r.cheer,
+    lift: r.lift,
+    building: r.kind === 'building',
+    buildingScale: r.kind === 'building' ? r.scale : undefined,
+  };
 }
 
 /** The Knight's shields show the team colour on their metal face. */

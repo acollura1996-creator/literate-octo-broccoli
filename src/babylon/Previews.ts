@@ -51,7 +51,7 @@ export class Previews {
 
   beginPlacement(modelId: string, _color: number, footprint: number): void {
     this.endPlacement();
-    const model = this.characters?.instantiateBuildingFlat(modelId, this.ok, 'placement') ?? this.models.instantiateFlat(modelId, this.ok, 'placement');
+    const model = this.characters?.instantiateBuildingFlat(modelId, this.ok, 'placement', footprint) ?? this.models.instantiateFlat(modelId, this.ok, 'placement');
     const tiles = CreateGround('placement-tiles', { width: footprint, height: footprint, subdivisions: footprint }, this.scene);
     tiles.material = this.ok;
     tiles.position.y = 0.12;

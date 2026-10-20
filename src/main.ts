@@ -6,6 +6,7 @@ import { Overlay } from './ui/overlay.ts';
 import { Game } from './game/game.ts';
 import { Input } from './input.ts';
 import { Hud } from './ui/hud.ts';
+import { bindWarcraftModels } from './ui/wc3.ts';
 import { HEROES, HERO_IDS } from './data/heroes.ts';
 import { UNITS } from './data/units.ts';
 import { ABILITIES } from './game/abilities.ts';
@@ -190,6 +191,7 @@ function buildTitle(): void {
     startGame();
   });
   $('btn-help').addEventListener('click', () => openModal('modal-help'));
+  bindWarcraftModels(() => openModal('modal-wc3'));
   document.querySelectorAll<HTMLElement>('.path').forEach((x) => x.classList.toggle('selected', x.dataset['mode'] === settings.mode));
   $('hero-pick').classList.toggle('hidden', settings.mode !== 'hero');
   renderRivalRows();
@@ -228,6 +230,7 @@ function bindModals(): void {
       closeModal('modal-menu');
       setPaused(false);
     } else if (act === 'help') openModal('modal-help');
+    else if (act === 'wc3') openModal('modal-wc3');
     else if (act === 'quests') showQuests();
     else if (act === 'restart') {
       closeModal('modal-menu');

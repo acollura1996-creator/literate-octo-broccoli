@@ -169,15 +169,14 @@ export class UiRenderer {
 
   /** A model or, for units with a recipe, a rigged character (posed in its idle). */
   instantiate(modelId: string, color: number, name: string): ModelInstance {
-    const b = this.characters.instantiateBuilding(modelId, color, name);
-    if (b) return b;
-    const c = this.characters.instantiate(modelId, color, name);
-    if (c) {
-      c.animator.update(0.35);
-      c.syncFrames();
-      return c;
+    const c = this.characters.instantiateBuilding(modelId, color, name) ?? this.characters.instantiate(modelId, color, name);
+    if (c && 'animator' in c) {
+      // Characters (and Warcraft III's animated buildings) are posed a moment into their idle.
+      const ch = c as CharacterInstance;
+      ch.animator.update(0.35);
+      ch.syncFrames();
     }
-    return this.models.instantiate(modelId, color, name);
+    return c ?? this.models.instantiate(modelId, color, name);
   }
 
   /** Data URL icon for a model id rendered with a team colour (cached). */
@@ -185,6 +184,20 @@ export class UiRenderer {
     const key = `${modelId}|${color}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
+    // The player's Warcraft III icon, when their pack has one.
+    const wc3 = this.characters.icon(modelId);
+    if (wc3) {
+      const c = document.createElement('canvas');
+      c.width = wc3.size;
+      c.height = wc3.size;
+      const ctx = c.getContext('2d')!;
+      const img = ctx.createImageData(wc3.size, wc3.size);
+      img.data.set(wc3.data);
+      ctx.putImageData(img, 0, 0);
+      const url = c.toDataURL();
+      this.cache.set(key, url);
+      return url;
+    }
     const m = this.instantiate(modelId, color, `icon-${modelId}`);
     this.lights.icon();
     frame(this.iconCam, m, isBuilding);

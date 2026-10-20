@@ -111,6 +111,7 @@
               </label>
               <button id="btn-start" class="big-btn">Begin the Conquest</button>
               <button id="btn-help" class="small-btn">How to play</button>
+              <button id="btn-wc3" class="small-btn hidden">Warcraft III models…</button>
             </div>
           </div>
         </div>
@@ -143,6 +144,7 @@
             </label>
           </div>
           <button data-act="help" class="small-btn">How to Play</button>
+          <button data-act="wc3" id="menu-wc3" class="small-btn hidden">Warcraft III Models</button>
           <button data-act="quests" class="small-btn">Quests</button>
           <button data-act="restart" class="small-btn">Restart</button>
           <button data-act="quit" class="small-btn">Quit to Title</button>
@@ -224,6 +226,25 @@
             <button data-act="restart" class="big-btn">Play Again</button>
             <button data-act="quit" class="small-btn">Title Screen</button>
           </div>
+        </div>
+      </div>
+
+      <div id="modal-wc3" class="modal hidden">
+        <div class="panel">
+          <h2>Warcraft III Models</h2>
+          <p class="setup-note">
+            If Warcraft III is installed on this computer (Reforged, or the classic game), Heroes &amp; Empires can draw
+            its units and buildings with the original Warcraft III models and animations. They are converted here from
+            your own copy and stay on this computer.
+          </p>
+          <p id="wc3-status" class="wc3-status">Checking…</p>
+          <div id="wc3-progress" class="wc3-progress hidden"><div class="wc3-bar"></div><span class="wc3-step"></span></div>
+          <label class="check wc3-check"><input type="checkbox" id="wc3-enabled" /> Use the Warcraft III models</label>
+          <button id="wc3-import" class="big-btn">Import from Warcraft III…</button>
+          <button id="wc3-reload" class="small-btn hidden">Restart now to see them</button>
+          <button id="wc3-report" class="small-btn hidden">Show the import report</button>
+          <button id="wc3-remove" class="small-btn hidden">Remove the imported models</button>
+          <button data-act="close" class="small-btn">Close</button>
         </div>
       </div>
 

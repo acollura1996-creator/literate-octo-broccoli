@@ -22,6 +22,35 @@ export interface PerfStats {
   frameMs?: number;
 }
 
+/** The desktop app's Warcraft III importer (electron/wc3/desktop.ts). */
+export interface Wc3Status {
+  installed: boolean;
+  enabled: boolean;
+  source?: string;
+  created?: string;
+  bytes?: number;
+  units?: number;
+  missing?: string[];
+  failed?: string[];
+  busy: boolean;
+}
+export interface Wc3Progress {
+  stage: 'open' | 'data' | 'models' | 'write' | 'done';
+  done: number;
+  total: number;
+  current?: string;
+}
+export interface Wc3Bridge {
+  status(): Promise<Wc3Status>;
+  choose(): Promise<string | null>;
+  import(dir: string): Promise<{ ok: boolean; error?: string; log?: string[]; status: Wc3Status }>;
+  enable(on: boolean): Promise<Wc3Status>;
+  remove(): Promise<Wc3Status>;
+  showReport(): Promise<boolean>;
+  pack(): Promise<Uint8Array | null>;
+  onProgress(cb: (p: Wc3Progress) => void): () => void;
+}
+
 /** The Artifact viewer's hot-reload hooks (keeps the title-screen settings across updates). */
 export interface ArtifactHot<T> {
   data?: T;
@@ -34,7 +63,7 @@ declare global {
   var webkitOfflineAudioContext: typeof OfflineAudioContext | undefined;
   interface Window {
     /** The Electron preload bridge (absent in browsers). */
-    desktop?: { isElectron: boolean; toggleFullscreen(): Promise<boolean> };
+    desktop?: { isElectron: boolean; toggleFullscreen(): Promise<boolean>; wc3?: Wc3Bridge };
     claude?: { hot?: ArtifactHot<unknown> };
     webkitAudioContext?: typeof AudioContext;
     // Debug and test handles.

@@ -23,6 +23,9 @@ tiles (Lordaeron grass, dirt, flagstones, blight, cliff rock) with crisp, irregu
 rounded trees, grass tufts and flowers, bright water with shore foam, and chunky models with
 painted brick, plank, thatch and tile detail under warm, saturated light.
 
+(In the desktop app the game can use the original Warcraft III models instead, made from your own
+copy of Warcraft III: see [below](#warcraft-iii-models-desktop-app).)
+
 Soldiers, spellcasters, heroes and Kalenden's undead are rigged, animated characters from Kay
 Lousberg's free [KayKit](https://kaylousberg.com) *Adventurers* and *Skeletons* packs (CC0): they
 swing, shoot, cast, cheer and fall with hand-made animations, timed to the game's attacks and
@@ -62,11 +65,45 @@ an uninstaller in *Apps & features*. The app icon comes from `build/icon.png`.
 - The installer isn't code-signed, so on first run Windows SmartScreen may say "Windows protected
   your PC": choose *More info → Run anyway*. To sign it, set `build.win.signExecutable` to `true`
   in `package.json` and supply a certificate (`CSC_LINK` and `CSC_KEY_PASSWORD`).
-- Vite bundles the whole game, so every package is a devDependency and the installer ships only
-  `dist/` and `dist-electron/`.
+- Vite bundles the whole game, so the installer ships `dist/` and `dist-electron/` plus the three
+  packages the Warcraft III importer runs in the desktop app (`war3-model`, and CascLib and
+  StormLib's prebuilt Node bindings, unpacked from the archive). Every other package is a
+  devDependency.
 
 In the desktop app, **F11** or **Alt+Enter** toggles fullscreen (during a game F11 opens the
 Generals board, so use Alt+Enter or the ⛶ button). Developer tools are disabled in the installed app.
+
+### Warcraft III models (desktop app)
+
+If Warcraft III is installed on the same computer, the desktop app can draw the game's units and
+buildings with the original Warcraft III models: **Warcraft III models…** on the title screen (or in
+the in-game Menu), then **Import from Warcraft III…** and choose the folder the game is installed in.
+
+- It reads Reforged's CASC storage (its classic art, `war3.w3mod`), a classic install's MPQ archives
+  (War3.mpq, War3x.mpq, War3Patch.mpq), or a folder of files already extracted.
+- About a hundred of the game's unit and building types have a Warcraft III counterpart
+  (`electron/wc3/catalog.ts`): Footman, Knight, Rifleman, Priest and Sorceress, the Paladin,
+  Archmage, Blademaster and Mountain King, the creeps and bosses, the town hall from Great Hall to
+  Castle, farms, barracks, towers and the neutral buildings. The modern and future ages' vehicles
+  and troopers keep the game's own models.
+- Each model keeps its skeleton, animations, textures and team colour; parts that appear and vanish
+  (weapons, a corpse's gear) do so as in Warcraft III. Walks are paced to the unit's speed, attacks
+  land on the unit table's damage point, heroes play their victory animation on a new level, and
+  buildings play their construction as they are built and collapse when destroyed. The command
+  card uses the Warcraft III icons.
+- Particle effects (fire, glows, trails) and Reforged's HD models aren't converted.
+- The import takes a minute or less and writes a single pack and a report to a `wc3` folder in
+  the app's data folder (under `%APPDATA%`; *Show the import report* opens it). The game loads the
+  pack at start, so restart it after importing. The same dialog switches the models off or removes them, and opens the report
+  (what was found, converted or missing, and why).
+- From a terminal: `npm run build`, then
+  `node dist-electron/wc3/cli.js "C:\Program Files (x86)\Warcraft III" out-folder` writes the
+  same pack and report (`--only footman,knight` converts a few, `--file knight=Knight` names
+  another model).
+
+The pack is made from the player's own copy of Warcraft III and stays on their computer: nothing
+from Warcraft III is part of this repository, the installer or the browser version. It is
+Blizzard's art, for personal use only, so don't share it.
 
 ## The land of Kalenden
 
@@ -284,6 +321,13 @@ WC3's attack-type/armor-type damage table and armor formula.
 ## Code layout
 
 ```
+electron/
+  main.ts, preload.ts  the desktop app: one secure window, the app:// protocol, the page's bridge
+  wc3/                 the Warcraft III importer (desktop app): mdx.ts reads models (versions 800
+                       to 1800), textures.ts BLP, DDS and TGA, convert.ts turns a model into the
+                       character format, source.ts reads CASC, MPQ or extracted files, unitdata.ts
+                       the unit tables, catalog.ts which model draws which unit, importer.ts writes
+                       the pack, desktop.ts and worker.ts run it from the app, cli.ts from a terminal
 src/
   main.ts              title screen, game setup, main loop
   input.ts             selection, smart orders, targeting, building placement, hotkeys
@@ -300,16 +344,19 @@ src/
   world/               map layout, terrain generation, A* path grid, noise
   babylon/             Babylon.js renderer: view, camera, painted terrain and water, foliage,
                        models, rigged characters (Characters.ts: GPU skinning from a vertex
-                       animation texture; CharacterRecipes.ts: which unit wears what and plays
-                       which clips), effects, HUD icons and portrait, spatial audio
-  ui/                  HUD console, command card, minimap, 2D overlay (health bars, floating text)
+                       animation texture, from KayKit's pack or the player's Warcraft III pack;
+                       CharacterRecipes.ts: which unit wears what and plays which clips),
+                       effects, HUD icons and portrait, spatial audio
+  ui/                  HUD console, command card, minimap, 2D overlay (health bars, floating text),
+                       the Warcraft III models dialog (wc3.ts)
   assets/kaykit/        the KayKit characters (kaykit.bin, palette atlases, licences), made by tools/kaykit/import.mjs
   generated/           models.glb, baked by tools/bake-models.mjs (not committed)
 tools/
   models/              the procedural model builders (three.js geometry, build time only)
   bake-models.mjs      runs the builders in Node and writes src/generated/models.glb
   kaykit/import.mjs    fetches the KayKit packs from GitHub and writes src/assets/kaykit/kaykit.bin
-  characters.html      dev gallery of the rigged characters in any animation (/tools/characters.html)
+  characters.html      dev gallery of the rigged characters in any animation (/tools/characters.html;
+                       ?wc3=<url of a pack> shows a Warcraft III pack's)
   gallery-babylon.html dev gallery of the baked models in the game's renderer (/tools/gallery-babylon.html)
   textures.html        preview of the procedurally painted ground and foliage textures (/tools/textures.html)
   gallery.html         the builders' own three.js gallery, for editing models (/tools/gallery.html)

@@ -2,8 +2,10 @@
 
 Status: **done.** All milestones are complete (section 3), including two added after review: M13,
 the art pass (M8's upgrade kept the original look under post-processing, and the result still looked
-like the three.js version), and M14: rigged and animated characters and buildings, unit sounds, a
-larger map with more to do, and Warcraft III-style scrolling. The game is strict TypeScript on Babylon.js, built with Vite and packaged with
+like the three.js version), M14: rigged and animated characters and buildings, unit sounds, a
+larger map with more to do, and Warcraft III-style scrolling, and M15: the desktop app can draw the
+units and buildings with the original Warcraft III models, converted on the player's computer from
+their own copy. The game is strict TypeScript on Babylon.js, built with Vite and packaged with
 Electron; three.js is used only at build time, to bake the procedural models. One item couldn't be
 checked in this environment: running the installed game from the Windows `.exe` needs a Windows PC
 (D5).
@@ -590,6 +592,39 @@ The three.js renderer kept working in parallel, behind `?renderer=three`, until 
     - Opening view, software rendered: Low draws 0.52M triangles in 57 draw calls (M13: 0.70M, 64); High 0.98M in 260 (M13: 1.27M, 255). The 384 map's ground is split into chunks that are culled one by one, and start-up on High is faster than M13's (the exposure setting no longer re-flags every material).
     - The 120-unit benchmark (355 units with the new map's creeps): Low 201 draw calls, High 577 (M13: 658–674). Each character or KayKit building type is one draw call whatever its units are doing. Skinning runs in the vertex shader, which a graphics card absorbs. In this environment's software renderer it is costly, so Low skins from the nearest frame without crossfades.
     - Not checked here: listening to the sounds (they were checked by rendering them offline: levels, durations, spectra, no clipping), and frame rates on real hardware.
+- [x] **M15 – Warcraft III models from the player's own install** (added after review: "using universal modder, can you actually create a good recreation?"; the player chose both routes: their own Warcraft III art, and generated models for what it lacks).
+  - **Route A, done: an importer in the desktop app** (`electron/wc3/`). *Warcraft III models…* on the title screen or in the Menu, then *Import from Warcraft III…* and the install folder. It follows Universal Modder's technique note on converting Warcraft III's classic models.
+    - Reading the game's files: Reforged's CASC storage (CascLib; its classic art under `war3.w3mod:`), a classic install's MPQ archives (StormLib; War3.mpq, War3x.mpq, War3Patch.mpq in that order), or a folder of extracted files. Names are matched without regard to case or slashes. A storage that can't list its files is probed at the usual paths.
+    - `mdx.ts` reads models of versions 800 to 1800. Every chunk and object is read by its declared size, and unknown chunks are skipped. Reforged's layers name their textures in a (texture, slot) table; one that doesn't hold together or names no real texture is searched for in the layer's bytes. A geoset block it doesn't know is stepped over to the texture coordinates. Every guess goes in the report.
+    - `textures.ts`: BLP1 (JPEG and paletted, decoded by war3-model), DDS (DXT1/3/5 and plain RGBA) and TGA, resized to 256².
+    - `convert.ts`:
+      - Geosets: only the first level of detail. Effect layers (additive and modulate) and team glows are dropped, and so are geosets never visible in the sequences kept.
+      - Materials: a layer over the team colour (replaceable texture 1) shows the team colour where the skin's alpha is low; transparent and blended layers become alpha-tested; a lone team-colour layer is solid team colour.
+      - Skinning: from the matrix groups with equal weights, first four bones (Reforged skin weights when present).
+      - Animation: each sequence a unit or building uses is sampled at 20 frames a second with Warcraft III's rules. Only keys inside the sequence count, values hold before the first and after the last, tracks on global sequences run on their own clock, and interpolation is step, linear (slerp for rotations), Hermite or Bézier.
+      - Coordinates: Warcraft III's Z-up, +X-facing frame turns into the game's Y-up, +Z-facing one by a rotation, so the triangles keep their winding.
+      - Visibility: parts that appear and vanish (a weapon, a corpse's gear) get a per-frame visibility value.
+    - `catalog.ts` names the model for about a hundred of the game's unit and building types, with fallbacks. It covers infantry, cavalry, siege, casters, the five heroes, every creep and boss, the town hall from Great Hall to Castle, houses, farms and the military buildings, and the neutral buildings. It also says which sequences play for each state: Stand and its variants, Stand Ready, Walk, Attack and its variants, Spell, Death, Birth, Stand Victory, Stand Work, spins.
+    - `unitdata.ts` reads Warcraft III's unit tables, both the SYLK and the INI style: each model's scale (`modelScale:sd`), its attack's damage point (`dmgpt1`) and its command-card icon (`Art`).
+    - `importer.ts` writes one pack in the KayKit pack's container: rigs, animation rows, pieces, recipes, the textures and icons (deflated RGBA), plus a report. It runs on a worker thread, so the window stays responsive, and it writes only to the app's data folder. The page can import only a folder the player picked in the dialog. `cli.ts` does the same from a terminal.
+  - **Rendering** (`Characters.ts`). Each pack is a `CharacterPack` with its own animation texture, texture array and materials. `CharacterLibrary` draws a unit from the Warcraft III pack when it has the unit, else from KayKit's, through the same API, so `UnitView`, previews, icons and portraits needed few changes.
+    - Shader: four per-vertex material values (mode, layer, glow, visibility).
+      - New modes: team colour under the skin, alpha-tested, solid team colour.
+      - Visibility: hidden parts collapse to a point, in the colour pass and in the shadow pass alike.
+      - Animation texture: blocks get taller when the texture would otherwise be wider than the GPU allows.
+    - Units: heights follow Warcraft III's own proportions (rest height × model scale × 1.5), and fliers hover. Walks are paced by the sequence's move speed, attacks land on the unit table's damage point, and heroes play Stand Victory on a new level.
+    - Buildings are animated characters. Construction plays Birth in step with the build progress, then Stand (Stand Work while training or researching); towers attack; Death collapses the building before it sinks. They're scaled to their footprint.
+    - The command card and the placement previews use the Warcraft III icons and models.
+    - Units the pack doesn't cover (the modern and future ages' vehicles and troopers) keep KayKit's or the procedural models.
+  - **Legal line.** The pack is Blizzard's art made from the player's own copy, for their own use on their own computer. Nothing from Warcraft III is in the repository, the installer or the browser version, and the README asks players not to share packs.
+  - **Route B, not done: generated models (fal) for units without a Warcraft III counterpart.** It needs a `FAL_KEY` secret in the environment and the fal hosts allowed by its network policy. From this environment those hosts are refused.
+  - [x] Checks (no Warcraft III install is available here, so the converter was tested on models built for it):
+    - The reader matches war3-model's parser on synthetic models written by war3-model at versions 800, 900, 1000 and 1100: sequences, textures, materials and layers, geosets (vertices, normals, uvs, faces, groups, skin weights, levels of detail), geoset alpha, every node's tracks with tangents, pivots. It reads the mdx-m3-viewer sample model (v800) and its JPEG BLP texture.
+    - A simulated newer file (version 1800, eight unknown bytes inside every layer before its texture table, an unknown geoset block, an unknown chunk) reads the same as the original, with four warnings naming what was guessed.
+    - A stand-in install (a soldier and a barracks built from boxes as real MDX, paletted BLP and plain DDS files, plus the unit tables), imported as extracted files and from an MPQ written with StormLib, gives byte-identical packs. The soldier's team-coloured tabard, opaque head and alpha-tested sword are kept; its additive glow and team glow are dropped; the sword's visibility, the 0.433 s damage point, the 1.15 model scale and both icons (one named by the unit table, one by convention) come through.
+    - In the game's renderer (dev gallery with `?wc3=`, and the game itself with a stand-in desktop bridge): stand, walk, both attacks, death (the sword vanishes as its track says), victory, and the barracks' construction at 50 %, with team colours, alongside KayKit characters, with no console errors. The HUD shows the imported icons and portrait.
+    - In Electron (Linux, X virtual framebuffer): the page's import call runs the worker with the native modules, writes the pack, report and settings, and on the next start the game loads the pack and the dialog reports it.
+    - Not checkable here: real Warcraft III files (CASC in particular, and Reforged's v1800 layout), the catalog's file names against a real install, and the Windows build of the native modules (prebuilt N-API binaries, unpacked from the archive). The report lists every model not found or not converted, and why.
 
 ---
 

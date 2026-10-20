@@ -1,8 +1,9 @@
-// Dev gallery for the rigged KayKit characters (npm run dev → /tools/characters.html): every
-// recipe of src/babylon/CharacterRecipes.ts in a row, playing one role's clip, lit and shadowed
-// like the game.
+// Dev gallery for the rigged characters (npm run dev → /tools/characters.html): every recipe of
+// src/babylon/CharacterRecipes.ts in a row, playing one role's clip, lit and shadowed like the game.
 //   ids=footman,paladin  role=idle|walk|attack|cast|death|work|spawn  clip=Death_B  rate=1
 //   t=0.4 (freeze the clips at this time)  team=ff0303,0042ff  dist=14 pitch=28 yaw=20 cols=6
+//   wc3=/path/to/wc3-pack.bin  a Warcraft III pack (electron/wc3) to draw the units it has, as the
+//   desktop app does (buildings among the ids are drawn too, 3 wide)
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
@@ -57,6 +58,12 @@ function roleClip(r: CharacterRecipe): string {
 }
 
 async function main(): Promise<void> {
+  const packUrl = q.get('wc3');
+  if (packUrl) {
+    // Stand in for the desktop app's bridge: the pack from a URL.
+    const pack = (): Promise<Uint8Array> => fetch(packUrl).then(async (r) => new Uint8Array(await r.arrayBuffer()));
+    (window as unknown as { desktop: unknown }).desktop = { isElectron: false, toggleFullscreen: async () => false, wc3: { pack } };
+  }
   const lib = await CharacterLibrary.load(scene);
   const ids = q.get('ids') ? q.get('ids')!.split(',').filter(Boolean) : Object.keys(CHARACTER_RECIPES);
 
@@ -85,7 +92,8 @@ async function main(): Promise<void> {
   const rows = Math.ceil(ids.length / cols);
   const items: Array<{ id: string; c: CharacterInstance; x: number; z: number }> = [];
   ids.forEach((id, i) => {
-    const c = lib.instantiate(id, teams[i % teams.length]!, `gal-${id}`);
+    const b = lib.hasBuilding(id) ? lib.instantiateBuilding(id, teams[i % teams.length]!, `gal-${id}`, null, 3) : null;
+    const c = b && 'animator' in b ? (b as CharacterInstance) : lib.instantiate(id, teams[i % teams.length]!, `gal-${id}`);
     if (!c) return;
     const x = ((i % cols) - (cols - 1) / 2) * spacing;
     const z = (Math.floor(i / cols) - (rows - 1) / 2) * spacing * 1.1;

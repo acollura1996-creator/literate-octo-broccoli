@@ -11,3 +11,7 @@ src/generated/
 
 # KayKit packs fetched by tools/kaykit/import.mjs
 tools/kaykit/.cache/
+
+# Warcraft III packs made by electron/wc3/cli.js (Blizzard art from a local install: never commit)
+wc3-out/
+*wc3-pack.bin
